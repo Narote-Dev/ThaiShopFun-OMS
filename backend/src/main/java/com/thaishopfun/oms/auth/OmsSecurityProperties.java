@@ -1,5 +1,7 @@
 package com.thaishopfun.oms.auth;
 
+import java.util.ArrayList;
+import java.util.List;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 /** Issuer, audiences, and JWKS location. T05 points these at the mock TSF IdP. */
@@ -20,6 +22,17 @@ public class OmsSecurityProperties {
    * local boot does not need the IdP.
    */
   private String jwksUri = "";
+
+  /**
+   * {@code azp} or {@code client_id} values accepted on {@code /internal/**}. Empty rejects all.
+   */
+  private List<String> internalClientIds = new ArrayList<>();
+
+  /**
+   * When false, startup fails if {@code current_user} is superuser or has {@code BYPASSRLS}.
+   * Default false. Do not enable it for local Docker or tests.
+   */
+  private boolean allowRlsBypass = false;
 
   public String getIssuer() {
     return issuer;
@@ -51,5 +64,21 @@ public class OmsSecurityProperties {
 
   public void setJwksUri(String jwksUri) {
     this.jwksUri = jwksUri;
+  }
+
+  public List<String> getInternalClientIds() {
+    return internalClientIds;
+  }
+
+  public void setInternalClientIds(List<String> internalClientIds) {
+    this.internalClientIds = internalClientIds == null ? new ArrayList<>() : internalClientIds;
+  }
+
+  public boolean isAllowRlsBypass() {
+    return allowRlsBypass;
+  }
+
+  public void setAllowRlsBypass(boolean allowRlsBypass) {
+    this.allowRlsBypass = allowRlsBypass;
   }
 }
