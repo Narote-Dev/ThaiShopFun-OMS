@@ -14,8 +14,6 @@ spring:
   flyway:
     enabled: true
     clean-disabled: true
-    # V3–V5 are reserved (T06, T10, T50M) and may be added after V6 or V7.
-    out-of-order: true
     # Change: separate login from the runtime pool. URL follows spring.datasource.url
     # unless FLYWAY_URL or a postgres:// DATABASE_URL sets it (see the post-processor).
     user: ${FLYWAY_USER:oms}
@@ -29,6 +27,11 @@ server:
     include-message: never
     include-stacktrace: never
     include-binding-errors: never
+  task:
+    scheduling:
+      # Inbox uses its own thread. This pool is for other publishers, including outbox.
+      pool:
+        size: 2
 
 management:
   endpoints:
@@ -53,13 +56,16 @@ oms:
     internal-client-ids: []
     # allow-rls-bypass stays at the Java default false. Do not set it here.
   inbox:
-    # Comma-separated HMAC secrets, current key first. The default is local Docker only.
-    hmac-secrets: ${OMS_INBOX_HMAC_SECRETS:dev-inbox-hmac-secret}
+    # Comma-separated HMAC secrets, current key first. Empty outside local/test refuses to boot.
+    # The dev value is application-local.yml (profile local), not this file.
+    hmac-secrets: ${OMS_INBOX_HMAC_SECRETS:}
     # Polls claim_inbox_batch. Tests set this to false and call InboxWorker directly.
     worker-enabled: ${OMS_INBOX_WORKER_ENABLED:true}
     worker-delay-ms: ${OMS_INBOX_WORKER_DELAY_MS:1000}
-    batch-size: 50
+    # 5 x handler-timeout (30s) stays inside the 5m lease.
+    batch-size: 5
     lease: 5m
+    handler-timeout: 30s
     suspend-defer: 5m
     jitter-ratio: 0.2
   # T14 outbox publisher. Blank URL or secret: the scheduler does not claim rows.

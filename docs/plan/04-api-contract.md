@@ -104,12 +104,17 @@ X-Signature: t=1790665202,v1=5f2b...e9
 ```
 - `v1 = hex(HMAC_SHA256(secret, t + "." + raw_body))` secret แยกต่อทิศ หมุนได้ (รับ 2 key ช่วงเปลี่ยน)
 - ผู้รับตรวจ signature + `|now − t| ≤ 300s` ไม่ผ่าน = `401`
-- ผู้รับ insert inbox (UNIQUE `(tenant_id, source, event_id)`, V6) แล้วตอบ `202`; ซ้ำ = `200`; ประมวลผล async
+- ผู้รับ insert inbox (UNIQUE `(tenant_id, source, event_id)`, V3) แล้วตอบ `202`; ซ้ำ = `200`; ประมวลผล async. body คนละ payload แต่ key เดิมยังตอบ `200` (เก็บก้อนแรก, log + metric)
 - **at-least-once:** ผู้ส่งอาจส่งซ้ำ (เช่น ล่มหลังส่งก่อนบันทึก SENT) ผู้รับต้อง dedupe ด้วย `event_id` เสมอ
 - **Retry:** ไม่ได้ 2xx → backoff + jitter 30s, 2m, 10m, 30m, 1h, 3h, 6h (~11 ชม.) → `DEAD` + alert, retry เองได้
-- `4xx` (ยกเว้น 408/429) = ไม่ retry → DEAD
-- `aggregate_version` ≤ ที่เก็บ = ข้าม; มี gap = ดึงตัวเต็มผ่าน REST
+- `4xx` (ยกเว้น 408/429) = ไม่ retry → DEAD. `503` มี `Retry-After` ต้องเคารพ (retry ได้)
+- ร้านที่ยังไม่มีใน OMS: event ธุรกิจตอบ `503` + `Retry-After: 60` (`TENANT_NOT_READY`) ไม่ใช่ `422`. `membership.changed` ที่ entitlement ยังใช้ได้ (`ACTIVE` หรือ `GRACE` ที่ยังไม่หมดอายุ) สร้างร้านผ่าน `provision_tenant` (ไม่ถอย `ent_ver`) แล้วตอบ `202`. `SUSPENDED` หรือหมดอายุของร้านที่ยังไม่มีแถว ตอบ `503` เช่นกัน. `provision_membership` ยังเกิดตอน login เพราะ event นี้ไม่มี user
+- `aggregate_version` บังคับสำหรับ event ธุรกิจ (ไม่มีหรือเกิน bigint = `400`). `membership.changed` จัดลำดับด้วย `ent_ver` และละเว้น version ได้
+- `\u0000` ใน JSON = `400`
+- event type ที่ยังไม่มี handler: คง `RECEIVED`, เลื่อน 1 ชม. โดยไม่นับ attempt (replay ได้เมื่อมี handler)
+- `aggregate_version` ≤ ที่เก็บ = ข้าม; มี gap = handler ใช้ snapshot เต็มจนกว่าจะมี REST refetch (T10)
 - event ที่ aggregate เดียวกัน ประมวลผลทีละตัว (`pg_advisory_xact_lock(aggregate)`)
+- **GRACE:** event ขาเข้ายังประมวลผลระหว่าง `GRACE` ที่ยังไม่หมดอายุ (ออเดอร์ไม่หาย). การเขียนของ user ยังถูกบล็อก. `SUSPENDED` หรือหมดอายุเลื่อน event ธุรกิจไว้ ไม่ลบ และไม่ทำให้ `DEAD` แค่เพราะร้านถูกระงับ. กลับมา `ACTIVE`/`GRACE` แล้วแถวที่ถูกเลื่อนไว้ถูกปลุก (`next_attempt_at = now()`)
 
 ## 4.5 Events: TSF → OMS
 | event_type | เมื่อไร | ผลใน OMS |

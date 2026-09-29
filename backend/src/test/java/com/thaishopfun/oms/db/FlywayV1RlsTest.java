@@ -20,6 +20,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.postgresql.util.PSQLException;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.junit.jupiter.Container;
@@ -30,6 +31,7 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
  * V1 is applied by Spring Boot's Flyway on an empty Testcontainers database. The test then enables
  * login on {@code oms_app} and {@code oms_migrator} with passwords that exist only in this class.
  */
+@ActiveProfiles("test")
 @SpringBootTest
 @Testcontainers
 class FlywayV1RlsTest {
@@ -90,13 +92,13 @@ class FlywayV1RlsTest {
           ResultSet history =
               statement.executeQuery(
                   "SELECT version, success FROM flyway_schema_history ORDER BY installed_rank")) {
-        // Change: V2 (JIT) and V6 (inbox dedup) are applied with V1. V3–V5 are reserved.
+        // Change: V2 (JIT) and V3 (inbox dedup) are applied with V1.
         java.util.List<String> versions = new java.util.ArrayList<>();
         while (history.next()) {
           assertThat(history.getBoolean("success")).isTrue();
           versions.add(history.getString("version"));
         }
-        assertThat(versions).containsExactly("1", "2", "6");
+        assertThat(versions).containsExactly("1", "2", "3");
       }
 
       // Step 2: Every foundation table exists.
@@ -353,7 +355,7 @@ class FlywayV1RlsTest {
           .isEqualTo(
               new FunctionShape(
                   "n integer, p_lease interval",
-                  "TABLE(id uuid, tenant_id uuid)",
+                  "TABLE(id uuid, tenant_id uuid, next_attempt_at timestamp with time zone)",
                   true,
                   "oms_maint"));
       assertThat(functions.get("claim_outbox_batch"))

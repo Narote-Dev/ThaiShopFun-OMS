@@ -2,22 +2,18 @@ package com.thaishopfun.oms.inbox;
 
 import com.thaishopfun.oms.auth.UuidV7;
 import java.sql.Types;
-import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
-import java.util.Set;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
-import tools.jackson.databind.JsonNode;
 
 /**
  * Applies {@code membership.changed} to {@code tenant}. A lower {@code ent_ver} is ignored. The
- * audit row stores status and {@code ent_ver} only.
+ * audit row stores status and {@code ent_ver} only. Moving to {@code ACTIVE} or {@code GRACE} wakes
+ * deferred inbox rows for that shop.
  */
 @Component
 public class MembershipChangedHandler implements InboxHandler {
-
-  private static final Set<String> STATUSES = Set.of("ACTIVE", "GRACE", "SUSPENDED");
 
   private final JdbcTemplate jdbc;
 
@@ -32,19 +28,8 @@ public class MembershipChangedHandler implements InboxHandler {
 
   @Override
   public void handle(InboxMessage message) {
-    // Step 1: Require the entitlement fields. Do not echo the payload in the error.
-    JsonNode data = message.payload().path("data");
-    String tier = text(data, "tier");
-    String status = text(data, "status");
-    JsonNode entVerNode = data.get("ent_ver");
-    if (tier == null || status == null || entVerNode == null || !entVerNode.isIntegralNumber()) {
-      throw new IllegalArgumentException("membership.changed is invalid");
-    }
-    long entVer = entVerNode.asLong();
-    if (entVer < 0 || !STATUSES.contains(status)) {
-      throw new IllegalArgumentException("membership.changed is invalid");
-    }
-    Instant expiresAt = expiry(data);
+    // Step 1: Validate before any write. A bad payload is not retried.
+    MembershipPayload incoming = MembershipPayload.parse(message.payload().path("data"));
 
     // Step 2: Read the current row under this tenant's RLS context.
     Current current =
@@ -74,22 +59,37 @@ public class MembershipChangedHandler implements InboxHandler {
               AND ent_ver <= ?
             """,
             ps -> {
-              ps.setString(1, tier);
-              ps.setString(2, status);
-              if (expiresAt == null) {
+              ps.setString(1, incoming.tier);
+              ps.setString(2, incoming.status);
+              if (incoming.expiresAt == null) {
                 ps.setNull(3, Types.TIMESTAMP_WITH_TIMEZONE);
               } else {
-                ps.setObject(3, OffsetDateTime.ofInstant(expiresAt, ZoneOffset.UTC));
+                ps.setObject(3, OffsetDateTime.ofInstant(incoming.expiresAt, ZoneOffset.UTC));
               }
-              ps.setLong(4, entVer);
+              ps.setLong(4, incoming.entVer);
               ps.setObject(5, message.tenantId());
-              ps.setLong(6, entVer);
+              ps.setLong(6, incoming.entVer);
             });
     if (updated == 0) {
       return;
     }
 
-    // Step 4: Audit the status change. No shop name, email, or event payload.
+    // Step 4: A shop that can take orders again should not wait out a suspend defer.
+    if ("ACTIVE".equals(incoming.status) || "GRACE".equals(incoming.status)) {
+      jdbc.update(
+          """
+          UPDATE inbox_event
+          SET next_attempt_at = pg_catalog.now()
+          WHERE tenant_id = ?
+            AND id <> ?
+            AND status IN ('RECEIVED', 'FAILED')
+            AND next_attempt_at > pg_catalog.now()
+          """,
+          message.tenantId(),
+          message.id());
+    }
+
+    // Step 5: Audit the status change. No shop name, email, or event payload.
     jdbc.update(
         """
         INSERT INTO audit_log (
@@ -100,26 +100,7 @@ public class MembershipChangedHandler implements InboxHandler {
         message.tenantId(),
         message.tenantId().toString(),
         "{\"entitlement_status\":\"" + current.status + "\",\"ent_ver\":" + current.entVer + "}",
-        "{\"entitlement_status\":\"" + status + "\",\"ent_ver\":" + entVer + "}");
-  }
-
-  private static String text(JsonNode data, String field) {
-    JsonNode value = data.get(field);
-    if (value == null || !value.isString() || value.asString().isBlank()) {
-      return null;
-    }
-    return value.asString();
-  }
-
-  private static Instant expiry(JsonNode data) {
-    JsonNode value = data.get("expires_at");
-    if (value == null || value.isNull()) {
-      return null;
-    }
-    if (!value.isString()) {
-      throw new IllegalArgumentException("membership.changed is invalid");
-    }
-    return Instant.parse(value.asString());
+        "{\"entitlement_status\":\"" + incoming.status + "\",\"ent_ver\":" + incoming.entVer + "}");
   }
 
   private record Current(String status, long entVer) {}

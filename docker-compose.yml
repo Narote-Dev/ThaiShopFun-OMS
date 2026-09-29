@@ -1,3 +1,5 @@
+# Local inbox HMAC is the `local` Spring profile (backend application-local.yml),
+# not a password in this file. Do not copy that value into a shared environment.
 services:
   postgres:
     image: postgres:16-alpine

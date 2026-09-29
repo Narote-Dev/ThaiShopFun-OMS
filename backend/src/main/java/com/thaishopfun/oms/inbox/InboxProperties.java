@@ -12,8 +12,9 @@ public class InboxProperties {
   private String hmacSecrets = "";
   private boolean workerEnabled = true;
   private long workerDelayMs = 1000;
-  private int batchSize = 50;
+  private int batchSize = 5;
   private Duration lease = Duration.ofMinutes(5);
+  private Duration handlerTimeout = Duration.ofSeconds(30);
   private Duration suspendDefer = Duration.ofMinutes(5);
   private double jitterRatio = 0.2;
 
@@ -62,6 +63,14 @@ public class InboxProperties {
 
   public void setBatchSize(int batchSize) {
     this.batchSize = batchSize;
+  }
+
+  public Duration getHandlerTimeout() {
+    return handlerTimeout;
+  }
+
+  public void setHandlerTimeout(Duration handlerTimeout) {
+    this.handlerTimeout = handlerTimeout;
   }
 
   public Duration getLease() {

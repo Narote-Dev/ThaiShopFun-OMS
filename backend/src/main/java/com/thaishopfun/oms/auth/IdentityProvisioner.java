@@ -2,6 +2,7 @@ package com.thaishopfun.oms.auth;
 
 import java.sql.PreparedStatement;
 import java.sql.Types;
+import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.UUID;
@@ -57,6 +58,29 @@ public class IdentityProvisioner {
       return true;
     }
     return found.entVer() < claims.entVer();
+  }
+
+  @Transactional
+  public UUID provisionShop(
+      String shopId, String name, String tier, String status, Instant expiresAt, long entVer) {
+    // Step 1: Same definer as login. A lower ent_ver does not overwrite a newer shop.
+    // membership.changed has no user, so provision_membership stays on the first login.
+    return oneId(
+        (connection) -> {
+          PreparedStatement statement =
+              connection.prepareStatement("SELECT provision_tenant(?, ?, ?, ?, ?, ?)");
+          statement.setString(1, shopId);
+          statement.setString(2, name);
+          statement.setString(3, tier);
+          statement.setString(4, status);
+          if (expiresAt == null) {
+            statement.setNull(5, Types.TIMESTAMP_WITH_TIMEZONE);
+          } else {
+            statement.setObject(5, OffsetDateTime.ofInstant(expiresAt, ZoneOffset.UTC));
+          }
+          statement.setLong(6, entVer);
+          return statement;
+        });
   }
 
   @Transactional

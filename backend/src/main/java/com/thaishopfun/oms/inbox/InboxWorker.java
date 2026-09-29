@@ -26,14 +26,18 @@ import tools.jackson.databind.json.JsonMapper;
  * transaction back, so a PROCESSED row is never left behind a failed handler. The failure is then
  * recorded in a new transaction: backoff, or {@code DEAD} after the schedule is exhausted.
  *
- * <p>Backoff is 30s, 2m, 10m, 30m, 1h, 3h, 6h. Those seven waits sum to about 11 hours. The next
- * failure is {@code DEAD}. Same-aggregate events take {@code pg_advisory_xact_lock} for the
- * transaction, so two workers cannot apply them together.
+ * <p>The claimed {@code next_attempt_at} is the lease token. A worker whose token no longer matches
+ * the row does not write. Backoff is 30s, 2m, 10m, 30m, 1h, 3h, 6h. Those seven waits sum to about
+ * 11 hours. The next failure is {@code DEAD}. Same-aggregate events take {@code
+ * pg_advisory_xact_lock} for the transaction, so two workers cannot apply them together.
  */
 @Component
 public class InboxWorker {
 
   public static final String DEAD_METRIC = "oms.inbox.dead";
+  public static final String UNKNOWN_METRIC = "oms.inbox.unknown_type";
+  static final String MAX_ATTEMPTS_ERROR = "MAX_ATTEMPTS";
+  static final Duration UNKNOWN_DEFER = Duration.ofHours(1);
 
   static final Duration[] BACKOFF = {
     Duration.ofSeconds(30),
@@ -51,9 +55,12 @@ public class InboxWorker {
   private final InboxHandlerRegistry registry;
   private final InboxEntitlementPolicy policy;
   private final JdbcTemplate jdbc;
-  private final TransactionTemplate transactions;
+  private final TransactionTemplate claimTx;
+  private final TransactionTemplate applyTx;
+  private final TransactionTemplate failureTx;
   private final JsonMapper json;
   private final Counter deadEvents;
+  private final Counter unknownTypes;
 
   public InboxWorker(
       InboxProperties properties,
@@ -67,9 +74,15 @@ public class InboxWorker {
     this.registry = registry;
     this.policy = policy;
     this.jdbc = jdbc;
-    this.transactions = new TransactionTemplate(transactions);
+    this.claimTx = new TransactionTemplate(transactions);
+    int timeoutSeconds = (int) Math.max(properties.getHandlerTimeout().toSeconds(), 1);
+    this.applyTx = new TransactionTemplate(transactions);
+    this.applyTx.setTimeout(timeoutSeconds);
+    this.failureTx = new TransactionTemplate(transactions);
+    this.failureTx.setTimeout(timeoutSeconds);
     this.json = json;
     this.deadEvents = Counter.builder(DEAD_METRIC).register(meters);
+    this.unknownTypes = Counter.builder(UNKNOWN_METRIC).register(meters);
   }
 
   public int processAvailable() {
@@ -77,7 +90,7 @@ public class InboxWorker {
   }
 
   public int processAvailable(int limit) {
-    // Step 1: Claim with an empty tenant context. The definer returns id and tenant_id only.
+    // Step 1: Claim with an empty tenant context. The definer returns id, tenant, and the lease.
     List<Claimed> claimed = claim(limit);
     int handled = 0;
     for (Claimed row : claimed) {
@@ -85,26 +98,33 @@ public class InboxWorker {
         processClaim(row);
         handled++;
       } catch (RuntimeException ex) {
-        log.error("inbox event {} was not completed", row.id());
+        log.error("inbox event {} was not completed", row.id(), ex);
       }
     }
     return handled;
+  }
+
+  /** Applies one already-claimed row. Tests use this to show a stale lease cannot write. */
+  void applyClaim(UUID id, UUID tenantId, OffsetDateTime leaseUntil) {
+    processClaim(new Claimed(id, tenantId, leaseUntil));
   }
 
   private List<Claimed> claim(int limit) {
     int bounded = Math.min(Math.max(limit, 1), 1000);
     long leaseSeconds = Math.max(properties.getLease().toSeconds(), 1);
     List<Claimed> rows =
-        transactions.execute(
+        claimTx.execute(
             status ->
                 jdbc.query(
                     """
-                    SELECT id, tenant_id
+                    SELECT id, tenant_id, next_attempt_at
                     FROM claim_inbox_batch(?, (? * interval '1 second'))
                     """,
                     (rs, row) ->
                         new Claimed(
-                            rs.getObject("id", UUID.class), rs.getObject("tenant_id", UUID.class)),
+                            rs.getObject("id", UUID.class),
+                            rs.getObject("tenant_id", UUID.class),
+                            rs.getObject("next_attempt_at", OffsetDateTime.class)),
                     bounded,
                     leaseSeconds));
     return rows == null ? List.of() : rows;
@@ -114,9 +134,15 @@ public class InboxWorker {
     TenantContext.set(claimed.tenantId(), null);
     try {
       try {
-        transactions.executeWithoutResult(status -> apply(claimed));
+        applyTx.executeWithoutResult(
+            status -> {
+              // Step 1: Kill a stuck statement well before the lease expires.
+              jdbc.execute(
+                  "SET LOCAL statement_timeout = " + properties.getHandlerTimeout().toMillis());
+              apply(claimed);
+            });
       } catch (RuntimeException ex) {
-        // Step 1: The handler transaction is gone. Record FAILED or DEAD on its own.
+        // Step 2: The handler transaction is gone. Record FAILED or DEAD on its own.
         recordFailure(claimed, ex);
       }
     } finally {
@@ -125,7 +151,7 @@ public class InboxWorker {
   }
 
   private void apply(Claimed claimed) {
-    // Step 1: Lock the claimed row. A worker that lost the race sees PROCESSED and stops.
+    // Step 1: Lock the claimed row. A lost lease or a finished row is left alone.
     InboxRow row = lock(claimed.id());
     if (row == null || !claimed.tenantId().equals(row.tenantId())) {
       return;
@@ -133,29 +159,48 @@ public class InboxWorker {
     if (!"RECEIVED".equals(row.status()) && !"FAILED".equals(row.status())) {
       return;
     }
-    // Step 2: Suspended and expired shops keep the event. membership.changed still runs.
-    if (policy.defer(row.entitlementStatus(), row.expiresAt(), row.eventType())) {
-      defer(row.id());
+    if (!leaseMatches(row.nextAttemptAt(), claimed.leaseUntil())) {
       return;
     }
-    // Step 3: One aggregate at a time, then drop a version that is already applied.
+    // Step 2: A claim past the ladder means an earlier attempt never recorded DEAD.
+    if (row.attempts() > BACKOFF.length + 1) {
+      markDead(row, MAX_ATTEMPTS_ERROR);
+      return;
+    }
+    // Step 3: Suspended and expired shops keep the event. membership.changed still runs.
+    if (policy.defer(row.entitlementStatus(), row.expiresAt(), row.eventType())) {
+      pushBack(row, properties.getSuspendDefer());
+      return;
+    }
+    InboxHandler handler = registry.find(row.eventType());
+    if (handler == null) {
+      // Step 4: No handler yet. Leave RECEIVED and do not burn an attempt.
+      log.warn(
+          "inbox event {} type {} has no handler; deferred {}",
+          row.eventId(),
+          row.eventType(),
+          UNKNOWN_DEFER);
+      unknownTypes.increment();
+      pushBack(row, UNKNOWN_DEFER);
+      return;
+    }
+    // Step 5: One aggregate at a time, then drop a version that is already applied.
     lockAggregate(row);
     Long lastVersion = lastProcessedVersion(row);
     boolean stale =
         row.aggregateVersion() > 0 && lastVersion != null && row.aggregateVersion() <= lastVersion;
+    // TODO: Handlers must apply the full snapshot in data until REST refetch exists (T10).
+    // gap=true means aggregate_version skipped at least one version. Do not assume a delta.
     boolean gap =
         !stale
             && row.aggregateVersion() > 0
             && lastVersion != null
             && row.aggregateVersion() > lastVersion + 1;
     if (!stale) {
-      InboxHandler handler = registry.find(row.eventType());
-      if (handler != null) {
-        // Step 4: Handler writes and PROCESSED commit together. A throw rolls both back.
-        handler.handle(row.message(gap));
-      }
+      // Step 6: Handler writes and PROCESSED commit together. A throw rolls both back.
+      handler.handle(row.message(gap));
     }
-    markProcessed(row.id());
+    markProcessed(row);
   }
 
   private InboxRow lock(UUID id) {
@@ -163,7 +208,7 @@ public class InboxWorker {
         """
         SELECT e.id, e.tenant_id, e.source, e.event_id, e.event_type, e.aggregate_id,
                e.aggregate_version, e.payload::text AS payload, e.status, e.attempts,
-               t.entitlement_status, t.entitlement_expires_at
+               e.next_attempt_at, t.entitlement_status, t.entitlement_expires_at
         FROM inbox_event AS e
         JOIN tenant AS t ON t.id = e.tenant_id
         WHERE e.id = ?
@@ -185,6 +230,7 @@ public class InboxWorker {
               json.readTree(rs.getString("payload")),
               rs.getString("status"),
               rs.getInt("attempts"),
+              rs.getObject("next_attempt_at", OffsetDateTime.class),
               rs.getString("entitlement_status"),
               expires == null ? null : expires.toInstant());
         },
@@ -221,21 +267,27 @@ public class InboxWorker {
         row.id());
   }
 
-  private void defer(UUID id) {
-    long deferMillis = Math.max(properties.getSuspendDefer().toMillis(), 0);
-    jdbc.update(
-        """
-        UPDATE inbox_event
-        SET attempts = GREATEST(attempts - 1, 0),
-            next_attempt_at = pg_catalog.now() + (? * interval '1 millisecond')
-        WHERE id = ?
-          AND status IN ('RECEIVED', 'FAILED')
-        """,
-        deferMillis,
-        id);
+  private void pushBack(InboxRow row, Duration delay) {
+    long deferMillis = Math.max(delay.toMillis(), 0);
+    int updated =
+        jdbc.update(
+            """
+            UPDATE inbox_event
+            SET attempts = GREATEST(attempts - 1, 0),
+                next_attempt_at = pg_catalog.now() + (? * interval '1 millisecond')
+            WHERE id = ?
+              AND next_attempt_at = ?
+              AND status IN ('RECEIVED', 'FAILED')
+            """,
+            deferMillis,
+            row.id(),
+            row.nextAttemptAt());
+    if (updated != 1) {
+      throw new IllegalStateException("inbox lease was lost");
+    }
   }
 
-  private void markProcessed(UUID id) {
+  private void markProcessed(InboxRow row) {
     int updated =
         jdbc.update(
             """
@@ -245,17 +297,40 @@ public class InboxWorker {
                 last_error = NULL,
                 next_attempt_at = NULL
             WHERE id = ?
+              AND next_attempt_at = ?
               AND status IN ('RECEIVED', 'FAILED')
             """,
-            id);
+            row.id(),
+            row.nextAttemptAt());
     if (updated != 1) {
       throw new IllegalStateException("inbox row was not marked PROCESSED");
     }
   }
 
+  private void markDead(InboxRow row, String message) {
+    int updated =
+        jdbc.update(
+            """
+            UPDATE inbox_event
+            SET status = 'DEAD', last_error = ?, next_attempt_at = NULL
+            WHERE id = ?
+              AND next_attempt_at = ?
+              AND status IN ('RECEIVED', 'FAILED')
+            """,
+            message,
+            row.id(),
+            row.nextAttemptAt());
+    if (updated != 1) {
+      throw new IllegalStateException("inbox lease was lost");
+    }
+    deadEvents.increment();
+    log.error("inbox event {} is DEAD after {} attempts", row.eventId(), row.attempts());
+  }
+
   private void recordFailure(Claimed claimed, RuntimeException ex) {
     String message = sanitize(ex);
-    transactions.executeWithoutResult(
+    boolean stop = nonRetryable(ex);
+    failureTx.executeWithoutResult(
         status -> {
           InboxRow row = lock(claimed.id());
           if (row == null) {
@@ -264,20 +339,13 @@ public class InboxWorker {
           if (!"RECEIVED".equals(row.status()) && !"FAILED".equals(row.status())) {
             return;
           }
-          // Step 1: Seven waits, then DEAD. The claim already incremented attempts.
+          if (!leaseMatches(row.nextAttemptAt(), claimed.leaseUntil())) {
+            return;
+          }
+          // Step 1: Validation failures and an exhausted ladder go straight to DEAD.
           int attempt = Math.max(row.attempts(), 1);
-          if (attempt >= BACKOFF.length + 1) {
-            jdbc.update(
-                """
-                UPDATE inbox_event
-                SET status = 'DEAD', last_error = ?, next_attempt_at = NULL
-                WHERE id = ?
-                  AND status IN ('RECEIVED', 'FAILED')
-                """,
-                message,
-                row.id());
-            deadEvents.increment();
-            log.error("inbox event {} is DEAD after {} attempts", row.eventId(), attempt);
+          if (stop || attempt >= BACKOFF.length + 1) {
+            markDead(row, stop ? message : message);
             return;
           }
           Duration delay = jitter(BACKOFF[attempt - 1]);
@@ -288,12 +356,30 @@ public class InboxWorker {
                   last_error = ?,
                   next_attempt_at = pg_catalog.now() + (? * interval '1 millisecond')
               WHERE id = ?
+                AND next_attempt_at = ?
                 AND status IN ('RECEIVED', 'FAILED')
               """,
               message,
               delay.toMillis(),
-              row.id());
+              row.id(),
+              row.nextAttemptAt());
         });
+  }
+
+  private static boolean nonRetryable(Throwable ex) {
+    for (Throwable current = ex; current != null; current = current.getCause()) {
+      if (current instanceof NonRetryableInboxException) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private static boolean leaseMatches(OffsetDateTime row, OffsetDateTime claimed) {
+    if (row == null || claimed == null) {
+      return false;
+    }
+    return row.toInstant().equals(claimed.toInstant());
   }
 
   private Duration jitter(Duration base) {
@@ -319,7 +405,7 @@ public class InboxWorker {
     return message;
   }
 
-  private record Claimed(UUID id, UUID tenantId) {}
+  private record Claimed(UUID id, UUID tenantId, OffsetDateTime leaseUntil) {}
 
   private record InboxRow(
       UUID id,
@@ -332,6 +418,7 @@ public class InboxWorker {
       JsonNode payload,
       String status,
       int attempts,
+      OffsetDateTime nextAttemptAt,
       String entitlementStatus,
       Instant expiresAt) {
 

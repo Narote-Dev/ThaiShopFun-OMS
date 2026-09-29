@@ -41,6 +41,7 @@ class RuntimeRoleGuardTest {
       "--spring.flyway.password=" + POSTGRES.getPassword(),
       "--server.port=0",
       "--oms.inbox.worker-enabled=false",
+      "--spring.profiles.active=test",
       "--oms.security.allow-rls-bypass=" + allowBypass
     };
   }

@@ -104,7 +104,7 @@ erDiagram
 ### Sync / Platform
 | ตาราง | columns สำคัญ | หมายเหตุ |
 |---|---|---|
-| `inbox_event` | id, tenant_id, source, event_id, event_type, aggregate_id, aggregate_version, payload jsonb, status (`RECEIVED/PROCESSED/FAILED/DEAD`), attempts, next_attempt_at, last_error, received_at, processed_at, **UNIQUE(tenant_id, source, event_id)** | V6. V1 was `UNIQUE(source, event_id)`, which collided across shops. payload ที่มี PII ล้างหลัง PROCESSED 7 วัน |
+| `inbox_event` | id, tenant_id, source, event_id, event_type, aggregate_id, aggregate_version, payload jsonb, payload_sha256 bytea, status (`RECEIVED/PROCESSED/FAILED/DEAD`), attempts, next_attempt_at, last_error, received_at, processed_at, **UNIQUE(tenant_id, source, event_id)** | V3. V1 was `UNIQUE(source, event_id)`, which collided across shops. payload ที่มี PII ล้างหลัง PROCESSED 7 วัน |
 | `outbox_event` | id, tenant_id, aggregate_type, aggregate_id, event_type, payload jsonb, status (`PENDING/IN_FLIGHT/SENT/DEAD`), attempts, next_attempt_at, lease_until, created_at, sent_at | เขียนใน transaction เดียวกับ business change |
 | `sync_cursor` | tenant_id, channel_account_id, resource (`ORDERS/LISTINGS`), cursor, last_success_at, PK(channel_account_id, resource) | |
 | `idempotency_key` | tenant_id, scope, key, request_hash, response_status, response_body jsonb, created_at, PK(tenant_id, scope, key) | ลบหลัง 24 ชม. |
