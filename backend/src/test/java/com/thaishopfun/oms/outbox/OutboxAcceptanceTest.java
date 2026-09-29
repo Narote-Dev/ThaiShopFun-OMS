@@ -21,9 +21,13 @@ import java.sql.Statement;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -43,7 +47,11 @@ import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.test.web.server.LocalServerPort;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
+import org.springframework.context.annotation.Primary;
 import org.springframework.http.HttpHeaders;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -63,11 +71,14 @@ import tools.jackson.databind.json.JsonMapper;
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
     properties = {
       "oms.outbox.publisher-enabled=false",
-      "oms.outbox.webhook-secret=test-outbox-secret",
+      "oms.outbox.webhook-secret=" + OutboxAcceptanceTest.SECRET,
       "oms.outbox.jitter-ratio=0.2",
       "spring.datasource.hikari.maximum-pool-size=12"
     })
+@Import(OutboxAcceptanceTest.CrashHookConfig.class)
 class OutboxAcceptanceTest {
+
+  static final String SECRET = "test-outbox-secret-0123456789abcdef";
 
   private static final JsonMapper JSON = JsonMapper.builder().build();
   private static final Pattern LEASE =
@@ -80,6 +91,7 @@ class OutboxAcceptanceTest {
   private static volatile int forcedStatus = 202;
   private static volatile String retryAfter;
   private static volatile boolean dedupe;
+  private static volatile boolean stall;
   private static HttpServer webhook;
 
   @DynamicPropertySource
@@ -96,6 +108,16 @@ class OutboxAcceptanceTest {
     webhook.createContext(
         "/internal/v1/oms-events",
         exchange -> {
+          if (stall) {
+            try {
+              Thread.sleep(2000);
+            } catch (InterruptedException interrupted) {
+              Thread.currentThread().interrupt();
+            }
+            exchange.sendResponseHeaders(202, -1);
+            exchange.close();
+            return;
+          }
           byte[] raw = exchange.getRequestBody().readAllBytes();
           String eventId = exchange.getRequestHeaders().getFirst("X-Event-Id");
           DELIVERIES.add(
@@ -127,7 +149,9 @@ class OutboxAcceptanceTest {
   @Autowired private PlatformTransactionManager transactions;
   @Autowired private OutboxAppender appender;
   @Autowired private OutboxPublisher publisher;
-  @Autowired private OutboxHooks hooks;
+  @Autowired private OutboxStore store;
+  @Autowired private OutboxProperties outboxProperties;
+  @Autowired private CrashHooks hooks;
   @LocalServerPort private int port;
 
   private RestClient client;
@@ -137,6 +161,7 @@ class OutboxAcceptanceTest {
     forcedStatus = 202;
     retryAfter = null;
     dedupe = false;
+    stall = false;
     DELIVERIES.clear();
     APPLIED.clear();
     attachLogs();
@@ -233,7 +258,15 @@ class OutboxAcceptanceTest {
   @Test
   void publishSignsTheBodyAndMarksSent() throws Exception {
     UUID tenantId = insertTenant();
-    UUID eventId = append(tenantId, Map.of("available", 18, "phone", "0812341234"));
+    UUID eventId =
+        append(
+            tenantId,
+            OutboxDraft.of(
+                "inventory",
+                "sku-1",
+                "stock.updated",
+                Map.of("available", 18, "phone", "0812341234"),
+                4));
     assertThat(publisher.publishOnce()).isEqualTo(1);
 
     assertThat(DELIVERIES).hasSize(1);
@@ -243,13 +276,14 @@ class OutboxAcceptanceTest {
     String[] parts = delivery.signature().split(",", 2);
     long timestamp = Long.parseLong(parts[0].substring(2));
     String given = parts[1].substring("v1=".length());
-    assertThat(given)
-        .isEqualTo(OutboxHttpSender.sign("test-outbox-secret", timestamp, delivery.body()));
+    assertThat(given).isEqualTo(OutboxHttpSender.sign(SECRET, timestamp, delivery.body()));
     assertThat(Math.abs(Instant.now().getEpochSecond() - timestamp)).isLessThan(300);
     JsonNode body = JSON.readTree(delivery.body());
     assertThat(body.path("event_id").asString()).isEqualTo(eventId.toString());
     assertThat(body.path("event_type").asString()).isEqualTo("stock.updated");
+    assertThat(body.path("aggregate_version").asInt()).isEqualTo(4);
     assertThat(body.path("data").path("available").asInt()).isEqualTo(18);
+    assertThat(delivery.body()).isEqualTo(payloadOf(eventId));
     assertThat(statusOf(eventId)).isEqualTo("SENT");
     assertThat(sentAt(eventId)).isNotNull();
     assertThat(LOGS.list).noneMatch(event -> event.getFormattedMessage().contains("0812341234"));
@@ -498,6 +532,265 @@ class OutboxAcceptanceTest {
     assertThatThrownBy(unauthorized::toBodilessEntity).hasMessageContaining("401");
   }
 
+  @Test
+  void staleLeaseFenceRejectsTheFirstHolder() {
+    UUID tenantId = insertTenant();
+    UUID sentId = append(tenantId, stock(1));
+    UUID retryId = append(tenantId, stock(2));
+    UUID deadId = append(tenantId, stock(3));
+    TenantContext.set(tenantId, null);
+    try {
+      List<OutboxStore.Held> first = loadClaimed(store.claim(10, Duration.ofMinutes(5)));
+      OutboxStore.Held aSent = held(first, sentId);
+      OutboxStore.Held aRetry = held(first, retryId);
+      OutboxStore.Held aDead = held(first, deadId);
+      resetLikeAdminRetry(sentId);
+      resetLikeAdminRetry(retryId);
+      resetLikeAdminRetry(deadId);
+      List<OutboxStore.Held> second = loadClaimed(store.claim(10, Duration.ofMinutes(5)));
+      OutboxStore.Held bSent = held(second, sentId);
+      OutboxStore.Held bRetry = held(second, retryId);
+      OutboxStore.Held bDead = held(second, deadId);
+      assertThat(aSent.attempts()).isEqualTo(bSent.attempts());
+      assertThat(aSent.leaseUntil()).isNotEqualTo(bSent.leaseUntil());
+
+      assertThat(store.markSent(aSent)).isFalse();
+      assertThat(store.scheduleRetry(aRetry, OutboxStore.atUtc(Instant.now().plusSeconds(30))))
+          .isFalse();
+      assertThat(store.markDead(aDead, 400)).isFalse();
+      assertThat(statusOf(sentId)).isEqualTo("IN_FLIGHT");
+      assertThat(statusOf(retryId)).isEqualTo("IN_FLIGHT");
+      assertThat(statusOf(deadId)).isEqualTo("IN_FLIGHT");
+
+      assertThat(store.markSent(bSent)).isTrue();
+      assertThat(store.scheduleRetry(bRetry, OutboxStore.atUtc(Instant.now().plusSeconds(30))))
+          .isTrue();
+      assertThat(store.markDead(bDead, 400)).isTrue();
+      assertThat(statusOf(sentId)).isEqualTo("SENT");
+      assertThat(statusOf(retryId)).isEqualTo("PENDING");
+      assertThat(statusOf(deadId)).isEqualTo("DEAD");
+    } finally {
+      TenantContext.clear();
+    }
+  }
+
+  @Test
+  void http429HonorsRetryAfterHttpDate() {
+    forcedStatus = 429;
+    retryAfter =
+        DateTimeFormatter.RFC_1123_DATE_TIME
+            .withLocale(Locale.US)
+            .format(ZonedDateTime.now(ZoneOffset.UTC).plusSeconds(50));
+    UUID tenantId = insertTenant();
+    UUID eventId = append(tenantId, stock(1));
+    Instant started = Instant.now();
+    publisher.publishOnce();
+    Duration delay = Duration.between(started, read(eventId).nextAttemptAt().toInstant());
+    assertThat(delay).isBetween(Duration.ofSeconds(45), Duration.ofSeconds(55));
+    assertThat(read(eventId).status()).isEqualTo("PENDING");
+  }
+
+  @Test
+  void httpTimeoutAndConnectFailureScheduleARetry() {
+    UUID tenantId = insertTenant();
+    UUID refusedId = append(tenantId, stock(1));
+    String destination = outboxProperties.getDestinationUrl();
+    Duration timeout = outboxProperties.getHttpTimeout();
+    outboxProperties.setDestinationUrl("http://127.0.0.1:1/internal/v1/oms-events");
+    try {
+      Instant started = Instant.now();
+      assertThat(publisher.publishOnce()).isEqualTo(1);
+      Row refused = read(refusedId);
+      assertThat(refused.status()).isEqualTo("PENDING");
+      assertThat(refused.attempts()).isEqualTo(1);
+      assertThat(Duration.between(started, refused.nextAttemptAt().toInstant()))
+          .isBetween(Duration.ofSeconds(20), Duration.ofSeconds(45));
+      assertThat(DELIVERIES).isEmpty();
+
+      outboxProperties.setDestinationUrl(destination);
+      outboxProperties.setHttpTimeout(Duration.ofMillis(300));
+      stall = true;
+      UUID timeoutId = append(tenantId, stock(2));
+      started = Instant.now();
+      assertThat(publisher.publishOnce()).isEqualTo(1);
+      Row timedOut = read(timeoutId);
+      assertThat(timedOut.status()).isEqualTo("PENDING");
+      assertThat(timedOut.attempts()).isEqualTo(1);
+      assertThat(Duration.between(started, timedOut.nextAttemptAt().toInstant()))
+          .isBetween(Duration.ofSeconds(20), Duration.ofSeconds(45));
+    } finally {
+      stall = false;
+      outboxProperties.setDestinationUrl(destination);
+      outboxProperties.setHttpTimeout(timeout);
+    }
+  }
+
+  @Test
+  void httpRedirectIsDeadImmediately() {
+    forcedStatus = 302;
+    UUID tenantId = insertTenant();
+    UUID eventId = append(tenantId, stock(1));
+    publisher.publishOnce();
+    assertThat(read(eventId).status()).isEqualTo("DEAD");
+    assertThat(read(eventId).attempts()).isEqualTo(1);
+    assertThat(publisher.publishOnce()).isZero();
+  }
+
+  @Test
+  void adminRetryInGraceReturns403() throws Exception {
+    String shop = "shop-grace-" + UUID.randomUUID();
+    String token =
+        AuthTestSupport.token(
+            "grace-" + UUID.randomUUID(),
+            shop,
+            "GRACE",
+            Instant.now().plus(30, ChronoUnit.DAYS),
+            1,
+            "oms",
+            Instant.now().plusSeconds(600),
+            List.of("oms"),
+            "OWNER");
+    JsonNode me = get("/api/v1/me", token);
+    UUID tenantId = UUID.fromString(me.path("tenant").path("id").asString());
+    forcedStatus = 400;
+    UUID eventId = append(tenantId, stock(1));
+    publisher.publishOnce();
+    assertThat(statusOf(eventId)).isEqualTo("DEAD");
+    assertThat(post("/api/v1/outbox/" + eventId + "/retry", token, 403).path("error").asString())
+        .isEqualTo("ENTITLEMENT_GRACE");
+    assertThat(statusOf(eventId)).isEqualTo("DEAD");
+  }
+
+  @Test
+  void poisonRowDoesNotBlockOthersAndEventuallyDies() {
+    UUID tenantA = insertTenant();
+    UUID tenantB = insertTenant();
+    UUID poison = append(tenantA, stock(1));
+    UUID good = append(tenantB, stock(2));
+    hooks.poison(poison);
+    assertThat(publisher.publishOnce()).isEqualTo(2);
+    assertThat(statusOf(good)).isEqualTo("SENT");
+    assertThat(statusOf(poison)).isEqualTo("PENDING");
+    assertThat(attempts(poison)).isEqualTo(1);
+    for (int attempt = 0; attempt < 6; attempt++) {
+      expireBackoff(poison);
+      assertThat(publisher.publishOnce()).isEqualTo(1);
+      assertThat(statusOf(poison)).isEqualTo("PENDING");
+    }
+    expireBackoff(poison);
+    assertThat(publisher.publishOnce()).isEqualTo(1);
+    assertThat(statusOf(poison)).isEqualTo("DEAD");
+    assertThat(attempts(poison)).isEqualTo(8);
+    assertThat(statusOf(good)).isEqualTo("SENT");
+    assertThat(DELIVERIES.stream().map(Delivery::eventId)).containsOnly(good.toString());
+  }
+
+  @Test
+  void shortLeaseIsLeftForReclaim() {
+    UUID tenantId = insertTenant();
+    UUID eventId = append(tenantId, stock(1));
+    assertThat(publisher.publishOnce(1, Duration.ofSeconds(1))).isEqualTo(1);
+    assertThat(DELIVERIES).isEmpty();
+    assertThat(statusOf(eventId)).isEqualTo("IN_FLIGHT");
+    expireLease(eventId);
+    assertThat(publisher.publishOnce()).isEqualTo(1);
+    assertThat(statusOf(eventId)).isEqualTo("SENT");
+    assertThat(DELIVERIES).hasSize(1);
+  }
+
+  @Test
+  void appendRejectsAnEnvelopeOver256Kb() {
+    UUID tenantId = insertTenant();
+    String blob = "x".repeat(300_000);
+    TenantContext.set(tenantId, null);
+    try {
+      assertThatThrownBy(
+              () ->
+                  new TransactionTemplate(transactions)
+                      .executeWithoutResult(
+                          status ->
+                              appender.append(
+                                  OutboxDraft.of(
+                                      "inventory",
+                                      "sku-1",
+                                      "stock.updated",
+                                      Map.of("blob", blob),
+                                      1))))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("256 KB");
+    } finally {
+      TenantContext.clear();
+    }
+    assertThat(count("SELECT count(*) FROM outbox_event WHERE tenant_id = ?", tenantId)).isZero();
+  }
+
+  @Test
+  void listDeadIsPaged() throws Exception {
+    String shop = "shop-page-" + UUID.randomUUID();
+    String token = token("page-" + UUID.randomUUID(), shop, "OWNER");
+    JsonNode me = get("/api/v1/me", token);
+    UUID tenantId = UUID.fromString(me.path("tenant").path("id").asString());
+    forcedStatus = 400;
+    append(tenantId, stock(1));
+    append(tenantId, stock(2));
+    publisher.publishOnce();
+    assertThat(get("/api/v1/outbox?limit=1&offset=0", token).path("events").size()).isEqualTo(1);
+    assertThat(get("/api/v1/outbox?limit=1&offset=1", token).path("events").size()).isEqualTo(1);
+    assertThat(get("/api/v1/outbox?limit=1&offset=2", token).path("events").size()).isZero();
+  }
+
+  private List<OutboxStore.Held> loadClaimed(List<OutboxStore.Claimed> claimed) {
+    return store.loadInFlight(claimed);
+  }
+
+  @Test
+  void loadDoesNotAdoptAReclaimedLease() {
+    UUID tenantId = insertTenant();
+    UUID eventId = append(tenantId, stock(1));
+    TenantContext.set(tenantId, null);
+    try {
+      List<OutboxStore.Claimed> first = store.claim(1, Duration.ofMinutes(5));
+      expireLease(eventId);
+      List<OutboxStore.Claimed> second = store.claim(1, Duration.ofMinutes(5));
+      assertThat(store.loadInFlight(first)).isEmpty();
+      List<OutboxStore.Held> held = store.loadInFlight(second);
+      assertThat(held).hasSize(1);
+      assertThat(store.markSent(held.get(0))).isTrue();
+      assertThat(statusOf(eventId)).isEqualTo("SENT");
+      assertThat(DELIVERIES).isEmpty();
+    } finally {
+      TenantContext.clear();
+    }
+  }
+
+  @Test
+  void http429HonorsRetryAfterBeyondOneDay() {
+    forcedStatus = 429;
+    retryAfter = Long.toString(Duration.ofHours(25).toSeconds());
+    UUID tenantId = insertTenant();
+    UUID eventId = append(tenantId, stock(1));
+    Instant started = Instant.now();
+    publisher.publishOnce();
+    Duration delay = Duration.between(started, read(eventId).nextAttemptAt().toInstant());
+    assertThat(delay)
+        .isBetween(Duration.ofHours(25).minusSeconds(2), Duration.ofHours(25).plusSeconds(5));
+    assertThat(read(eventId).status()).isEqualTo("PENDING");
+  }
+
+  private static OutboxStore.Held held(List<OutboxStore.Held> rows, UUID id) {
+    return rows.stream().filter(row -> row.id().equals(id)).findFirst().orElseThrow();
+  }
+
+  private static void resetLikeAdminRetry(UUID eventId) {
+    execute(
+        """
+        UPDATE outbox_event
+        SET status = 'PENDING', attempts = 0, lease_until = NULL, next_attempt_at = NULL
+        WHERE id = ?
+        """,
+        eventId);
+  }
+
   private static void attachLogs() {
     // Spring Boot resets Logback while the context starts, so attach after that.
     if (!LOGS.isStarted()) {
@@ -505,7 +798,7 @@ class OutboxAcceptanceTest {
     }
     Logger publisherLog = (Logger) LoggerFactory.getLogger(OutboxPublisher.class);
     Logger storeLog = (Logger) LoggerFactory.getLogger(OutboxStore.class);
-    publisherLog.setLevel(Level.INFO);
+    publisherLog.setLevel(Level.DEBUG);
     storeLog.setLevel(Level.INFO);
     if (!publisherLog.isAttached(LOGS)) {
       publisherLog.addAppender(LOGS);
@@ -587,14 +880,14 @@ class OutboxAcceptanceTest {
                   appender.append(
                       data instanceof OutboxDraft draft
                           ? draft
-                          : OutboxDraft.of("inventory", "sku-1", "stock.updated", data)));
+                          : OutboxDraft.of("inventory", "sku-1", "stock.updated", data, 1)));
     } finally {
       TenantContext.clear();
     }
   }
 
   private static OutboxDraft stock(int available) {
-    return OutboxDraft.of("inventory", "sku-1", "stock.updated", Map.of("available", available));
+    return OutboxDraft.of("inventory", "sku-1", "stock.updated", Map.of("available", available), 1);
   }
 
   private void expireLease(UUID eventId) {
@@ -625,6 +918,20 @@ class OutboxAcceptanceTest {
       try (ResultSet rows = statement.executeQuery()) {
         rows.next();
         return rows.getInt(1);
+      }
+    } catch (SQLException ex) {
+      throw new IllegalStateException(ex);
+    }
+  }
+
+  private static String payloadOf(UUID id) {
+    try (Connection admin = AuthTestSupport.admin();
+        PreparedStatement statement =
+            admin.prepareStatement("SELECT payload::text FROM outbox_event WHERE id = ?")) {
+      statement.setObject(1, id);
+      try (ResultSet rows = statement.executeQuery()) {
+        rows.next();
+        return rows.getString(1);
       }
     } catch (SQLException ex) {
       throw new IllegalStateException(ex);
@@ -713,4 +1020,57 @@ class OutboxAcceptanceTest {
   private record Delivery(String eventId, String signature, String body) {}
 
   private record Row(String status, int attempts, OffsetDateTime nextAttemptAt) {}
+
+  /** Test-only crash and poison seam. Production uses the no-op {@link OutboxHooks} bean. */
+  static final class CrashHooks extends OutboxHooks {
+
+    private volatile boolean crashBeforeSend;
+    private volatile boolean crashAfterAck;
+    private volatile UUID poisonId;
+
+    @Override
+    void beforeSend(UUID eventId) {
+      if (poisonId != null && poisonId.equals(eventId)) {
+        throw new IllegalStateException("poison row");
+      }
+      if (crashBeforeSend) {
+        throw new OutboxCrash("kill before ack");
+      }
+    }
+
+    @Override
+    void afterAck(UUID eventId) {
+      if (crashAfterAck) {
+        throw new OutboxCrash("kill after ack");
+      }
+    }
+
+    void crashBeforeSend(boolean crash) {
+      this.crashBeforeSend = crash;
+    }
+
+    void crashAfterAck(boolean crash) {
+      this.crashAfterAck = crash;
+    }
+
+    void poison(UUID eventId) {
+      this.poisonId = eventId;
+    }
+
+    void reset() {
+      crashBeforeSend = false;
+      crashAfterAck = false;
+      poisonId = null;
+    }
+  }
+
+  @TestConfiguration
+  static class CrashHookConfig {
+
+    @Bean
+    @Primary
+    CrashHooks crashHooks() {
+      return new CrashHooks();
+    }
+  }
 }

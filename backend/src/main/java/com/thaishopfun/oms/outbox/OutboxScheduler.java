@@ -14,7 +14,9 @@ public class OutboxScheduler {
     this.publisher = publisher;
   }
 
-  @Scheduled(fixedDelayString = "${oms.outbox.poll-delay-ms:2000}")
+  @Scheduled(
+      fixedDelayString = "${oms.outbox.poll-delay-ms:2000}",
+      scheduler = "outboxTaskScheduler")
   public void tick() {
     // Step 1: A blank destination must not claim rows that would then sit IN_FLIGHT.
     if (!properties.isPublisherEnabled() || !properties.destinationConfigured()) {

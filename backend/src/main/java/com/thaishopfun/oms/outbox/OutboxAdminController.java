@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
@@ -25,8 +26,10 @@ class OutboxAdminController {
   }
 
   @GetMapping("/api/v1/outbox")
-  Map<String, List<OutboxDeadEvent>> listDead() {
-    return Map.of("events", admin.listDead());
+  Map<String, List<OutboxDeadEvent>> listDead(
+      @RequestParam(name = "limit", defaultValue = "50") int limit,
+      @RequestParam(name = "offset", defaultValue = "0") int offset) {
+    return Map.of("events", admin.listDead(limit, offset));
   }
 
   @PostMapping("/api/v1/outbox/{id}/retry")

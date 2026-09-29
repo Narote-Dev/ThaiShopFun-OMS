@@ -13,7 +13,11 @@ public record OutboxDraft(
     Instant occurredAt) {
 
   public static OutboxDraft of(
-      String aggregateType, String aggregateId, String eventType, Object data) {
-    return new OutboxDraft(aggregateType, aggregateId, eventType, data, 1, 1, null);
+      String aggregateType,
+      String aggregateId,
+      String eventType,
+      Object data,
+      long aggregateVersion) {
+    return new OutboxDraft(aggregateType, aggregateId, eventType, data, 1, aggregateVersion, null);
   }
 }

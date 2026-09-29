@@ -26,8 +26,6 @@ public class OutboxRetryPolicy {
         Duration.ofHours(6)
       };
 
-  private static final Duration MAX_RETRY_AFTER = Duration.ofHours(24);
-
   private final double jitterRatio;
   private final DoubleSupplier random;
 
@@ -58,12 +56,11 @@ public class OutboxRetryPolicy {
     double sample = random.getAsDouble();
     double multiplier = (1 - jitterRatio) + (2 * jitterRatio * sample);
     Duration jittered = Duration.ofMillis(Math.round(base.toMillis() * multiplier));
-    // Step 3: Honor Retry-After when it is later than the schedule. Cap a runaway header.
-    if (retryAfter != null && retryAfter.compareTo(Duration.ZERO) > 0) {
-      Duration honored = retryAfter.compareTo(MAX_RETRY_AFTER) > 0 ? MAX_RETRY_AFTER : retryAfter;
-      if (honored.compareTo(jittered) > 0) {
-        return Optional.of(honored);
-      }
+    // Step 3: Honor Retry-After when it is later than the schedule. Do not shorten it.
+    if (retryAfter != null
+        && retryAfter.compareTo(Duration.ZERO) > 0
+        && retryAfter.compareTo(jittered) > 0) {
+      return Optional.of(retryAfter);
     }
     return Optional.of(jittered);
   }

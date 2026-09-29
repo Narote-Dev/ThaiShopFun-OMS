@@ -2,6 +2,7 @@ package com.thaishopfun.oms.outbox;
 
 import com.thaishopfun.oms.auth.UuidV7;
 import com.thaishopfun.oms.tenant.TenantContext;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.LinkedHashMap;
@@ -17,6 +18,8 @@ import tools.jackson.databind.json.JsonMapper;
 /** Writes {@code outbox_event} in the caller's transaction. There is no transaction of its own. */
 @Service
 public class OutboxAppender {
+
+  static final int MAX_ENVELOPE_BYTES = 256 * 1024;
 
   private final JdbcTemplate jdbc;
   private final JsonMapper json;
@@ -55,8 +58,13 @@ public class OutboxAppender {
     envelope.put("aggregate_id", draft.aggregateId());
     envelope.put("aggregate_version", draft.aggregateVersion());
     envelope.put("data", dataNode(draft.data()));
+    String payload = json.writeValueAsString(envelope);
+    // Step 3: Reject an envelope the webhook body cannot carry. Nothing is inserted.
+    if (payload.getBytes(StandardCharsets.UTF_8).length > MAX_ENVELOPE_BYTES) {
+      throw new IllegalArgumentException("outbox envelope exceeds 256 KB");
+    }
 
-    // Step 3: Insert in the surrounding transaction. A later throw rolls this row back.
+    // Step 4: Insert in the surrounding transaction. A later throw rolls this row back.
     jdbc.update(
         """
         INSERT INTO outbox_event (
@@ -69,7 +77,7 @@ public class OutboxAppender {
           ps.setString(3, draft.aggregateType());
           ps.setString(4, draft.aggregateId());
           ps.setString(5, draft.eventType());
-          ps.setString(6, json.writeValueAsString(envelope));
+          ps.setString(6, payload);
         });
     return id;
   }

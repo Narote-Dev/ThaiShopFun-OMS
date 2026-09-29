@@ -28,9 +28,11 @@ public class OutboxAdminService {
   }
 
   @Transactional(readOnly = true)
-  public List<OutboxDeadEvent> listDead() {
+  public List<OutboxDeadEvent> listDead(int limit, int offset) {
     // Step 1: The caller is already inside a tenant transaction. STAFF cannot list.
     requireAdmin();
+    int boundedLimit = Math.min(Math.max(limit, 1), 100);
+    int boundedOffset = Math.max(offset, 0);
     return jdbc.query(
         """
         SELECT id, aggregate_type, aggregate_id, event_type, status, attempts,
@@ -38,7 +40,12 @@ public class OutboxAdminService {
         FROM outbox_event
         WHERE status = 'DEAD'
         ORDER BY created_at, id
+        LIMIT ? OFFSET ?
         """,
+        ps -> {
+          ps.setInt(1, boundedLimit);
+          ps.setInt(2, boundedOffset);
+        },
         (rs, rowNum) -> map(rs));
   }
 
@@ -46,22 +53,23 @@ public class OutboxAdminService {
   public OutboxRetryResponse retry(UUID eventId, String remoteAddr) {
     // Step 2: Only DEAD rows move. A missing id and another tenant look the same: not found.
     TenantSnapshot snapshot = requireAdmin();
-    String status =
+    // Change: one read for status and attempts. The second SELECT was the same row.
+    Existing existing =
         jdbc.query(
             "SELECT status, attempts FROM outbox_event WHERE id = ?",
             ps -> ps.setObject(1, eventId),
-            rs -> rs.next() ? rs.getString("status") : null);
-    if (status == null) {
+            rs -> {
+              if (!rs.next()) {
+                return null;
+              }
+              return new Existing(rs.getString("status"), rs.getInt("attempts"));
+            });
+    if (existing == null) {
       throw new OutboxAccessException(404, "NOT_FOUND", "Outbox event not found");
     }
-    if (!"DEAD".equals(status)) {
+    if (!"DEAD".equals(existing.status())) {
       throw new OutboxAccessException(409, "CONFLICT", "Only DEAD events can be retried");
     }
-    int attempts =
-        jdbc.query(
-            "SELECT attempts FROM outbox_event WHERE id = ?",
-            ps -> ps.setObject(1, eventId),
-            rs -> rs.next() ? rs.getInt(1) : 0);
     int updated =
         jdbc.update(
             """
@@ -74,7 +82,7 @@ public class OutboxAdminService {
       throw new OutboxAccessException(409, "CONFLICT", "Only DEAD events can be retried");
     }
     // Step 3: Audit the transition. The payload is not copied; it may hold shop data later.
-    writeAudit(snapshot, eventId, attempts, remoteAddr);
+    writeAudit(snapshot, eventId, existing.attempts(), remoteAddr);
     return new OutboxRetryResponse(eventId, "PENDING", 0);
   }
 
@@ -122,6 +130,8 @@ public class OutboxAdminService {
         instant(rs, "created_at"),
         instant(rs, "next_attempt_at"));
   }
+
+  private record Existing(String status, int attempts) {}
 
   private static Instant instant(ResultSet rs, String column) throws SQLException {
     OffsetDateTime value = rs.getObject(column, OffsetDateTime.class);

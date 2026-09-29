@@ -14,7 +14,6 @@ import java.util.Locale;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import org.springframework.stereotype.Component;
-import tools.jackson.databind.json.JsonMapper;
 
 /** POSTs the stored envelope to TSF and signs {@code t + "." + rawBody} with HMAC-SHA256. */
 @Component
@@ -26,18 +25,20 @@ public class OutboxHttpSender {
       return status >= 200 && status < 300;
     }
 
-    boolean terminalClientError() {
+    /** 3xx and 4xx except 408 and 429. Redirects are disabled, so a 3xx is terminal. */
+    boolean dead() {
+      if (status >= 300 && status < 400) {
+        return true;
+      }
       return status >= 400 && status < 500 && status != 408 && status != 429;
     }
   }
 
   private final OutboxProperties properties;
-  private final JsonMapper json;
   private final HttpClient client;
 
-  public OutboxHttpSender(OutboxProperties properties, JsonMapper json) {
+  public OutboxHttpSender(OutboxProperties properties) {
     this.properties = properties;
-    this.json = json;
     this.client =
         HttpClient.newBuilder()
             .connectTimeout(properties.getHttpTimeout())
@@ -46,8 +47,8 @@ public class OutboxHttpSender {
   }
 
   public SendResult send(OutboxStore.Held held) throws IOException, InterruptedException {
-    // Step 1: Rebuild one canonical body from jsonb so the signature matches the bytes we send.
-    String raw = json.writeValueAsString(json.readTree(held.payload()));
+    // Step 1: Sign and send the stored jsonb text. Do not parse it; numbers must not change.
+    String raw = held.payload();
     long timestamp = Instant.now().getEpochSecond();
     String signature = sign(properties.getWebhookSecret(), timestamp, raw);
     HttpRequest request =

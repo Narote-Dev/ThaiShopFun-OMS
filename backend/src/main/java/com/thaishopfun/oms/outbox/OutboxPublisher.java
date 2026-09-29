@@ -1,7 +1,6 @@
 package com.thaishopfun.oms.outbox;
 
 import com.thaishopfun.oms.tenant.TenantContext;
-import java.io.IOException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -70,9 +69,7 @@ public class OutboxPublisher {
 
   public int publishOnce(int batchSize, Duration lease) {
     // Step 1: Do not claim rows we cannot sign or deliver.
-    if (!properties.destinationConfigured()) {
-      throw new IllegalStateException("outbox destination is not configured");
-    }
+    properties.assertSendable();
     if (batchSize < 1 || batchSize > 1000) {
       throw new IllegalArgumentException("batch size must be between 1 and 1000");
     }
@@ -82,53 +79,87 @@ public class OutboxPublisher {
     }
 
     // Step 2: One transaction per tenant after the claim has committed.
-    Map<UUID, List<UUID>> byTenant = new LinkedHashMap<>();
+    Map<UUID, List<OutboxStore.Claimed>> byTenant = new LinkedHashMap<>();
     for (OutboxStore.Claimed claimedRow : claimed) {
-      byTenant
-          .computeIfAbsent(claimedRow.tenantId(), ignored -> new ArrayList<>())
-          .add(claimedRow.id());
+      byTenant.computeIfAbsent(claimedRow.tenantId(), ignored -> new ArrayList<>()).add(claimedRow);
     }
-    for (Map.Entry<UUID, List<UUID>> entry : byTenant.entrySet()) {
-      List<OutboxStore.Held> held = new ArrayList<>();
-      inTenant(entry.getKey(), () -> held.addAll(store.loadInFlight(entry.getValue())));
-      for (OutboxStore.Held row : held) {
-        deliver(entry.getKey(), row);
+    for (Map.Entry<UUID, List<OutboxStore.Claimed>> entry : byTenant.entrySet()) {
+      try {
+        List<OutboxStore.Held> held = new ArrayList<>();
+        inTenant(entry.getKey(), () -> held.addAll(store.loadInFlight(entry.getValue())));
+        for (OutboxStore.Held row : held) {
+          deliver(entry.getKey(), row);
+        }
+      } catch (OutboxCrash crash) {
+        throw crash;
+      } catch (RuntimeException ex) {
+        // Change: one tenant must not strand the other tenants claimed in this batch.
+        log.warn(
+            "outbox tenant failed tenant_id={} error={}", entry.getKey(), ex.getClass().getName());
       }
     }
     return claimed.size();
   }
 
   private void deliver(UUID tenantId, OutboxStore.Held row) {
-    // Step 3: This line is the lease log. Two instances must not emit it for one event at once.
-    log.info(
+    // Step 3: Lease evidence. DEBUG so a busy publisher does not flood INFO.
+    log.debug(
         "outbox lease instance={} event_id={} tenant_id={} lease_until={} attempts={}",
         instanceId,
         row.id(),
         row.tenantId(),
         row.leaseUntil(),
         row.attempts());
+    // Step 4: Leave the row IN_FLIGHT when the lease cannot cover this HTTP call.
+    if (leaseShorterThanTimeout(row)) {
+      log.debug("outbox skip send event_id={} lease_until={}", row.id(), row.leaseUntil());
+      return;
+    }
     OutboxHttpSender.SendResult result;
     try {
+      result = attemptSend(row);
+    } catch (OutboxCrash crash) {
+      throw crash;
+    }
+    try {
+      if (result.success()) {
+        hooks.afterAck(row.id());
+      }
+      finish(tenantId, row, result);
+    } catch (OutboxCrash crash) {
+      throw crash;
+    } catch (RuntimeException ex) {
+      // Change: a finish failure must not abandon the rest of the batch. The row stays leased.
+      log.warn("outbox finish failed event_id={} error={}", row.id(), ex.getClass().getName());
+    }
+  }
+
+  private OutboxHttpSender.SendResult attemptSend(OutboxStore.Held row) {
+    try {
       hooks.beforeSend(row.id());
-      result = sender.send(row);
+      return sender.send(row);
     } catch (OutboxCrash crash) {
       throw crash;
     } catch (InterruptedException ex) {
       Thread.currentThread().interrupt();
       throw new OutboxCrash("publisher interrupted before ack");
-    } catch (IOException ex) {
-      // A timeout is a failed attempt, not a kill. Back off instead of waiting out the lease.
-      finish(tenantId, row, new OutboxHttpSender.SendResult(-1, null));
-      return;
+    } catch (Exception ex) {
+      // Change: IOException and RuntimeException follow the ladder instead of spinning IN_FLIGHT.
+      log.warn("outbox send failed event_id={} error={}", row.id(), ex.getClass().getName());
+      return new OutboxHttpSender.SendResult(-1, null);
     }
-    if (result.success()) {
-      hooks.afterAck(row.id());
+  }
+
+  private boolean leaseShorterThanTimeout(OutboxStore.Held row) {
+    if (row.leaseUntil() == null) {
+      return true;
     }
-    finish(tenantId, row, result);
+    Duration remaining = Duration.between(Instant.now(), row.leaseUntil().toInstant());
+    return remaining.compareTo(properties.getHttpTimeout()) < 0;
   }
 
   private void finish(UUID tenantId, OutboxStore.Held row, OutboxHttpSender.SendResult result) {
-    // Step 4: 2xx is SENT. Other 4xx is DEAD. Everything else waits on the 4.4 ladder.
+    // Step 5: 2xx is SENT. 3xx and other 4xx are DEAD. Everything else waits on the 4.4 ladder.
     inTenant(
         tenantId,
         () -> {
@@ -136,7 +167,7 @@ public class OutboxPublisher {
             store.markSent(row);
             return;
           }
-          if (result.terminalClientError()) {
+          if (result.dead()) {
             store.markDead(row, result.status());
             return;
           }

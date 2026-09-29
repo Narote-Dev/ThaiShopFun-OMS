@@ -33,6 +33,7 @@ class OutboxRetryPolicyTest {
     OutboxRetryPolicy policy = new OutboxRetryPolicy(0.2, () -> 0.5);
     assertThat(policy.nextDelay(1, Duration.ofSeconds(5))).contains(Duration.ofSeconds(30));
     assertThat(policy.nextDelay(1, Duration.ofSeconds(50))).contains(Duration.ofSeconds(50));
+    assertThat(policy.nextDelay(1, Duration.ofHours(25))).contains(Duration.ofHours(25));
     assertThat(policy.nextDelay(1, Duration.ZERO)).contains(Duration.ofSeconds(30));
     assertThat(policy.nextDelay(8, Duration.ofHours(5))).isEqualTo(Optional.empty());
   }
