@@ -21,6 +21,8 @@ spring:
 
 server:
   port: ${PORT:8080}
+  # Trust X-Forwarded-For so audit_log.ip is the client, not the proxy.
+  forward-headers-strategy: framework
   error:
     include-message: never
     include-stacktrace: never
@@ -45,3 +47,6 @@ oms:
     audience: ${OMS_JWT_AUDIENCE:oms}
     internal-audience: ${OMS_JWT_INTERNAL_AUDIENCE:oms-internal}
     jwks-uri: ${TSF_JWKS_URI:${OMS_JWKS_URI:}}
+    # Client ids (azp or client_id) allowed to call /internal/**. Empty rejects every service token.
+    internal-client-ids: []
+    # allow-rls-bypass stays at the Java default false. Do not set it here.
