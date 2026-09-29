@@ -123,7 +123,7 @@ class MockTsfApiTest {
             + enc("http://127.0.0.1/callback")
             + "&code_challenge="
             + enc(challenge)
-            + "&code_challenge_method=S256&state=xyz&login_hint=owner-grace";
+            + "&code_challenge_method=S256&state=xyz&nonce=n-1&login_hint=owner-grace";
     HttpResponse<String> redirect =
         http.send(request(authorize).GET().build(), HttpResponse.BodyHandlers.ofString());
     assertThat(redirect.statusCode()).isEqualTo(302);
@@ -153,6 +153,14 @@ class MockTsfApiTest {
         .isEqualTo("GRACE");
     assertThat(jwt.getJWTClaimsSet().getLongClaim("ent_ver")).isEqualTo(1L);
     assertThat(body.path("refresh_token").asString()).isNotBlank();
+    SignedJWT idToken = SignedJWT.parse(body.path("id_token").asString());
+    assertThat(idToken.verify(new RSASSAVerifier(keys.publicKey()))).isTrue();
+    assertThat(idToken.getJWTClaimsSet().getIssuer()).isEqualTo("http://localhost:8090/tsf-idp");
+    assertThat(idToken.getJWTClaimsSet().getSubject()).isEqualTo("owner-grace");
+    assertThat(idToken.getJWTClaimsSet().getAudience()).containsExactly("oms");
+    assertThat(idToken.getJWTClaimsSet().getStringClaim("nonce")).isEqualTo("n-1");
+    assertThat(idToken.getJWTClaimsSet().getExpirationTime()).isNotNull();
+    assertThat(idToken.getJWTClaimsSet().getIssueTime()).isNotNull();
   }
 
   @Test
@@ -221,13 +229,209 @@ class MockTsfApiTest {
         "{"
             + "\"reservation_expires_at\":\"2026-09-29T08:30:00Z\","
             + "\"event\":"
-            + stockEvent("evt-after-expiry").replace("2026-09-29T08:15:02Z", "2026-09-29T08:00:00Z")
+            + orderCreated("evt-after-expiry", "2026-09-29T08:00:00Z")
             + "}";
     HttpResponse<String> response = post("/control/events/after-reservation-expiry", event);
     assertThat(response.statusCode()).isEqualTo(200);
     assertThat(OMS_BODIES).hasSize(1);
     assertThat(JSON.readTree(OMS_BODIES.get(0)).path("occurred_at").asString())
         .isEqualTo("2026-09-29T08:30:01Z");
+
+    OMS_BODIES.clear();
+    HttpResponse<String> wrongType =
+        post(
+            "/control/events/after-reservation-expiry",
+            "{"
+                + "\"reservation_expires_at\":\"2026-09-29T08:30:00Z\","
+                + "\"event\":"
+                + stockEvent("evt-not-reservation")
+                + "}");
+    assertThat(wrongType.statusCode()).isEqualTo(400);
+    assertThat(OMS_BODIES).isEmpty();
+
+    String future =
+        java.time.Instant.now()
+            .plusSeconds(3600)
+            .truncatedTo(java.time.temporal.ChronoUnit.SECONDS)
+            .toString();
+    HttpResponse<String> futureStamp =
+        post(
+            "/control/events/after-reservation-expiry",
+            "{"
+                + "\"reservation_expires_at\":\""
+                + future
+                + "\","
+                + "\"event\":"
+                + orderCreated("evt-future", "2026-09-29T08:00:00Z")
+                + "}");
+    assertThat(futureStamp.statusCode()).isEqualTo(400);
+    assertThat(futureStamp.body()).contains("occurred_at would be in the future");
+  }
+
+  @Test
+  void rejectsBadEventDataNulAndForeignTypes() throws Exception {
+    String badData = stockEvent("evt-bad-data").replaceFirst("\"data\":\\{.*}$", "\"data\":{}}");
+    HttpResponse<String> rejected = post("/control/events/send", "{\"event\":" + badData + "}");
+    assertThat(rejected.statusCode()).isEqualTo(400);
+    assertThat(JSON.readTree(rejected.body()).path("error").asString())
+        .isEqualTo("SCHEMA_VIOLATION");
+
+    String nul = stockEvent("evt-nul") + "\u0000";
+    HttpResponse<String> nulResponse =
+        postRaw(
+            "/internal/v1/oms-events",
+            nul,
+            Hmacs.header(
+                "dev-outbox-webhook-secret-local-only", Instant.now().getEpochSecond(), bytes(nul)),
+            "evt-nul");
+    assertThat(nulResponse.statusCode()).isEqualTo(400);
+    assertThat(JSON.readTree(nulResponse.body()).path("error").asString()).isEqualTo("BAD_REQUEST");
+
+    String escaped = stockEvent("evt-esc").replace("TSHIRT-BLK-M", "TSH" + "\\" + "u0000IRT");
+    HttpResponse<String> escapedResponse =
+        postRaw(
+            "/internal/v1/oms-events",
+            escaped,
+            Hmacs.header(
+                "dev-outbox-webhook-secret-local-only",
+                Instant.now().getEpochSecond(),
+                bytes(escaped)),
+            "evt-esc");
+    assertThat(escapedResponse.statusCode()).isEqualTo(400);
+    assertThat(JSON.readTree(escapedResponse.body()).path("message").asString())
+        .isEqualTo("Body contains an unsupported character");
+
+    String foreign = orderCreated("evt-foreign", "2026-09-29T08:15:02Z");
+    HttpResponse<String> foreignResponse =
+        postRaw(
+            "/internal/v1/oms-events",
+            foreign,
+            Hmacs.header(
+                "dev-outbox-webhook-secret-local-only",
+                Instant.now().getEpochSecond(),
+                bytes(foreign)),
+            "evt-foreign");
+    assertThat(foreignResponse.statusCode()).isEqualTo(400);
+    assertThat(foreignResponse.body()).contains("not accepted");
+  }
+
+  @Test
+  void faultInjectionReturns429ThenTheRealResponse() throws Exception {
+    HttpResponse<String> armed =
+        post(
+            "/control/faults",
+            "{\"method\":\"GET\",\"path\":\"/internal/v1/orders/TSF-240929-000123\",\"status\":429,\"times\":1,\"retry_after\":30}");
+    assertThat(armed.statusCode()).isEqualTo(200);
+    HttpResponse<String> anonymous = get("/internal/v1/orders/TSF-240929-000123");
+    assertThat(anonymous.statusCode()).isEqualTo(401);
+    String service = serviceToken("oms-service", "dev-oms-service-secret");
+    HttpResponse<String> limited = get("/internal/v1/orders/TSF-240929-000123", service);
+    assertThat(limited.statusCode()).isEqualTo(429);
+    assertThat(limited.headers().firstValue("Retry-After").orElse("")).isEqualTo("30");
+    assertThat(JSON.readTree(limited.body()).path("error").asString()).isEqualTo("RATE_LIMITED");
+    assertThat(get("/internal/v1/orders/TSF-240929-000123", service).statusCode()).isEqualTo(200);
+
+    post(
+        "/control/faults",
+        "{\"method\":\"GET\",\"path\":\"/internal/v1/orders/TSF-240929-000123\",\"status\":503,\"times\":1}");
+    HttpResponse<String> down = get("/internal/v1/orders/TSF-240929-000123", service);
+    assertThat(down.statusCode()).isEqualTo(503);
+    assertThat(down.headers().firstValue("Retry-After")).isEmpty();
+  }
+
+  @Test
+  void userTokenOverridesDoNotRequireAMembershipEvent() throws Exception {
+    HttpResponse<String> response =
+        post(
+            "/control/user-token",
+            "{\"login_hint\":\"owner-active\",\"ent_ver\":9,\"status\":\"SUSPENDED\",\"expires_at\":\"2020-01-01T00:00:00Z\"}");
+    assertThat(response.statusCode()).isEqualTo(200);
+    SignedJWT jwt = SignedJWT.parse(JSON.readTree(response.body()).path("access_token").asString());
+    assertThat(jwt.getJWTClaimsSet().getLongClaim("ent_ver")).isEqualTo(9L);
+    assertThat(jwt.getJWTClaimsSet().getJSONObjectClaim("membership").get("status"))
+        .isEqualTo("SUSPENDED");
+    assertThat(jwt.getJWTClaimsSet().getJSONObjectClaim("membership").get("expires_at"))
+        .isEqualTo("2020-01-01T00:00:00Z");
+  }
+
+  @Test
+  void sameIdempotencyKeyCreatesOneShipment() throws Exception {
+    String service = serviceToken("oms-service", "dev-oms-service-secret");
+    String key = "parallel-" + java.util.UUID.randomUUID();
+    java.util.concurrent.ExecutorService pool =
+        java.util.concurrent.Executors.newFixedThreadPool(8);
+    try {
+      java.util.List<java.util.concurrent.Future<HttpResponse<String>>> calls =
+          new java.util.ArrayList<>();
+      for (int i = 0; i < 8; i++) {
+        calls.add(
+            pool.submit(
+                () ->
+                    post(
+                        "/internal/v1/orders/TSF-240929-000123/shipments",
+                        "{\"carrier\":\"FLASH\"}",
+                        service,
+                        key)));
+      }
+      java.util.Set<String> bodies = new java.util.HashSet<>();
+      for (java.util.concurrent.Future<HttpResponse<String>> call : calls) {
+        HttpResponse<String> response = call.get();
+        assertThat(response.statusCode()).isEqualTo(201);
+        bodies.add(response.body());
+      }
+      assertThat(bodies).hasSize(1);
+    } finally {
+      pool.shutdownNow();
+    }
+  }
+
+  @Test
+  void receivedStoreKeepsTheLastThousand() {
+    com.thaishopfun.mocktsf.events.ReceivedEventStore store =
+        new com.thaishopfun.mocktsf.events.ReceivedEventStore();
+    for (int i = 0; i < 1005; i++) {
+      assertThat(
+              store.add(
+                  new com.thaishopfun.mocktsf.events.ReceivedEventStore.Received(
+                      "e" + i, "stock.updated", "2026-09-29T08:15:02Z", "{}")))
+          .isTrue();
+    }
+    assertThat(store.all()).hasSize(1000);
+    assertThat(store.all().get(0).eventId()).isEqualTo("e5");
+    assertThat(
+            store.add(
+                new com.thaishopfun.mocktsf.events.ReceivedEventStore.Received(
+                    "e1004", "stock.updated", "2026-09-29T08:15:02Z", "{}")))
+        .isFalse();
+  }
+
+  @Test
+  void incompleteErrorBodyIsNotSchemaValid() throws Exception {
+    com.sun.net.httpserver.HttpServer bad =
+        com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress("127.0.0.1", 0), 0);
+    bad.createContext(
+        "/",
+        exchange -> {
+          byte[] body = "{\"error\":\"NOT_FOUND\"}".getBytes(StandardCharsets.UTF_8);
+          exchange.sendResponseHeaders(404, body.length);
+          exchange.getResponseBody().write(body);
+          exchange.close();
+        });
+    bad.start();
+    try {
+      endpoint.setBaseUrl("http://127.0.0.1:" + bad.getAddress().getPort());
+      HttpResponse<String> response =
+          post(
+              "/control/checkout/reservations",
+              "{\"checkout_id\":\"chk_1\",\"tsf_shop_id\":\"shop_45021\",\"items\":[{\"listing_sku_id\":\"tsf_sku_7781\",\"qty\":1}]}");
+      assertThat(response.statusCode()).isEqualTo(200);
+      JsonNode result = JSON.readTree(response.body());
+      assertThat(result.path("oms_status").asInt()).isEqualTo(404);
+      assertThat(result.path("response_schema_valid").asBoolean()).isFalse();
+    } finally {
+      bad.stop(0);
+      endpoint.setBaseUrl("http://127.0.0.1:" + oms.getAddress().getPort());
+    }
   }
 
   private String serviceToken(String clientId, String secret) throws Exception {
@@ -301,6 +505,32 @@ class MockTsfApiTest {
 
   private static byte[] bytes(String body) {
     return body.getBytes(StandardCharsets.UTF_8);
+  }
+
+  private static String orderCreated(String eventId, String occurredAt) {
+    return "{"
+        + "\"event_id\":\""
+        + eventId
+        + "\","
+        + "\"event_type\":\"order.created\","
+        + "\"schema_version\":1,"
+        + "\"occurred_at\":\""
+        + occurredAt
+        + "\","
+        + "\"tsf_shop_id\":\"shop_active\","
+        + "\"aggregate_id\":\"TSF-240929-000123\","
+        + "\"aggregate_version\":1,"
+        + "\"data\":{"
+        + "\"order_id\":\"TSF-240929-000123\","
+        + "\"reservation_id\":\"rsv_1\","
+        + "\"payment_method\":\"COD\","
+        + "\"payment_expires_at\":\"2026-09-29T08:45:00Z\","
+        + "\"currency\":\"THB\","
+        + "\"totals\":{\"subtotal\":1,\"shipping_fee\":0,\"discount\":0,\"grand_total\":1},"
+        + "\"recipient\":{\"name\":\"A\",\"phone\":\"1\",\"address\":{\"line1\":\"1\",\"district\":\"d\",\"province\":\"p\",\"postcode\":\"10110\"}},"
+        + "\"ship_by\":\"2026-10-01T00:00:00Z\","
+        + "\"lines\":[{\"line_id\":\"L1\",\"listing_sku_id\":\"sku\",\"seller_sku\":\"S\",\"name\":\"n\",\"qty\":1,\"unit_price\":1}]"
+        + "}}";
   }
 
   private static String stockEvent(String eventId) {

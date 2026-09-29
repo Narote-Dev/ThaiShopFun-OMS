@@ -9,6 +9,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.BiFunction;
 import org.springframework.stereotype.Component;
 
 /** Seeded orders, listings, and in-memory shipments for section 4.7. */
@@ -65,12 +66,12 @@ public class TsfCatalog {
     return listings;
   }
 
-  public Optional<Stored> idempotent(String scope, String key) {
-    return Optional.ofNullable(idempotency.get(scope + "\n" + key));
-  }
-
-  public void remember(String scope, String key, Stored stored) {
-    idempotency.put(scope + "\n" + key, stored);
+  /**
+   * Lookup and insert for one scope+key are a single map operation. The function runs once and must
+   * return the stored row (the previous one, or the row just created).
+   */
+  public Stored compute(String scope, String key, BiFunction<String, Stored, Stored> remapping) {
+    return idempotency.compute(scope + "\n" + key, remapping);
   }
 
   public Map<String, Object> newShipment(String orderId, String carrier) {

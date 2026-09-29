@@ -3,6 +3,7 @@ package com.thaishopfun.mocktsf.security;
 import com.thaishopfun.mocktsf.MockProperties;
 import com.thaishopfun.mocktsf.SigningKeys;
 import com.thaishopfun.mocktsf.contract.ContractResponses;
+import com.thaishopfun.mocktsf.events.FaultSchedule;
 import com.thaishopfun.mocktsf.idp.TokenIssuer;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -51,7 +52,8 @@ public class SecurityConfig {
       HttpSecurity http,
       JwtDecoder jwtDecoder,
       MockProperties properties,
-      ContractResponses responses)
+      ContractResponses responses,
+      FaultSchedule faults)
       throws Exception {
     stateless(http);
     http.securityMatcher("/internal/**");
@@ -62,9 +64,10 @@ public class SecurityConfig {
                 .authenticationEntryPoint(
                     (request, response, ex) -> write(responses, request, response))
                 .jwt(jwt -> jwt.decoder(jwtDecoder)));
-    http.addFilterAfter(
-        new ClientFilter(responses, properties.getOmsServiceClientId()),
-        BearerTokenAuthenticationFilter.class);
+    ClientFilter clients = new ClientFilter(responses, properties.getOmsServiceClientId());
+    http.addFilterAfter(clients, BearerTokenAuthenticationFilter.class);
+    // Step 1: Faults run after the client check, so a missing token stays 401.
+    http.addFilterAfter(new FaultFilter(responses, faults), ClientFilter.class);
     return http.build();
   }
 
@@ -130,6 +133,39 @@ public class SecurityConfig {
         return;
       }
       chain.doFilter(request, response);
+    }
+  }
+
+  /** Section 4.7 fault injection. One armed call returns 429 (with Retry-After) or 503. */
+  static final class FaultFilter extends OncePerRequestFilter {
+
+    private final ContractResponses responses;
+    private final FaultSchedule faults;
+
+    FaultFilter(ContractResponses responses, FaultSchedule faults) {
+      this.responses = responses;
+      this.faults = faults;
+    }
+
+    @Override
+    protected void doFilterInternal(
+        HttpServletRequest request, HttpServletResponse response, FilterChain chain)
+        throws ServletException, IOException {
+      FaultSchedule.Armed armed = faults.consume(request.getMethod(), request.getRequestURI());
+      if (armed == null) {
+        chain.doFilter(request, response);
+        return;
+      }
+      String code = armed.status() == 429 ? "RATE_LIMITED" : "UNAVAILABLE";
+      String message = armed.status() == 429 ? "Retry later" : "Service unavailable";
+      var entity = responses.error(request, armed.status(), code, message);
+      if (armed.retryAfter() != null) {
+        response.setHeader("Retry-After", Integer.toString(armed.retryAfter()));
+      }
+      response.setStatus(entity.getStatusCode().value());
+      response.setContentType("application/json");
+      response.setCharacterEncoding("UTF-8");
+      response.getWriter().write(entity.getBody() == null ? "" : entity.getBody());
     }
   }
 }

@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Section 4.1 user access-token claims",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "iss",
+    "aud",
+    "sub",
+    "iat",
+    "exp",
+    "email",
+    "tsf_shop_id",
+    "shop_role",
+    "membership",
+    "entitlements",
+    "ent_ver"
+  ],
+  "properties": {
+    "iss": {
+      "type": "string",
+      "minLength": 1
+    },
+    "aud": {
+      "const": "oms"
+    },
+    "sub": {
+      "type": "string",
+      "minLength": 1
+    },
+    "iat": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "exp": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "jti": {
+      "type": "string",
+      "minLength": 1
+    },
+    "email": {
+      "type": "string",
+      "minLength": 1
+    },
+    "tsf_shop_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "shop_role": {
+      "type": "string",
+      "minLength": 1
+    },
+    "shop_name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "membership": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tier", "status", "expires_at"],
+      "properties": {
+        "tier": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "type": "string",
+          "enum": ["ACTIVE", "GRACE", "SUSPENDED"]
+        },
+        "expires_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "entitlements": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "ent_ver": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9223372036854775807
+    }
+  }
+}

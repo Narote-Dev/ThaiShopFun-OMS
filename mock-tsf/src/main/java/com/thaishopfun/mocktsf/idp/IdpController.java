@@ -88,19 +88,20 @@ public class IdpController {
       @RequestParam(value = "code_challenge_method", required = false) String method,
       @RequestParam(value = "state", required = false) String state,
       @RequestParam(value = "scope", required = false) String scope,
+      @RequestParam(value = "nonce", required = false) String nonce,
       @RequestParam(value = "login_hint", required = false) String loginHint) {
     // Step 1: Public client + PKCE only. Redirect targets stay on localhost.
     requireCodeRequest(responseType, clientId, redirectUri, codeChallenge, method);
     if (loginHint == null || loginHint.isBlank()) {
       return ResponseEntity.ok()
           .contentType(MediaType.TEXT_HTML)
-          .body(picker(clientId, redirectUri, codeChallenge, method, state, scope));
+          .body(picker(clientId, redirectUri, codeChallenge, method, state, scope, nonce));
     }
     SeedData.ShopUser user =
         shops
             .find(loginHint)
             .orElseThrow(() -> ApiException.badRequest("UNKNOWN_USER", "login_hint is unknown"));
-    return redirectWithCode(user, clientId, redirectUri, codeChallenge, state);
+    return redirectWithCode(user, clientId, redirectUri, codeChallenge, state, nonce);
   }
 
   @PostMapping(value = "/token", consumes = MediaType.APPLICATION_FORM_URLENCODED_VALUE)
@@ -138,7 +139,7 @@ public class IdpController {
         shops
             .find(stored.userId())
             .orElseThrow(() -> ApiException.badRequest("INVALID_GRANT", "user is unknown"));
-    return userToken(user, clientId);
+    return userToken(user, clientId, stored.nonce());
   }
 
   private ResponseEntity<String> refresh(MultiValueMap<String, String> form) {
@@ -153,7 +154,7 @@ public class IdpController {
         shops
             .find(stored.userId())
             .orElseThrow(() -> ApiException.badRequest("INVALID_GRANT", "user is unknown"));
-    return userToken(user, clientId);
+    return userToken(user, clientId, null);
   }
 
   private ResponseEntity<String> clientCredentials(MultiValueMap<String, String> form) {
@@ -170,24 +171,29 @@ public class IdpController {
     } else {
       throw ApiException.badRequest("INVALID_CLIENT", "client credentials were rejected");
     }
-    Map<String, Object> body = tokenBody(tokens.serviceToken(clientId, audience), null);
+    Map<String, Object> body = tokenBody(tokens.serviceToken(clientId, audience), null, null);
     return responses.outbound(200, "token-response", body);
   }
 
-  private ResponseEntity<String> userToken(SeedData.ShopUser user, String clientId) {
+  private ResponseEntity<String> userToken(SeedData.ShopUser user, String clientId, String nonce) {
     String refresh = randomToken();
     refreshes.put(refresh, new Refresh(user.userId(), clientId));
     return responses.outbound(
-        200, "token-response", tokenBody(tokens.userAccessToken(user), refresh));
+        200,
+        "token-response",
+        tokenBody(tokens.userAccessToken(user), refresh, tokens.idToken(user, clientId, nonce)));
   }
 
-  private Map<String, Object> tokenBody(String accessToken, String refresh) {
+  private Map<String, Object> tokenBody(String accessToken, String refresh, String idToken) {
     Map<String, Object> body = new LinkedHashMap<>();
     body.put("access_token", accessToken);
     body.put("token_type", "Bearer");
     body.put("expires_in", Math.toIntExact(properties.getAccessTokenSeconds()));
     if (refresh != null) {
       body.put("refresh_token", refresh);
+    }
+    if (idToken != null) {
+      body.put("id_token", idToken);
     }
     return body;
   }
@@ -197,7 +203,8 @@ public class IdpController {
       String clientId,
       String redirectUri,
       String codeChallenge,
-      String state) {
+      String state,
+      String nonce) {
     String code = randomToken();
     codes.put(
         code,
@@ -206,6 +213,7 @@ public class IdpController {
             redirectUri,
             clientId,
             user.userId(),
+            nonce,
             Instant.now().plusSeconds(CODE_TTL_SECONDS)));
     UriComponentsBuilder location =
         UriComponentsBuilder.fromUriString(redirectUri).queryParam("code", code);
@@ -259,7 +267,8 @@ public class IdpController {
       String challenge,
       String method,
       String state,
-      String scope) {
+      String scope,
+      String nonce) {
     StringBuilder html = new StringBuilder();
     html.append(
         "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>Mock TSF</title></head>");
@@ -278,6 +287,9 @@ public class IdpController {
       }
       if (scope != null) {
         link.queryParam("scope", scope);
+      }
+      if (nonce != null) {
+        link.queryParam("nonce", nonce);
       }
       html.append("<li><a href=\"")
           .append(esc(link.build(true).toUriString()))
@@ -318,7 +330,12 @@ public class IdpController {
   }
 
   private record AuthCode(
-      String challenge, String redirectUri, String clientId, String userId, Instant expiresAt) {}
+      String challenge,
+      String redirectUri,
+      String clientId,
+      String userId,
+      String nonce,
+      Instant expiresAt) {}
 
   private record Refresh(String userId, String clientId) {}
 }

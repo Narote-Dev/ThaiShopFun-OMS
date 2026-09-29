@@ -22,6 +22,10 @@
     "refresh_token": {
       "type": "string",
       "minLength": 20
+    },
+    "id_token": {
+      "type": "string",
+      "minLength": 20
     }
   }
 }

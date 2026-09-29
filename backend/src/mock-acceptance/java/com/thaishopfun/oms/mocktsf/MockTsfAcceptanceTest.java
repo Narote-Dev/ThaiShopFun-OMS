@@ -2,8 +2,10 @@ package com.thaishopfun.oms.mocktsf;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.thaishopfun.mocktsf.MockProperties;
 import com.thaishopfun.mocktsf.MockTsfApplication;
 import com.thaishopfun.mocktsf.OmsEndpoint;
+import com.thaishopfun.mocktsf.idp.IdpController;
 import com.thaishopfun.oms.auth.AuthTestSupport;
 import com.thaishopfun.oms.inbox.InboxWorker;
 import com.thaishopfun.oms.outbox.OutboxAppender;
@@ -11,6 +13,7 @@ import com.thaishopfun.oms.outbox.OutboxDraft;
 import com.thaishopfun.oms.outbox.OutboxPublisher;
 import com.thaishopfun.oms.tenant.TenantContext;
 import java.net.URI;
+import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -45,8 +48,8 @@ import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ObjectNode;
 
 /**
- * OMS against the in-process mock IdP, inbox sender, and outbox receiver. The mock jar is installed
- * before this module's tests.
+ * OMS against the in-process mock IdP, inbox sender, and outbox receiver. Compiled only with {@code
+ * -Pmock-acceptance}, after mock-tsf from the same commit is installed.
  */
 @ActiveProfiles("test")
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
@@ -121,7 +124,8 @@ class MockTsfAcceptanceTest {
 
     JsonNode grace = me("owner-grace");
     assertThat(grace.path("entitlement").path("status").asString()).isEqualTo("GRACE");
-    HttpResult graceWrite = call("POST", "/api/v1/me", token("owner-grace"), null);
+    HttpResult graceWrite =
+        call("POST", "/api/v1/outbox/" + UUID.randomUUID() + "/retry", token("owner-grace"), null);
     assertThat(graceWrite.status()).isEqualTo(403);
     assertThat(JSON.readTree(graceWrite.body()).path("error").asString())
         .isEqualTo("ENTITLEMENT_GRACE");
@@ -264,6 +268,117 @@ class MockTsfAcceptanceTest {
     assertThat(found).isTrue();
   }
 
+  @Test
+  void pkceAuthorizeThenTokenReachesMe() throws Exception {
+    String verifier = "pkce-verifier-0123456789-abcdefghijklmnopqrstuvwxyz";
+    String challenge = IdpController.s256(verifier);
+    String redirect = "http://127.0.0.1/callback";
+    String authorize =
+        "/tsf-idp/authorize?response_type=code&client_id=oms&redirect_uri="
+            + URLEncoder.encode(redirect, StandardCharsets.UTF_8)
+            + "&code_challenge="
+            + URLEncoder.encode(challenge, StandardCharsets.UTF_8)
+            + "&code_challenge_method=S256&state=xyz&nonce=n-1&login_hint=owner-active";
+    HttpRequest request =
+        HttpRequest.newBuilder(mockUri(authorize)).timeout(Duration.ofSeconds(10)).GET().build();
+    HttpResponse<String> redirected =
+        HTTP.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+    assertThat(redirected.statusCode()).isEqualTo(302);
+    String code = query(redirected.headers().firstValue("location").orElseThrow(), "code");
+    HttpRequest tokenRequest =
+        HttpRequest.newBuilder(mockUri("/tsf-idp/token"))
+            .timeout(Duration.ofSeconds(10))
+            .header("Content-Type", "application/x-www-form-urlencoded")
+            .POST(
+                HttpRequest.BodyPublishers.ofString(
+                    "grant_type=authorization_code&client_id=oms&redirect_uri="
+                        + URLEncoder.encode(redirect, StandardCharsets.UTF_8)
+                        + "&code="
+                        + URLEncoder.encode(code, StandardCharsets.UTF_8)
+                        + "&code_verifier="
+                        + URLEncoder.encode(verifier, StandardCharsets.UTF_8)))
+            .build();
+    HttpResponse<String> token =
+        HTTP.send(tokenRequest, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+    assertThat(token.statusCode()).isEqualTo(200);
+    JsonNode issued = JSON.readTree(token.body());
+    assertThat(issued.path("id_token").asString()).isNotBlank();
+    HttpResult me = call("GET", "/api/v1/me", issued.path("access_token").asString(), null);
+    assertThat(me.status()).isEqualTo(200);
+    assertThat(JSON.readTree(me.body()).path("tenant").path("tsf_shop_id").asString())
+        .isEqualTo("shop_active");
+  }
+
+  @Test
+  void membershipBumpsSeedSoTheNextTokenIsNotStale() throws Exception {
+    JsonNode first = me("owner-active");
+    assertThat(first.path("entitlement").path("ent_ver").asLong()).isEqualTo(1);
+    ObjectNode event = membership(UUID.randomUUID().toString(), "shop_active", 2);
+    ObjectNode body = JSON.createObjectNode();
+    body.set("event", event);
+    JsonNode report = control("/control/events/send", body);
+    assertThat(report.path("sent").get(0).path("http_status").asInt()).isEqualTo(202);
+    assertThat(worker.processAvailable(20)).isEqualTo(1);
+    JsonNode again = me("owner-active");
+    assertThat(again.path("entitlement").path("ent_ver").asLong()).isEqualTo(2);
+    assertThat(again.path("entitlement").path("status").asString()).isEqualTo("ACTIVE");
+  }
+
+  @Test
+  void outboxWrongSecretIsDead() throws Exception {
+    JsonNode me = me("owner-active");
+    UUID tenantId = UUID.fromString(me.path("tenant").path("id").asString());
+    MockProperties secrets = mock.getBean(MockProperties.class);
+    String original = secrets.getOutboxHmacSecret();
+    secrets.setOutboxHmacSecret("not-the-oms-outbox-secret");
+    UUID eventId;
+    try {
+      eventId = appendStock(tenantId, 1043);
+      assertThat(publisher.publishOnce()).isEqualTo(1);
+    } finally {
+      secrets.setOutboxHmacSecret(original);
+    }
+    assertThat(text("SELECT status FROM outbox_event WHERE id = ?::uuid", eventId.toString()))
+        .isEqualTo("DEAD");
+  }
+
+  @Test
+  void badEventDataIsSchemaViolation() throws Exception {
+    ObjectNode event = membership(UUID.randomUUID().toString(), "shop_active", 9);
+    event.set("data", JSON.createObjectNode());
+    ObjectNode body = JSON.createObjectNode();
+    body.set("event", event);
+    HttpResult result = call("POST", mockUri("/control/events/send"), null, body.toString());
+    assertThat(result.status()).isEqualTo(400);
+    assertThat(JSON.readTree(result.body()).path("error").asString()).isEqualTo("SCHEMA_VIOLATION");
+  }
+
+  private UUID appendStock(UUID tenantId, long version) {
+    Map<String, Object> item = new LinkedHashMap<>();
+    item.put("listing_sku_id", "tsf_sku_7781");
+    item.put("seller_sku", "TSHIRT-BLK-M");
+    item.put("available", 18);
+    item.put("stock_version", version);
+    UUID[] eventId = new UUID[1];
+    TenantContext.set(tenantId, null);
+    try {
+      new TransactionTemplate(transactions)
+          .executeWithoutResult(
+              status ->
+                  eventId[0] =
+                      appender.append(
+                          OutboxDraft.of(
+                              "listing",
+                              "tsf_sku_7781",
+                              "stock.updated",
+                              Map.of("items", List.of(item)),
+                              version)));
+    } finally {
+      TenantContext.clear();
+    }
+    return eventId[0];
+  }
+
   private static void startMock() {
     if (mock != null) {
       return;
@@ -369,6 +484,17 @@ class MockTsfAcceptanceTest {
         return rows.getString(1);
       }
     }
+  }
+
+  private static String query(String location, String name) {
+    String rawQuery = URI.create(location).getRawQuery();
+    for (String part : rawQuery.split("&")) {
+      int split = part.indexOf('=');
+      if (split > 0 && name.equals(part.substring(0, split))) {
+        return java.net.URLDecoder.decode(part.substring(split + 1), StandardCharsets.UTF_8);
+      }
+    }
+    throw new IllegalStateException("missing " + name);
   }
 
   private record HttpResult(int status, String body) {}

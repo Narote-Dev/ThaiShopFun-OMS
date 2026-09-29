@@ -1,0 +1,10 @@
+{
+  "name": "tsf-oms-contracts",
+  "private": true,
+  "scripts": {
+    "lint": "spectral lint --fail-severity error openapi/tsf-internal.yaml openapi/oms-checkout.yaml"
+  },
+  "devDependencies": {
+    "@stoplight/spectral-cli": "6.15.0"
+  }
+}

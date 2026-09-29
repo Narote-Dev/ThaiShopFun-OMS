@@ -166,22 +166,28 @@ public class TsfApiController {
       throw ApiException.badRequest("IDEMPOTENCY_KEY_REQUIRED", "Idempotency-Key is required");
     }
     String hash = sha256(raw);
-    TsfCatalog.Stored existing = catalog.idempotent(scope, key).orElse(null);
-    if (existing != null) {
-      if (!existing.bodyHash().equals(hash)) {
-        throw new ApiException(
-            409, "IDEMPOTENCY_CONFLICT", "Idempotency-Key was reused with a different body");
-      }
-      return ResponseEntity.status(existing.status())
-          .contentType(MediaType.APPLICATION_JSON)
-          .body(existing.response());
-    }
-    ResponseEntity<String> created = call.get();
-    catalog.remember(
-        scope,
-        key,
-        new TsfCatalog.Stored(hash, created.getStatusCode().value(), created.getBody()));
-    return created;
+    // Step 2: One map operation. Two callers with the same key cannot both create a new id.
+    TsfCatalog.Stored stored =
+        catalog.compute(
+            scope,
+            key,
+            (ignored, existing) -> {
+              if (existing != null) {
+                if (!existing.bodyHash().equals(hash)) {
+                  throw new ApiException(
+                      409,
+                      "IDEMPOTENCY_CONFLICT",
+                      "Idempotency-Key was reused with a different body");
+                }
+                return existing;
+              }
+              ResponseEntity<String> created = call.get();
+              return new TsfCatalog.Stored(
+                  hash, created.getStatusCode().value(), created.getBody());
+            });
+    return ResponseEntity.status(stored.status())
+        .contentType(MediaType.APPLICATION_JSON)
+        .body(stored.response());
   }
 
   private TsfCatalog.Order requireOrder(String orderId) {

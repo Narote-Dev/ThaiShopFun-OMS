@@ -1,6 +1,6 @@
 # ThaiShopFun OMS
 
-Multichannel order management for ThaiShopFun. This repository is the application monorepo (`backend/` and `frontend/`). API contracts live in the separate `tsf-oms-contracts` repo (T01C).
+Multichannel order management for ThaiShopFun. This repository is the application monorepo (`backend/` and `frontend/`). API contracts live temporarily in `contracts/` (stand-in for the `tsf-oms-contracts` repo, T01C).
 
 The approved plan is in [`docs/plan/`](docs/plan/plan.md).
 
@@ -37,7 +37,7 @@ curl -s -X POST http://localhost:8090/control/user-token \
   -d '{"login_hint":"owner-active"}'
 ```
 
-`GET /tsf-idp/authorize` with `login_hint` redirects with a PKCE code. Without `login_hint` it returns the user picker. `POST /tsf-idp/token` accepts `authorization_code`, `refresh_token`, and `client_credentials`.
+`GET /tsf-idp/authorize` with `login_hint` redirects with a PKCE code. Without `login_hint` it returns the user picker. `POST /tsf-idp/token` accepts `authorization_code`, `refresh_token`, and `client_credentials`. An authorization-code or refresh response includes a minimal `id_token` (`aud` is `client_id`) as well as the API access token. `POST /control/user-token` accepts optional `ent_ver`, `status` (`ACTIVE`, `GRACE`, or `SUSPENDED`), and `expires_at` for that token only. A `membership.changed` event OMS accepts updates the seed's `ent_ver`, status, and `expires_at`.
 
 | Call | Body |
 |---|---|
@@ -46,10 +46,11 @@ curl -s -X POST http://localhost:8090/control/user-token \
 | `POST /control/events/shuffle` | `{"events":[envelope, envelope]}` — sent in a different order |
 | `POST /control/events/stale` | `{"skew_seconds":301,"event":{...}}` |
 | `POST /control/events/bad-signature` | `{"event":{...}}` — signed with the wrong secret |
-| `POST /control/events/after-reservation-expiry` | `{"reservation_expires_at":"2026-09-29T08:30:00Z","event":{...}}` |
+| `POST /control/events/after-reservation-expiry` | `order.created` only. `{"reservation_expires_at":"...","event":{...}}`. Refuses a future `occurred_at` |
 | `POST /control/checkout/reservations` | reservation request; OMS status and body are returned as-is |
 | `DELETE /control/checkout/reservations/{id}` | release |
-| `GET /control/received-events` | OMS webhooks that passed HMAC and schema |
+| `GET /control/received-events` | OMS webhooks that passed HMAC and schema. Keeps the last 1000 |
+| `POST /control/faults` | `{"method":"GET","path":"/internal/v1/...","status":429,"times":1,"retry_after":30}` or `status` 503. Arms the next N authenticated 4.7 calls |
 
 Section 4.7 (`/internal/v1/...` on the mock) needs a bearer token from `POST /tsf-idp/token` with `grant_type=client_credentials`, `client_id=oms-service`, and `client_secret=dev-oms-service-secret`. OMS calls the mock with the outbox HMAC on `POST /internal/v1/oms-events` and does not send that bearer token.
 
@@ -89,10 +90,10 @@ The process refuses to start if the runtime role is superuser or has `BYPASSRLS`
 
 GitHub Actions runs on pull requests and on `main`.
 
-- Backend: Java 17, `./mvnw verify`. Spotless (`google-java-format` 1.28.0) is bound to `verify`, so a format violation fails the job. The job installs `mock-tsf` first; `MockTsfAcceptanceTest` boots that jar.
+- Backend: Java 17. The job first runs `./mvnw -DskipTests package` with no `mock-tsf` artifact installed, then installs `mock-tsf` from the same commit (`-Dspotless.skip=true`; Spotless for that module is the mock-tsf job), then `./mvnw -Pmock-acceptance verify`. Spotless (`google-java-format` 1.28.0) is bound to backend `verify`. The acceptance tests live in `src/mock-acceptance` and are not on the default classpath, so the image build and `spring-boot:run` do not need the mock jar.
 - Frontend: `npm ci && npm run lint && npm run build && npm test`. `npm run lint` is ESLint with `--max-warnings 0`, so a lint violation fails the job. `npm test` is Vitest.
 - Mock TSF: `./mvnw verify` in `mock-tsf/`.
-- Contracts: `ContractExamplesTest` validates every file in `contracts/examples/` against its schema.
+- Contracts: Spectral lints `contracts/openapi/*.yaml` (resolving `$ref`s). `ContractExamplesTest` validates every file in `contracts/examples/` against its schema and checks that each event example filename matches `event_type`.
 
 ## Staging on Railway
 

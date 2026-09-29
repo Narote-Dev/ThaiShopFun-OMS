@@ -15,7 +15,7 @@ services:
       OMS_MIGRATOR_PASSWORD: ${OMS_MIGRATOR_PASSWORD:-oms_migrator}
       OMS_APP_PASSWORD: ${OMS_APP_PASSWORD:-oms_app}
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U oms -d oms"]
       interval: 5s
@@ -30,7 +30,7 @@ services:
       context: .
       dockerfile: mock-tsf/Dockerfile
     ports:
-      - "8090:8090"
+      - "127.0.0.1:8090:8090"
     environment:
       PORT: "8090"
       MOCK_TSF_ISSUER: http://localhost:8090/tsf-idp

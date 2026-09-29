@@ -24,12 +24,14 @@
   "email": "owner@shop.example",
   "tsf_shop_id": "shop_45021",
   "shop_role": "OWNER",
+  "shop_name": "ร้านตัวอย่าง",
   "membership": { "tier": "PRO", "status": "ACTIVE", "expires_at": "2026-12-31T16:59:59Z" },
   "entitlements": ["oms"],
   "ent_ver": 7
 }
 ```
 - `tsf_shop_id` → `tenant`, `sub` → `app_user`, `shop_role` → role
+- `shop_name` (optional) → `tenant.name`; ถ้าไม่มีให้ใช้ `tsf_shop_id`
 - 1 token = 1 ร้าน เปลี่ยนร้าน = ขอ token ใหม่
 - `ent_ver` ใน token ต่ำกว่าใน DB → `401 ENTITLEMENT_STALE` และไม่เขียนแถว ให้ refresh
 

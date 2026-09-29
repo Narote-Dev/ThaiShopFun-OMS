@@ -8,6 +8,7 @@ import com.thaishopfun.mocktsf.contract.ContractResponses;
 import com.thaishopfun.mocktsf.idp.TokenIssuer;
 import jakarta.servlet.http.HttpServletRequest;
 import java.io.IOException;
+import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -41,6 +42,7 @@ public class ControlController {
   private final SeedData shops;
   private final TokenIssuer tokens;
   private final ReceivedEventStore received;
+  private final FaultSchedule faults;
 
   public ControlController(
       JsonMapper json,
@@ -49,7 +51,8 @@ public class ControlController {
       MockProperties properties,
       SeedData shops,
       TokenIssuer tokens,
-      ReceivedEventStore received) {
+      ReceivedEventStore received,
+      FaultSchedule faults) {
     this.json = json;
     this.responses = responses;
     this.oms = oms;
@@ -57,6 +60,7 @@ public class ControlController {
     this.shops = shops;
     this.tokens = tokens;
     this.received = received;
+    this.faults = faults;
   }
 
   @PostMapping("/user-token")
@@ -67,6 +71,9 @@ public class ControlController {
         shops
             .find(hint)
             .orElseThrow(() -> ApiException.badRequest("UNKNOWN_USER", "login_hint is unknown"));
+    // Step 1: Overrides apply to this token only. The seed stays until a membership event lands.
+    user =
+        shops.override(user, longOrNull(body, "ent_ver"), statusOrNull(body), instantOrNull(body));
     Map<String, Object> token = new LinkedHashMap<>();
     token.put("access_token", tokens.userAccessToken(user));
     token.put("token_type", "Bearer");
@@ -92,7 +99,7 @@ public class ControlController {
     String signature = oms.signInbox(OmsCaller.now(), raw);
     List<Map<String, Object>> sent = new ArrayList<>();
     for (int i = 0; i < times; i++) {
-      sent.add(row(eventId, oms.postEvent(raw, eventId, signature)));
+      sent.add(row(eventId, raw, oms.postEvent(raw, eventId, signature)));
     }
     return report(sent);
   }
@@ -131,7 +138,8 @@ public class ControlController {
     List<Map<String, Object>> sent = new ArrayList<>();
     for (int index : order) {
       byte[] raw = raws.get(index);
-      sent.add(row(ids.get(index), oms.postEvent(raw, ids.get(index), oms.signInbox(now, raw))));
+      sent.add(
+          row(ids.get(index), raw, oms.postEvent(raw, ids.get(index), oms.signInbox(now, raw))));
     }
     return report(sent);
   }
@@ -147,20 +155,29 @@ public class ControlController {
     long timestamp = OmsCaller.now() - skew;
     return report(
         List.of(
-            row(eventId(raw), oms.postEvent(raw, eventId(raw), oms.signInbox(timestamp, raw)))));
+            row(
+                eventId(raw),
+                raw,
+                oms.postEvent(raw, eventId(raw), oms.signInbox(timestamp, raw)))));
   }
 
   @PostMapping("/events/bad-signature")
   public ResponseEntity<String> badSignature(HttpServletRequest request) throws IOException {
     byte[] raw = canonical(eventOf(readObject(request)));
     String signature = Hmacs.header("invalid-signature-secret", OmsCaller.now(), raw);
-    return report(List.of(row(eventId(raw), oms.postEvent(raw, eventId(raw), signature))));
+    return report(List.of(row(eventId(raw), raw, oms.postEvent(raw, eventId(raw), signature))));
   }
 
   @PostMapping("/events/after-reservation-expiry")
   public ResponseEntity<String> afterExpiry(HttpServletRequest request) throws IOException {
-    // Step 1: Stamp occurred_at strictly after the reservation expiry. Do not sleep for the TTL.
+    // Step 1: Only order.created. Stamp occurred_at one second after expiry when it is not already
+    // later, and refuse a stamp that would be in the future.
     JsonNode body = readObject(request);
+    ObjectNode event = eventOf(body);
+    if (!"order.created".equals(event.path("event_type").asString())) {
+      throw ApiException.badRequest(
+          "BAD_REQUEST", "after-reservation-expiry applies only to order.created");
+    }
     String expiryText = text(body, "reservation_expires_at");
     Instant expiry;
     try {
@@ -168,7 +185,6 @@ public class ControlController {
     } catch (Exception ex) {
       throw ApiException.badRequest("BAD_REQUEST", "reservation_expires_at is invalid");
     }
-    ObjectNode event = eventOf(body);
     Instant occurred;
     try {
       occurred =
@@ -178,10 +194,50 @@ public class ControlController {
     } catch (Exception ex) {
       throw ApiException.badRequest("BAD_REQUEST", "occurred_at is invalid");
     }
-    if (!occurred.isAfter(expiry)) {
-      event.put("occurred_at", expiry.plusSeconds(1).toString());
+    Instant stamped = occurred.isAfter(expiry) ? occurred : expiry.plusSeconds(1);
+    if (stamped.isAfter(Instant.now())) {
+      throw ApiException.badRequest("BAD_REQUEST", "occurred_at would be in the future");
     }
+    event.put("occurred_at", stamped.toString());
     return report(List.of(deliver(event, OmsCaller.now(), true)));
+  }
+
+  @PostMapping("/faults")
+  public ResponseEntity<String> faults(HttpServletRequest request) throws IOException {
+    // Step 1: Arm the next N authenticated calls to one 4.7 path. 429 requires Retry-After.
+    JsonNode body = readObject(request);
+    String method = text(body, "method").toUpperCase(java.util.Locale.ROOT);
+    String path = text(body, "path");
+    if (!path.startsWith("/internal/") || path.startsWith("/internal/v1/oms-events")) {
+      throw ApiException.badRequest("BAD_REQUEST", "path must be a section 4.7 route");
+    }
+    int status = body.path("status").asInt(0);
+    if (status != 429 && status != 503) {
+      throw ApiException.badRequest("BAD_REQUEST", "status must be 429 or 503");
+    }
+    int times = body.path("times").asInt(0);
+    if (times < 1 || times > 20) {
+      throw ApiException.badRequest("BAD_REQUEST", "times must be between 1 and 20");
+    }
+    Integer retryAfter = null;
+    if (status == 429) {
+      if (!body.path("retry_after").isIntegralNumber() || body.path("retry_after").asInt() < 1) {
+        throw ApiException.badRequest("BAD_REQUEST", "retry_after is required for 429");
+      }
+      retryAfter = body.path("retry_after").asInt();
+    }
+    faults.arm(method, path, status, times, retryAfter);
+    Map<String, Object> armed = new LinkedHashMap<>();
+    armed.put("method", method);
+    armed.put("path", path);
+    armed.put("status", status);
+    armed.put("times", times);
+    if (retryAfter != null) {
+      armed.put("retry_after", retryAfter);
+    }
+    return ResponseEntity.ok()
+        .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+        .body(json.writeValueAsString(armed));
   }
 
   @PostMapping("/checkout/reservations")
@@ -218,7 +274,7 @@ public class ControlController {
         validSignature
             ? oms.signInbox(timestamp, raw)
             : Hmacs.header("invalid-signature-secret", timestamp, raw);
-    return row(eventId, oms.postEvent(raw, eventId, signature));
+    return row(eventId, raw, oms.postEvent(raw, eventId, signature));
   }
 
   private byte[] canonical(ObjectNode event) {
@@ -249,7 +305,10 @@ public class ControlController {
     return responses.outbound(down ? 502 : 200, "delivery-report", body);
   }
 
-  private static Map<String, Object> row(String eventId, OmsCaller.CallResult result) {
+  private Map<String, Object> row(String eventId, byte[] raw, OmsCaller.CallResult result) {
+    if (result.status() >= 200 && result.status() < 300) {
+      shops.noteAccepted(json.readTree(raw));
+    }
     Map<String, Object> row = new LinkedHashMap<>();
     row.put("event_id", eventId);
     row.put("http_status", result.status());
@@ -279,7 +338,55 @@ public class ControlController {
       return responses.validator().restErrors("reservation-conflict", result.body()).isEmpty()
           || responses.validator().restErrors("error", result.body()).isEmpty();
     }
-    return true;
+    if (result.status() >= 400) {
+      return responses.validator().restErrors("error", result.body()).isEmpty();
+    }
+    return false;
+  }
+
+  private static Long longOrNull(JsonNode body, String field) {
+    JsonNode value = body.get(field);
+    if (value == null || value.isNull()) {
+      return null;
+    }
+    if (!value.isIntegralNumber()) {
+      throw ApiException.badRequest("BAD_REQUEST", field + " is invalid");
+    }
+    BigInteger number = value.bigIntegerValue();
+    if (number.signum() < 0 || number.bitLength() > 63) {
+      throw ApiException.badRequest("BAD_REQUEST", field + " is invalid");
+    }
+    return number.longValue();
+  }
+
+  private static String statusOrNull(JsonNode body) {
+    JsonNode value = body.get("status");
+    if (value == null || value.isNull()) {
+      return null;
+    }
+    if (!value.isString()) {
+      throw ApiException.badRequest("BAD_REQUEST", "status is invalid");
+    }
+    String status = value.asString();
+    if (!status.equals("ACTIVE") && !status.equals("GRACE") && !status.equals("SUSPENDED")) {
+      throw ApiException.badRequest("BAD_REQUEST", "status is invalid");
+    }
+    return status;
+  }
+
+  private static Instant instantOrNull(JsonNode body) {
+    JsonNode value = body.get("expires_at");
+    if (value == null || value.isNull()) {
+      return null;
+    }
+    if (!value.isString()) {
+      throw ApiException.badRequest("BAD_REQUEST", "expires_at is invalid");
+    }
+    try {
+      return Instant.parse(value.asString());
+    } catch (RuntimeException ex) {
+      throw ApiException.badRequest("BAD_REQUEST", "expires_at is invalid");
+    }
   }
 
   private JsonNode readObject(HttpServletRequest request) throws IOException {

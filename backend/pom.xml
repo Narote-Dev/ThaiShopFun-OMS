@@ -59,13 +59,6 @@
       <artifactId>spring-boot-starter-test</artifactId>
       <scope>test</scope>
     </dependency>
-    <!-- Change: T05 acceptance boots the mock IdP in-process. Install mock-tsf before verify. -->
-    <dependency>
-      <groupId>com.thaishopfun</groupId>
-      <artifactId>mock-tsf</artifactId>
-      <version>0.0.1-SNAPSHOT</version>
-      <scope>test</scope>
-    </dependency>
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-webmvc-test</artifactId>
@@ -107,6 +100,11 @@
         <version>3.10.3</version>
         <configuration>
           <java>
+            <includes>
+              <include>src/main/java/**/*.java</include>
+              <include>src/test/java/**/*.java</include>
+              <include>src/mock-acceptance/java/**/*.java</include>
+            </includes>
             <googleJavaFormat>
               <version>1.28.0</version>
             </googleJavaFormat>
@@ -127,4 +125,44 @@
       </plugin>
     </plugins>
   </build>
+
+  <!-- Change: mock-tsf is not on the default classpath. -DskipTests package and the
+       backend image build must succeed on a fresh clone. CI enables this profile
+       after installing mock-tsf from the same commit. -->
+  <profiles>
+    <profile>
+      <id>mock-acceptance</id>
+      <dependencies>
+        <dependency>
+          <groupId>com.thaishopfun</groupId>
+          <artifactId>mock-tsf</artifactId>
+          <version>0.0.1-SNAPSHOT</version>
+          <scope>test</scope>
+        </dependency>
+      </dependencies>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>org.codehaus.mojo</groupId>
+            <artifactId>build-helper-maven-plugin</artifactId>
+            <version>3.6.0</version>
+            <executions>
+              <execution>
+                <id>add-mock-acceptance-tests</id>
+                <phase>generate-test-sources</phase>
+                <goals>
+                  <goal>add-test-source</goal>
+                </goals>
+                <configuration>
+                  <sources>
+                    <source>src/mock-acceptance/java</source>
+                  </sources>
+                </configuration>
+              </execution>
+            </executions>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+  </profiles>
 </project>

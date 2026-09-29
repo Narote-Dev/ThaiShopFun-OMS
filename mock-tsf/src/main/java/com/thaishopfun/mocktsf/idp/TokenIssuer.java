@@ -60,6 +60,26 @@ public class TokenIssuer {
     return sign(claims);
   }
 
+  /**
+   * Minimal OIDC {@code id_token}. {@code aud} is the OIDC client id. The API access token stays
+   * the section 4.1 JWT.
+   */
+  public String idToken(SeedData.ShopUser user, String clientId, String nonce) {
+    Instant now = Instant.now();
+    Instant exp = now.plusSeconds(properties.getAccessTokenSeconds());
+    JWTClaimsSet.Builder claims =
+        new JWTClaimsSet.Builder()
+            .issuer(properties.getIssuer())
+            .audience(clientId)
+            .subject(user.userId())
+            .issueTime(Date.from(now))
+            .expirationTime(Date.from(exp));
+    if (nonce != null && !nonce.isBlank()) {
+      claims.claim("nonce", nonce);
+    }
+    return sign(claims.build());
+  }
+
   /** Token this mock presents to OMS {@code /internal/**}. */
   public String tsfServiceToken() {
     return serviceToken(properties.getTsfClientId(), OMS_INTERNAL_AUDIENCE);
