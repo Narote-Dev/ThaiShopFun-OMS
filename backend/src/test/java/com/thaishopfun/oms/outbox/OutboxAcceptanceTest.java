@@ -55,6 +55,7 @@ import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
 import org.springframework.http.HttpHeaders;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.transaction.IllegalTransactionStateException;
@@ -68,6 +69,7 @@ import tools.jackson.databind.json.JsonMapper;
  * Acceptance coverage for T14. The webhook receiver dedupes by {@code event_id}. Lease evidence is
  * the {@code outbox lease} log line.
  */
+@ActiveProfiles("test")
 @SpringBootTest(
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
     properties = {

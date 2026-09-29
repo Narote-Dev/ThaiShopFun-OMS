@@ -27,11 +27,6 @@ server:
     include-message: never
     include-stacktrace: never
     include-binding-errors: never
-  task:
-    scheduling:
-      # Inbox uses its own thread. This pool is for other publishers, including outbox.
-      pool:
-        size: 2
 
 management:
   endpoints:
