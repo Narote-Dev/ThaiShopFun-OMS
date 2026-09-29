@@ -12,7 +12,8 @@ public class MockProperties {
   private String omsBaseUrl = "http://localhost:8080";
   private String inboxHmacSecret = "dev-inbox-hmac-secret";
   private String outboxHmacSecret = "dev-outbox-webhook-secret-local-only";
-  private String publicClientId = "oms";
+  private String publicClientId = "oms-web";
+  private String corsAllowedOrigins = "http://localhost:5173,http://127.0.0.1:5173";
   private String tsfClientId = "tsf";
   private String tsfClientSecret = "dev-tsf-client-secret";
   private String omsServiceClientId = "oms-service";
@@ -57,6 +58,18 @@ public class MockProperties {
 
   public void setPublicClientId(String publicClientId) {
     this.publicClientId = publicClientId;
+  }
+
+  public String getCorsAllowedOrigins() {
+    return corsAllowedOrigins;
+  }
+
+  public void setCorsAllowedOrigins(String corsAllowedOrigins) {
+    this.corsAllowedOrigins = corsAllowedOrigins;
+  }
+
+  public List<String> corsOrigins() {
+    return split(corsAllowedOrigins);
   }
 
   public String getTsfClientId() {

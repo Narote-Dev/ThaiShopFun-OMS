@@ -37,7 +37,9 @@ curl -s -X POST http://localhost:8090/control/user-token \
   -d '{"login_hint":"owner-active"}'
 ```
 
-`GET /tsf-idp/authorize` with `login_hint` redirects with a PKCE code. Without `login_hint` it returns the user picker. `POST /tsf-idp/token` accepts `authorization_code`, `refresh_token`, and `client_credentials`. An authorization-code or refresh response includes a minimal `id_token` (`aud` is `client_id`) as well as the API access token. `POST /control/user-token` accepts optional `ent_ver`, `status` (`ACTIVE`, `GRACE`, or `SUSPENDED`), and `expires_at` for that token only. A `membership.changed` event OMS accepts updates the seed's `ent_ver`, status, and `expires_at`.
+`GET /tsf-idp/authorize` with `login_hint` redirects with a PKCE code. Without `login_hint` it returns the user picker. The public client id is `oms-web` (no secret). `POST /tsf-idp/token` accepts `authorization_code`, `refresh_token`, and `client_credentials`. An authorization-code or refresh response includes a minimal `id_token` (`aud=oms-web`, `typ=JWT`) and an API access token (`aud=oms`, header `typ=at+jwt`). OMS rejects the `id_token` as a bearer. `POST /control/user-token` accepts optional `ent_ver`, `status` (`ACTIVE`, `GRACE`, or `SUSPENDED`), and `expires_at` for that token only. A `membership.changed` event OMS accepts with 202 updates the seed's `ent_ver`, status, and `expires_at`. A 200 duplicate does not.
+
+T04 should call the IdP at `http://localhost:8090/tsf-idp` with `client_id=oms-web`. The mock allows CORS preflight from `http://localhost:5173` and `http://127.0.0.1:5173` on `/tsf-idp/**` (`MOCK_CORS_ORIGINS` overrides that list). Vite also proxies `/tsf-idp` to the mock for same-origin debugging. Do not use that proxy as the OIDC authority: discovery `issuer` is `http://localhost:8090/tsf-idp`, and oidc-client-ts rejects a mismatch.
 
 | Call | Body |
 |---|---|

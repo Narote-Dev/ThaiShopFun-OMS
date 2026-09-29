@@ -25,6 +25,7 @@ public class TokenIssuer {
   public static final String USER_AUDIENCE = "oms";
   public static final String OMS_INTERNAL_AUDIENCE = "oms-internal";
   public static final String TSF_INTERNAL_AUDIENCE = "tsf-internal";
+  public static final String ACCESS_TOKEN_TYPE = "at+jwt";
 
   private final MockProperties properties;
   private final SigningKeys keys;
@@ -57,7 +58,7 @@ public class TokenIssuer {
             .claim("entitlements", user.entitlements())
             .claim("ent_ver", user.entVer())
             .build();
-    return sign(claims);
+    return sign(claims, true);
   }
 
   /**
@@ -77,7 +78,7 @@ public class TokenIssuer {
     if (nonce != null && !nonce.isBlank()) {
       claims.claim("nonce", nonce);
     }
-    return sign(claims.build());
+    return sign(claims.build(), false);
   }
 
   /** Token this mock presents to OMS {@code /internal/**}. */
@@ -104,16 +105,17 @@ public class TokenIssuer {
             .claim("azp", clientId)
             .claim("client_id", clientId)
             .build();
-    return sign(claims);
+    return sign(claims, true);
   }
 
-  private String sign(JWTClaimsSet claims) {
+  private String sign(JWTClaimsSet claims, boolean accessToken) {
     try {
+      // Step 1: Access tokens use typ at+jwt. The id_token stays a plain JWT so OMS can reject it.
       SignedJWT jwt =
           new SignedJWT(
               new JWSHeader.Builder(JWSAlgorithm.RS256)
                   .keyID(keys.key().getKeyID())
-                  .type(JOSEObjectType.JWT)
+                  .type(accessToken ? new JOSEObjectType(ACCESS_TOKEN_TYPE) : JOSEObjectType.JWT)
                   .build(),
               claims);
       jwt.sign(new RSASSASigner(keys.key()));

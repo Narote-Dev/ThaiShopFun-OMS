@@ -167,8 +167,32 @@ public final class AuthTestSupport {
       claims.claim("azp", userId);
     }
     JwtClaimsSet built = claims.build();
-    JwsHeader header = JwsHeader.with(SignatureAlgorithm.RS256).keyId(RSA_KEY.getKeyID()).build();
+    JwsHeader header =
+        JwsHeader.with(SignatureAlgorithm.RS256).keyId(RSA_KEY.getKeyID()).type("at+jwt").build();
     return ENCODER.encode(JwtEncoderParameters.from(header, built)).getTokenValue();
+  }
+
+  /** Same issuer and {@code aud=oms} as an access token, but {@code typ} is {@code JWT}. */
+  public static String idToken(String userId, String shopId) throws Exception {
+    JWTClaimsSet claims =
+        new JWTClaimsSet.Builder()
+            .issuer(ISSUER)
+            .audience("oms")
+            .subject(userId)
+            .expirationTime(Date.from(Instant.now().plusSeconds(600)))
+            .issueTime(Date.from(Instant.now().minusSeconds(30)))
+            .jwtID("id-token")
+            .claim("nonce", "n-1")
+            .build();
+    SignedJWT jwt =
+        new SignedJWT(
+            new com.nimbusds.jose.JWSHeader.Builder(JWSAlgorithm.RS256)
+                .keyID(RSA_KEY.getKeyID())
+                .type(com.nimbusds.jose.JOSEObjectType.JWT)
+                .build(),
+            claims);
+    jwt.sign(new RSASSASigner(RSA_KEY.toRSAPrivateKey()));
+    return jwt.serialize();
   }
 
   static String invalidRoleToken(String userId, String shopId) {
@@ -199,7 +223,8 @@ public final class AuthTestSupport {
             .claim("ent_ver", 1)
             .claim("azp", "tsf-checkout")
             .build();
-    JwsHeader header = JwsHeader.with(SignatureAlgorithm.RS256).keyId(RSA_KEY.getKeyID()).build();
+    JwsHeader header =
+        JwsHeader.with(SignatureAlgorithm.RS256).keyId(RSA_KEY.getKeyID()).type("at+jwt").build();
     return ENCODER.encode(JwtEncoderParameters.from(header, claims)).getTokenValue();
   }
 
@@ -247,7 +272,11 @@ public final class AuthTestSupport {
       throws Exception {
     SignedJWT jwt =
         new SignedJWT(
-            new com.nimbusds.jose.JWSHeader.Builder(algorithm).keyID(keyId).build(), claims);
+            new com.nimbusds.jose.JWSHeader.Builder(algorithm)
+                .keyID(keyId)
+                .type(new com.nimbusds.jose.JOSEObjectType("at+jwt"))
+                .build(),
+            claims);
     if (rsa) {
       jwt.sign(new RSASSASigner(RSA_KEY.toRSAPrivateKey()));
     }

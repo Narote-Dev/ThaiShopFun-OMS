@@ -27,7 +27,10 @@ mock:
   inbox-hmac-secret: ${MOCK_INBOX_HMAC_SECRET:dev-inbox-hmac-secret}
   # OMS → TSF. Must match oms.outbox.webhook-secret. At least 32 bytes.
   outbox-hmac-secret: ${MOCK_OUTBOX_HMAC_SECRET:dev-outbox-webhook-secret-local-only}
-  public-client-id: oms
+  # OIDC public client. id_token aud is this value. The API access token aud stays oms.
+  public-client-id: oms-web
+  # Browser origins allowed to call /tsf-idp directly. Comma-separated.
+  cors-allowed-origins: ${MOCK_CORS_ORIGINS:http://localhost:5173,http://127.0.0.1:5173}
   # Service client TSF uses when it calls OMS (/internal/**, aud=oms-internal).
   tsf-client-id: tsf
   tsf-client-secret: ${MOCK_TSF_CLIENT_SECRET:dev-tsf-client-secret}

@@ -499,6 +499,13 @@ class AuthApiTest {
   }
 
   @Test
+  void idTokenUsedAsBearerIs401() throws Exception {
+    HttpResult result = get("/api/v1/me", AuthTestSupport.idToken(user(), shop()));
+    assertThat(result.status()).isEqualTo(401);
+    assertThat(JSON.readTree(result.body()).path("error").asString()).isEqualTo("UNAUTHORIZED");
+  }
+
+  @Test
   void badTokensAreGeneric401() throws Exception {
     String shopId = shop();
     String userId = user();

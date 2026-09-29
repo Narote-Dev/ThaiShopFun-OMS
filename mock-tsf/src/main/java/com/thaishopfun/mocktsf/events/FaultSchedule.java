@@ -25,7 +25,11 @@ public class FaultSchedule {
             method.toUpperCase(Locale.ROOT), path, status, new AtomicInteger(times), retryAfter));
   }
 
-  /** One matching call. A spent arm stays in the queue and never matches again. */
+  public int pending() {
+    return arms.size();
+  }
+
+  /** One matching call. The arm leaves the queue when its count hits zero. */
   public Armed consume(String method, String path) {
     String normalized = method == null ? "" : method.toUpperCase(Locale.ROOT);
     for (Arm arm : arms) {
@@ -33,9 +37,14 @@ public class FaultSchedule {
         continue;
       }
       int left = arm.remaining.getAndUpdate(count -> count > 0 ? count - 1 : 0);
-      if (left > 0) {
-        return new Armed(arm.status, arm.retryAfter);
+      if (left <= 0) {
+        arms.remove(arm);
+        continue;
       }
+      if (left == 1) {
+        arms.remove(arm);
+      }
+      return new Armed(arm.status, arm.retryAfter);
     }
     return null;
   }

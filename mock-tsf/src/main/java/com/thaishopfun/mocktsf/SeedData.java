@@ -40,6 +40,8 @@ public class SeedData {
     Instant past = now.minus(1, ChronoUnit.DAYS).truncatedTo(ChronoUnit.SECONDS);
     users.add(user("owner-active", "shop_active", "Active Shop", "ACTIVE", future));
     users.add(user("owner-grace", "shop_grace", "Grace Shop", "GRACE", grace));
+    // Change: dedicated shop so membership tests do not move shop_active.
+    users.add(user("owner-bump", "shop_bump", "Bump Shop", "ACTIVE", future));
     users.add(user("owner-suspended", "shop_suspended", "Suspended Shop", "SUSPENDED", future));
     users.add(user("owner-expired", "shop_expired", "Expired Shop", "ACTIVE", past));
   }
@@ -80,7 +82,7 @@ public class SeedData {
   }
 
   /**
-   * A membership event OMS accepted (2xx). A lower {@code ent_ver} does not move the seed
+   * A membership event OMS first-accepted with 202. A lower {@code ent_ver} does not move the seed
    * backwards. Unknown shops stay unknown.
    */
   public void noteAccepted(JsonNode event) {

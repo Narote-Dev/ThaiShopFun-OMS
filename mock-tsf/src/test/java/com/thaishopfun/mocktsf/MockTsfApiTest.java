@@ -5,7 +5,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.nimbusds.jose.crypto.RSASSAVerifier;
 import com.nimbusds.jwt.SignedJWT;
 import com.sun.net.httpserver.HttpServer;
+import com.thaishopfun.mocktsf.contract.ContractValidator;
+import com.thaishopfun.mocktsf.events.FaultSchedule;
 import com.thaishopfun.mocktsf.idp.IdpController;
+import com.thaishopfun.mocktsf.idp.TokenIssuer;
 import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.URLDecoder;
@@ -57,6 +60,7 @@ class MockTsfApiTest {
 
   @Autowired private OmsEndpoint endpoint;
   @Autowired private SigningKeys keys;
+  @Autowired private FaultSchedule faults;
 
   private final HttpClient http = HttpClient.newBuilder().build();
 
@@ -118,7 +122,7 @@ class MockTsfApiTest {
     String verifier = "pkce-verifier-0123456789-abcdefghijklmnopqrstuvwxyz";
     String challenge = IdpController.s256(verifier);
     String authorize =
-        "/tsf-idp/authorize?response_type=code&client_id=oms"
+        "/tsf-idp/authorize?response_type=code&client_id=oms-web"
             + "&redirect_uri="
             + enc("http://127.0.0.1/callback")
             + "&code_challenge="
@@ -134,7 +138,7 @@ class MockTsfApiTest {
                 .header("Content-Type", "application/x-www-form-urlencoded")
                 .POST(
                     HttpRequest.BodyPublishers.ofString(
-                        "grant_type=authorization_code&client_id=oms&redirect_uri="
+                        "grant_type=authorization_code&client_id=oms-web&redirect_uri="
                             + enc("http://127.0.0.1/callback")
                             + "&code="
                             + enc(code)
@@ -146,7 +150,9 @@ class MockTsfApiTest {
     JsonNode body = JSON.readTree(token.body());
     SignedJWT jwt = SignedJWT.parse(body.path("access_token").asString());
     assertThat(jwt.verify(new RSASSAVerifier(keys.publicKey()))).isTrue();
+    assertThat(jwt.getHeader().getType().toString()).isEqualTo(TokenIssuer.ACCESS_TOKEN_TYPE);
     assertThat(jwt.getJWTClaimsSet().getAudience()).containsExactly("oms");
+    assertThat(userClaimErrors(body.path("access_token").asString())).isEmpty();
     assertThat(jwt.getJWTClaimsSet().getStringClaim("tsf_shop_id")).isEqualTo("shop_grace");
     assertThat(jwt.getJWTClaimsSet().getStringClaim("shop_role")).isEqualTo("OWNER");
     assertThat(jwt.getJWTClaimsSet().getJSONObjectClaim("membership").get("status"))
@@ -157,7 +163,8 @@ class MockTsfApiTest {
     assertThat(idToken.verify(new RSASSAVerifier(keys.publicKey()))).isTrue();
     assertThat(idToken.getJWTClaimsSet().getIssuer()).isEqualTo("http://localhost:8090/tsf-idp");
     assertThat(idToken.getJWTClaimsSet().getSubject()).isEqualTo("owner-grace");
-    assertThat(idToken.getJWTClaimsSet().getAudience()).containsExactly("oms");
+    assertThat(idToken.getHeader().getType().toString()).isEqualTo("JWT");
+    assertThat(idToken.getJWTClaimsSet().getAudience()).containsExactly("oms-web");
     assertThat(idToken.getJWTClaimsSet().getStringClaim("nonce")).isEqualTo("n-1");
     assertThat(idToken.getJWTClaimsSet().getExpirationTime()).isNotNull();
     assertThat(idToken.getJWTClaimsSet().getIssueTime()).isNotNull();
@@ -337,6 +344,35 @@ class MockTsfApiTest {
     HttpResponse<String> down = get("/internal/v1/orders/TSF-240929-000123", service);
     assertThat(down.statusCode()).isEqualTo(503);
     assertThat(down.headers().firstValue("Retry-After")).isEmpty();
+    assertThat(faults.pending()).isZero();
+  }
+
+  @Test
+  void tokenPreflightAllowsTheViteOriginOnly() throws Exception {
+    HttpResponse<String> allowed =
+        http.send(
+            request("/tsf-idp/token")
+                .method("OPTIONS", HttpRequest.BodyPublishers.noBody())
+                .header("Origin", "http://localhost:5173")
+                .header("Access-Control-Request-Method", "POST")
+                .header("Access-Control-Request-Headers", "content-type")
+                .build(),
+            HttpResponse.BodyHandlers.ofString());
+    assertThat(allowed.statusCode()).isEqualTo(200);
+    assertThat(allowed.headers().firstValue("Access-Control-Allow-Origin").orElse(""))
+        .isEqualTo("http://localhost:5173");
+    assertThat(allowed.headers().firstValue("Access-Control-Allow-Methods").orElse(""))
+        .contains("POST");
+
+    HttpResponse<String> blocked =
+        http.send(
+            request("/tsf-idp/token")
+                .method("OPTIONS", HttpRequest.BodyPublishers.noBody())
+                .header("Origin", "https://evil.example")
+                .header("Access-Control-Request-Method", "POST")
+                .build(),
+            HttpResponse.BodyHandlers.ofString());
+    assertThat(blocked.headers().firstValue("Access-Control-Allow-Origin")).isEmpty();
   }
 
   @Test
@@ -434,6 +470,87 @@ class MockTsfApiTest {
     }
   }
 
+  @Test
+  void emptyAndHtmlCheckoutBodiesStayInTheReport() throws Exception {
+    java.util.concurrent.atomic.AtomicInteger calls =
+        new java.util.concurrent.atomic.AtomicInteger();
+    com.sun.net.httpserver.HttpServer bad =
+        com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress("127.0.0.1", 0), 0);
+    bad.createContext(
+        "/",
+        exchange -> {
+          exchange.getRequestBody().readAllBytes();
+          int n = calls.incrementAndGet();
+          if (n == 1) {
+            exchange.sendResponseHeaders(201, -1);
+            exchange.close();
+            return;
+          }
+          byte[] html = "<html>not json</html>".getBytes(StandardCharsets.UTF_8);
+          exchange.getResponseHeaders().set("Content-Type", "text/html");
+          exchange.sendResponseHeaders(n == 2 ? 409 : 500, html.length);
+          exchange.getResponseBody().write(html);
+          exchange.close();
+        });
+    bad.start();
+    try {
+      endpoint.setBaseUrl("http://127.0.0.1:" + bad.getAddress().getPort());
+      String request =
+          "{\"checkout_id\":\"chk_1\",\"tsf_shop_id\":\"shop_45021\",\"items\":[{\"listing_sku_id\":\"tsf_sku_7781\",\"qty\":1}]}";
+      for (int expected : new int[] {201, 409, 500}) {
+        HttpResponse<String> response = post("/control/checkout/reservations", request);
+        assertThat(response.statusCode()).as(response.body()).isEqualTo(200);
+        JsonNode result = JSON.readTree(response.body());
+        assertThat(result.path("oms_status").asInt()).isEqualTo(expected);
+        assertThat(result.path("response_schema_valid").asBoolean()).isFalse();
+        if (expected == 201) {
+          assertThat(result.path("oms_body").asString()).isEmpty();
+        } else {
+          assertThat(result.path("oms_body").asString()).contains("<html>");
+        }
+      }
+    } finally {
+      bad.stop(0);
+      endpoint.setBaseUrl("http://127.0.0.1:" + oms.getAddress().getPort());
+    }
+  }
+
+  @Test
+  void duplicateMembershipDoesNotRewriteTheSeed() throws Exception {
+    java.util.concurrent.atomic.AtomicInteger calls =
+        new java.util.concurrent.atomic.AtomicInteger();
+    com.sun.net.httpserver.HttpServer scripted =
+        com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress("127.0.0.1", 0), 0);
+    scripted.createContext(
+        "/",
+        exchange -> {
+          exchange.getRequestBody().readAllBytes();
+          int status = calls.incrementAndGet() == 1 ? 202 : 200;
+          byte[] body = "{}".getBytes(StandardCharsets.UTF_8);
+          exchange.sendResponseHeaders(status, body.length);
+          exchange.getResponseBody().write(body);
+          exchange.close();
+        });
+    scripted.start();
+    try {
+      endpoint.setBaseUrl("http://127.0.0.1:" + scripted.getAddress().getPort());
+      String first =
+          "{\"event\":{\"event_id\":\"evt-seed-1\",\"event_type\":\"membership.changed\",\"schema_version\":1,\"occurred_at\":\"2026-09-29T08:15:02Z\",\"tsf_shop_id\":\"shop_bump\",\"aggregate_id\":\"shop_bump\",\"data\":{\"tier\":\"PRO\",\"status\":\"ACTIVE\",\"ent_ver\":5,\"expires_at\":\"2027-01-01T00:00:00Z\"}}}";
+      assertThat(post("/control/events/send", first).statusCode()).isEqualTo(200);
+      String later =
+          "{\"event\":{\"event_id\":\"evt-seed-2\",\"event_type\":\"membership.changed\",\"schema_version\":1,\"occurred_at\":\"2026-09-29T08:15:03Z\",\"tsf_shop_id\":\"shop_bump\",\"aggregate_id\":\"shop_bump\",\"data\":{\"tier\":\"PRO\",\"status\":\"SUSPENDED\",\"ent_ver\":9,\"expires_at\":\"2027-01-01T00:00:00Z\"}}}";
+      assertThat(post("/control/events/send", later).statusCode()).isEqualTo(200);
+      HttpResponse<String> token = post("/control/user-token", "{\"login_hint\":\"owner-bump\"}");
+      SignedJWT jwt = SignedJWT.parse(JSON.readTree(token.body()).path("access_token").asString());
+      assertThat(jwt.getJWTClaimsSet().getLongClaim("ent_ver")).isEqualTo(5L);
+      assertThat(jwt.getJWTClaimsSet().getJSONObjectClaim("membership").get("status"))
+          .isEqualTo("ACTIVE");
+    } finally {
+      scripted.stop(0);
+      endpoint.setBaseUrl("http://127.0.0.1:" + oms.getAddress().getPort());
+    }
+  }
+
   private String serviceToken(String clientId, String secret) throws Exception {
     HttpResponse<String> token =
         http.send(
@@ -505,6 +622,21 @@ class MockTsfApiTest {
 
   private static byte[] bytes(String body) {
     return body.getBytes(StandardCharsets.UTF_8);
+  }
+
+  private static List<String> userClaimErrors(String accessToken) throws Exception {
+    SignedJWT jwt = SignedJWT.parse(accessToken);
+    String payload = jwt.getPayload().toString();
+    List<String> errors = ContractValidator.classpath().restErrors("user-claims", payload);
+    String withoutEmail = payload.replaceFirst(",\"email\":\"[^\"]*\"", "");
+    if (!withoutEmail.equals(payload)) {
+      errors.addAll(ContractValidator.classpath().restErrors("user-claims", withoutEmail));
+    }
+    String withoutJti = payload.replaceFirst(",\"jti\":\"[^\"]*\"", "");
+    if (ContractValidator.classpath().restErrors("user-claims", withoutJti).isEmpty()) {
+      errors.add("jti must be required");
+    }
+    return errors;
   }
 
   private static String orderCreated(String eventId, String occurredAt) {

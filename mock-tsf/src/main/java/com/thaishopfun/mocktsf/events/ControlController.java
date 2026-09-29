@@ -306,7 +306,8 @@ public class ControlController {
   }
 
   private Map<String, Object> row(String eventId, byte[] raw, OmsCaller.CallResult result) {
-    if (result.status() >= 200 && result.status() < 300) {
+    // Step 1: Only the first accept moves the seed. A 200 duplicate must not rewrite it.
+    if (result.status() == 202) {
       shops.noteAccepted(json.readTree(raw));
     }
     Map<String, Object> row = new LinkedHashMap<>();
@@ -319,7 +320,7 @@ public class ControlController {
   private Map<String, Object> checkoutResult(OmsCaller.CallResult result) {
     Map<String, Object> body = new LinkedHashMap<>();
     body.put("oms_status", result.status());
-    body.put("oms_body", result.body());
+    body.put("oms_body", snippet(result.body()));
     body.put("response_schema_valid", schemaOk(result));
     return body;
   }
@@ -328,20 +329,33 @@ public class ControlController {
     if (!result.reached()) {
       return false;
     }
-    if (result.status() == 204) {
-      return result.body() == null || result.body().isBlank();
+    String body = result.body() == null ? "" : result.body();
+    try {
+      // Step 1: A non-JSON body is invalid. Do not fail the checkout report itself.
+      if (result.status() == 204) {
+        return body.isBlank();
+      }
+      if (result.status() == 201) {
+        return responses.validator().restErrors("reservation-created", body).isEmpty();
+      }
+      if (result.status() == 409) {
+        return responses.validator().restErrors("reservation-conflict", body).isEmpty()
+            || responses.validator().restErrors("error", body).isEmpty();
+      }
+      if (result.status() >= 400) {
+        return responses.validator().restErrors("error", body).isEmpty();
+      }
+      return false;
+    } catch (RuntimeException ex) {
+      return false;
     }
-    if (result.status() == 201) {
-      return responses.validator().restErrors("reservation-created", result.body()).isEmpty();
+  }
+
+  private static String snippet(String raw) {
+    if (raw == null || raw.isEmpty()) {
+      return "";
     }
-    if (result.status() == 409) {
-      return responses.validator().restErrors("reservation-conflict", result.body()).isEmpty()
-          || responses.validator().restErrors("error", result.body()).isEmpty();
-    }
-    if (result.status() >= 400) {
-      return responses.validator().restErrors("error", result.body()).isEmpty();
-    }
-    return false;
+    return raw.length() <= 240 ? raw : raw.substring(0, 240);
   }
 
   private static Long longOrNull(JsonNode body, String field) {

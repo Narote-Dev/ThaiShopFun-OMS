@@ -7,6 +7,8 @@ export default defineConfig({
     // Localhost only. #/admin/outbox calls /api through this proxy. No nginx change.
     proxy: {
       '/api': 'http://127.0.0.1:8080',
+      // Same-origin debugging only. T04 must not use this as the OIDC authority.
+      '/tsf-idp': 'http://127.0.0.1:8090',
     },
   },
   test: {

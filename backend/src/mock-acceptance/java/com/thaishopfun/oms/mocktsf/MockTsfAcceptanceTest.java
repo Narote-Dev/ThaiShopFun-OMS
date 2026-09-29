@@ -274,7 +274,7 @@ class MockTsfAcceptanceTest {
     String challenge = IdpController.s256(verifier);
     String redirect = "http://127.0.0.1/callback";
     String authorize =
-        "/tsf-idp/authorize?response_type=code&client_id=oms&redirect_uri="
+        "/tsf-idp/authorize?response_type=code&client_id=oms-web&redirect_uri="
             + URLEncoder.encode(redirect, StandardCharsets.UTF_8)
             + "&code_challenge="
             + URLEncoder.encode(challenge, StandardCharsets.UTF_8)
@@ -291,7 +291,7 @@ class MockTsfAcceptanceTest {
             .header("Content-Type", "application/x-www-form-urlencoded")
             .POST(
                 HttpRequest.BodyPublishers.ofString(
-                    "grant_type=authorization_code&client_id=oms&redirect_uri="
+                    "grant_type=authorization_code&client_id=oms-web&redirect_uri="
                         + URLEncoder.encode(redirect, StandardCharsets.UTF_8)
                         + "&code="
                         + URLEncoder.encode(code, StandardCharsets.UTF_8)
@@ -303,6 +303,8 @@ class MockTsfAcceptanceTest {
     assertThat(token.statusCode()).isEqualTo(200);
     JsonNode issued = JSON.readTree(token.body());
     assertThat(issued.path("id_token").asString()).isNotBlank();
+    HttpResult asIdToken = call("GET", "/api/v1/me", issued.path("id_token").asString(), null);
+    assertThat(asIdToken.status()).isEqualTo(401);
     HttpResult me = call("GET", "/api/v1/me", issued.path("access_token").asString(), null);
     assertThat(me.status()).isEqualTo(200);
     assertThat(JSON.readTree(me.body()).path("tenant").path("tsf_shop_id").asString())
@@ -311,15 +313,16 @@ class MockTsfAcceptanceTest {
 
   @Test
   void membershipBumpsSeedSoTheNextTokenIsNotStale() throws Exception {
-    JsonNode first = me("owner-active");
+    JsonNode first = me("owner-bump");
+    assertThat(first.path("tenant").path("tsf_shop_id").asString()).isEqualTo("shop_bump");
     assertThat(first.path("entitlement").path("ent_ver").asLong()).isEqualTo(1);
-    ObjectNode event = membership(UUID.randomUUID().toString(), "shop_active", 2);
+    ObjectNode event = membership(UUID.randomUUID().toString(), "shop_bump", 2);
     ObjectNode body = JSON.createObjectNode();
     body.set("event", event);
     JsonNode report = control("/control/events/send", body);
     assertThat(report.path("sent").get(0).path("http_status").asInt()).isEqualTo(202);
     assertThat(worker.processAvailable(20)).isEqualTo(1);
-    JsonNode again = me("owner-active");
+    JsonNode again = me("owner-bump");
     assertThat(again.path("entitlement").path("ent_ver").asLong()).isEqualTo(2);
     assertThat(again.path("entitlement").path("status").asString()).isEqualTo("ACTIVE");
   }

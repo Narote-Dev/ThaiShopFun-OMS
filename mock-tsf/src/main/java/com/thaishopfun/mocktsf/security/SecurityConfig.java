@@ -19,11 +19,16 @@ import org.springframework.security.config.annotation.web.configurers.AbstractHt
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
+import org.springframework.security.oauth2.jwt.JwtIssuerValidator;
+import org.springframework.security.oauth2.jwt.JwtTypeValidator;
 import org.springframework.security.oauth2.jwt.JwtValidators;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import org.springframework.security.oauth2.server.resource.web.authentication.BearerTokenAuthenticationFilter;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.CorsConfigurationSource;
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 @Configuration
@@ -32,7 +37,13 @@ public class SecurityConfig {
   @Bean
   JwtDecoder jwtDecoder(MockProperties properties, SigningKeys keys) {
     NimbusJwtDecoder decoder = NimbusJwtDecoder.withPublicKey(keys.publicKey()).build();
-    decoder.setJwtValidator(JwtValidators.createDefaultWithIssuer(properties.getIssuer()));
+    // Step 1: Supply typ ourselves. createDefaultWithIssuer adds JwtTypeValidator.jwt(), which
+    // rejects the RFC 9068 at+jwt access tokens this mock issues.
+    decoder.setJwtValidator(
+        JwtValidators.createDefaultWithValidators(
+            List.of(
+                new JwtIssuerValidator(properties.getIssuer()),
+                new JwtTypeValidator(TokenIssuer.ACCESS_TOKEN_TYPE))));
     return decoder;
   }
 
@@ -73,11 +84,24 @@ public class SecurityConfig {
 
   @Bean
   @Order(3)
-  SecurityFilterChain open(HttpSecurity http) throws Exception {
+  SecurityFilterChain open(HttpSecurity http, MockProperties properties) throws Exception {
     stateless(http);
     http.securityMatcher("/**");
+    // Step 1: Browser login from the Vite origin calls the IdP directly. Other routes stay closed.
+    http.cors(cors -> cors.configurationSource(idpCors(properties)));
     http.authorizeHttpRequests(auth -> auth.anyRequest().permitAll());
     return http.build();
+  }
+
+  private static CorsConfigurationSource idpCors(MockProperties properties) {
+    CorsConfiguration config = new CorsConfiguration();
+    config.setAllowedOrigins(properties.corsOrigins());
+    config.setAllowedMethods(List.of("GET", "POST", "OPTIONS"));
+    config.setAllowedHeaders(List.of("Content-Type", "Authorization"));
+    config.setMaxAge(3600L);
+    UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+    source.registerCorsConfiguration("/tsf-idp/**", config);
+    return source;
   }
 
   private static void stateless(HttpSecurity http) throws Exception {

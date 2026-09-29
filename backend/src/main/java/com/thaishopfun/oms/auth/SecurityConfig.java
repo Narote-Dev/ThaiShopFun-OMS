@@ -8,13 +8,14 @@ import org.springframework.core.annotation.Order;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
-import org.springframework.security.oauth2.core.DelegatingOAuth2TokenValidator;
 import org.springframework.security.oauth2.core.OAuth2Error;
 import org.springframework.security.oauth2.core.OAuth2TokenValidator;
 import org.springframework.security.oauth2.core.OAuth2TokenValidatorResult;
 import org.springframework.security.oauth2.jose.jws.SignatureAlgorithm;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
+import org.springframework.security.oauth2.jwt.JwtIssuerValidator;
+import org.springframework.security.oauth2.jwt.JwtTypeValidator;
 import org.springframework.security.oauth2.jwt.JwtValidators;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.oauth2.server.resource.web.authentication.BearerTokenAuthenticationFilter;
@@ -37,11 +38,15 @@ public class SecurityConfig {
         NimbusJwtDecoder.withJwkSetUri(properties.getJwksUri())
             .jwsAlgorithm(SignatureAlgorithm.RS256)
             .build();
-    OAuth2TokenValidator<Jwt> validator =
-        new DelegatingOAuth2TokenValidator<>(
-            JwtValidators.createDefaultWithIssuer(properties.getIssuer()),
-            new AudienceValidator(properties.getAudience(), properties.getInternalAudience()));
-    decoder.setJwtValidator(validator);
+    // Step 1: Require typ=at+jwt. createDefaultWithIssuer also inserts JwtTypeValidator.jwt(),
+    // which rejects that header, so issuer and type are passed in explicitly.
+    decoder.setJwtValidator(
+        JwtValidators.createDefaultWithValidators(
+            List.of(
+                new JwtIssuerValidator(properties.getIssuer()),
+                new JwtTypeValidator("at+jwt"),
+                new AudienceValidator(
+                    properties.getAudience(), properties.getInternalAudience()))));
     return decoder;
   }
 
