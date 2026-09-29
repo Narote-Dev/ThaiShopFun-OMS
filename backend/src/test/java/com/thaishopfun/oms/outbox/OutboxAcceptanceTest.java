@@ -76,6 +76,7 @@ import tools.jackson.databind.json.JsonMapper;
       "oms.outbox.publisher-enabled=false",
       "oms.outbox.webhook-secret=" + OutboxAcceptanceTest.SECRET,
       "oms.outbox.jitter-ratio=0.2",
+      "oms.inbox.worker-enabled=false",
       "spring.datasource.hikari.maximum-pool-size=12"
     })
 @Import(OutboxAcceptanceTest.CrashHookConfig.class)

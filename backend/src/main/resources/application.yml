@@ -72,5 +72,6 @@ oms:
     batch-size: 20
     lease: 5m
     http-timeout: 10s
+    jitter-ratio: 0.2
     destination-url: ${TSF_OMS_EVENTS_URL:}
     webhook-secret: ${OMS_OUTBOX_WEBHOOK_SECRET:}
