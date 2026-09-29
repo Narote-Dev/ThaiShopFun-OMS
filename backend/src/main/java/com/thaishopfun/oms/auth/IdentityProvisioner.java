@@ -73,7 +73,7 @@ public class IdentityProvisioner {
       userId = upsertUser(claims);
     }
     if (membershipId == null || newer) {
-      membershipId = provisionMembership(tenantId, userId, claims.role());
+      membershipId = provisionMembership(tenantId, userId, claims.role(), claims.entVer());
     }
     return new Provisioned(tenantId, userId, membershipId);
   }
@@ -109,14 +109,15 @@ public class IdentityProvisioner {
         });
   }
 
-  private UUID provisionMembership(UUID tenantId, UUID userId, String role) {
+  private UUID provisionMembership(UUID tenantId, UUID userId, String role, long entVer) {
     return oneId(
         (connection) -> {
           PreparedStatement statement =
-              connection.prepareStatement("SELECT provision_membership(?, ?, ?)");
+              connection.prepareStatement("SELECT provision_membership(?, ?, ?, ?)");
           statement.setObject(1, tenantId);
           statement.setObject(2, userId);
           statement.setString(3, role);
+          statement.setLong(4, entVer);
           return statement;
         });
   }

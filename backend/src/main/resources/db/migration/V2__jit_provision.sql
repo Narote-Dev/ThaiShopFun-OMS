@@ -32,6 +32,7 @@ BEGIN
     p_display_name := NULL;
   END IF;
 
+  -- The second key keeps this lock off the tenant lock namespace.
   PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext(p_tsf_user_id), 2);
 
   INSERT INTO public.app_user AS u (id, tsf_user_id, email, display_name, last_login_at)
@@ -92,14 +93,34 @@ BEGIN
     RAISE EXCEPTION 'ent_ver is invalid';
   END IF;
 
+  -- Shop lock first, then the tenant-id lock that provision_membership uses.
+  -- The opposite order deadlocks with a concurrent membership update.
   PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext(p_tsf_shop_id), 1);
+  SELECT t.id
+    INTO v_id
+  FROM public.tenant AS t
+  WHERE t.tsf_shop_id = p_tsf_shop_id;
+  IF v_id IS NOT NULL THEN
+    PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext(v_id::text), 4);
+  END IF;
 
   INSERT INTO public.tenant AS t (
-    id, name, tsf_shop_id, membership_tier, entitlement_status, entitlement_expires_at, ent_ver
+    id,
+    name,
+    tsf_shop_id,
+    membership_tier,
+    entitlement_status,
+    entitlement_expires_at,
+    ent_ver
   )
   VALUES (
-    pg_catalog.gen_random_uuid(), p_name, p_tsf_shop_id, p_tier, p_entitlement_status,
-    p_entitlement_expires_at, p_ent_ver
+    pg_catalog.gen_random_uuid(),
+    p_name,
+    p_tsf_shop_id,
+    p_tier,
+    p_entitlement_status,
+    p_entitlement_expires_at,
+    p_ent_ver
   )
   ON CONFLICT (tsf_shop_id) DO UPDATE
     SET name = EXCLUDED.name,
@@ -110,8 +131,10 @@ BEGIN
     WHERE t.ent_ver <= EXCLUDED.ent_ver
   RETURNING id INTO v_id;
 
+  -- The WHERE clause skips the update when the token is older, so RETURNING is empty.
   IF v_id IS NULL THEN
-    SELECT existing.id INTO v_id
+    SELECT existing.id
+      INTO v_id
     FROM public.tenant AS existing
     WHERE existing.tsf_shop_id = p_tsf_shop_id;
   END IF;
@@ -119,15 +142,20 @@ BEGIN
   IF v_id IS NULL THEN
     RAISE EXCEPTION 'provision_tenant did not resolve an id';
   END IF;
+
+  PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext(v_id::text), 4);
   RETURN v_id;
 END
 $fn$;
 
--- Step 3: Link the user to the shop. A REVOKED membership is never reactivated.
+-- Step 3: Link the user to the shop. Role changes only when the stored ent_ver is
+-- not newer than the caller's token, under the same tenant advisory lock as
+-- provision_tenant. A REVOKED row is never reactivated.
 CREATE FUNCTION provision_membership(
   p_tenant_id uuid,
   p_user_id uuid,
-  p_role text
+  p_role text,
+  p_ent_ver bigint
 )
 RETURNS uuid
 LANGUAGE plpgsql
@@ -137,6 +165,7 @@ SET search_path = pg_catalog, pg_temp
 AS $fn$
 DECLARE
   v_id uuid;
+  v_stored bigint;
 BEGIN
   IF p_tenant_id IS NULL OR p_user_id IS NULL THEN
     RAISE EXCEPTION 'tenant_id and user_id are required';
@@ -144,19 +173,34 @@ BEGIN
   IF p_role IS NULL OR p_role NOT IN ('OWNER', 'ADMIN', 'STAFF') THEN
     RAISE EXCEPTION 'shop_role is invalid';
   END IF;
+  IF p_ent_ver IS NULL OR p_ent_ver < 0 THEN
+    RAISE EXCEPTION 'ent_ver is invalid';
+  END IF;
 
-  PERFORM pg_catalog.pg_advisory_xact_lock(
-    pg_catalog.hashtext(p_tenant_id::text || ':' || p_user_id::text), 3);
+  -- Same lock provision_tenant holds, so ent_ver cannot move between the check and the role write.
+  PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext(p_tenant_id::text), 4);
 
-  INSERT INTO public.tenant_membership AS m (id, tenant_id, user_id, role, status)
-  VALUES (pg_catalog.gen_random_uuid(), p_tenant_id, p_user_id, p_role, 'ACTIVE')
-  ON CONFLICT (tenant_id, user_id) DO UPDATE
-    SET role = EXCLUDED.role
-    WHERE m.status <> 'REVOKED'
-  RETURNING id INTO v_id;
+  SELECT t.ent_ver
+    INTO v_stored
+  FROM public.tenant AS t
+  WHERE t.id = p_tenant_id;
+
+  IF v_stored IS NULL THEN
+    RAISE EXCEPTION 'provision_membership tenant is missing';
+  END IF;
+
+  IF v_stored <= p_ent_ver THEN
+    INSERT INTO public.tenant_membership AS m (id, tenant_id, user_id, role, status)
+    VALUES (pg_catalog.gen_random_uuid(), p_tenant_id, p_user_id, p_role, 'ACTIVE')
+    ON CONFLICT (tenant_id, user_id) DO UPDATE
+      SET role = EXCLUDED.role
+      WHERE m.status <> 'REVOKED'
+    RETURNING id INTO v_id;
+  END IF;
 
   IF v_id IS NULL THEN
-    SELECT existing.id INTO v_id
+    SELECT existing.id
+      INTO v_id
     FROM public.tenant_membership AS existing
     WHERE existing.tenant_id = p_tenant_id
       AND existing.user_id = p_user_id;
@@ -169,7 +213,8 @@ BEGIN
 END
 $fn$;
 
--- Step 4: Read-only lookup. Ids, ent_ver, and membership status only.
+-- Step 4: Read-only lookup. Ids, ent_ver, and membership status only. No email or shop payload.
+-- The app calls this before any upsert so a stale token does not write.
 CREATE FUNCTION lookup_login(p_tsf_shop_id text, p_tsf_user_id text)
 RETURNS TABLE (
   tenant_id uuid,
@@ -193,26 +238,27 @@ AS $fn$
   WHERE t.tsf_shop_id = p_tsf_shop_id
 $fn$;
 
+-- Step 5: oms_maint owns the definers. Tables stay owned by oms_migrator (V1).
 ALTER FUNCTION upsert_app_user(text, text, text) OWNER TO oms_maint;
 ALTER FUNCTION provision_tenant(text, text, text, text, timestamptz, bigint) OWNER TO oms_maint;
-ALTER FUNCTION provision_membership(uuid, uuid, text) OWNER TO oms_maint;
+ALTER FUNCTION provision_membership(uuid, uuid, text, bigint) OWNER TO oms_maint;
 ALTER FUNCTION lookup_login(text, text) OWNER TO oms_maint;
 
 REVOKE ALL ON FUNCTION upsert_app_user(text, text, text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION provision_tenant(text, text, text, text, timestamptz, bigint) FROM PUBLIC;
-REVOKE ALL ON FUNCTION provision_membership(uuid, uuid, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION provision_membership(uuid, uuid, text, bigint) FROM PUBLIC;
 REVOKE ALL ON FUNCTION lookup_login(text, text) FROM PUBLIC;
 
 GRANT EXECUTE ON FUNCTION upsert_app_user(text, text, text) TO oms_app;
 GRANT EXECUTE ON FUNCTION provision_tenant(text, text, text, text, timestamptz, bigint) TO oms_app;
-GRANT EXECUTE ON FUNCTION provision_membership(uuid, uuid, text) TO oms_app;
+GRANT EXECUTE ON FUNCTION provision_membership(uuid, uuid, text, bigint) TO oms_app;
 GRANT EXECUTE ON FUNCTION lookup_login(text, text) TO oms_app;
 
 COMMENT ON FUNCTION upsert_app_user(text, text, text) IS
   'JIT user upsert. Returns id only. Owned by oms_maint.';
 COMMENT ON FUNCTION provision_tenant(text, text, text, text, timestamptz, bigint) IS
   'JIT tenant upsert by tsf_shop_id. Does not downgrade ent_ver. Returns id only.';
-COMMENT ON FUNCTION provision_membership(uuid, uuid, text) IS
-  'JIT membership upsert. Does not reactivate REVOKED. Returns id only.';
+COMMENT ON FUNCTION provision_membership(uuid, uuid, text, bigint) IS
+  'JIT membership upsert. Updates role only when tenant.ent_ver <= p_ent_ver. Does not reactivate REVOKED. Returns id only.';
 COMMENT ON FUNCTION lookup_login(text, text) IS
   'Read-only. Returns ids, ent_ver, and membership status. No other columns.';

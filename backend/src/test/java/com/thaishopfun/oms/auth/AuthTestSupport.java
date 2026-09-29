@@ -95,7 +95,14 @@ final class AuthTestSupport {
   static String userToken(
       String userId, String shopId, String status, Instant membershipExpiry, long entVer) {
     return token(
-        userId, shopId, status, membershipExpiry, entVer, "oms", Instant.now().plusSeconds(600), List.of("oms"));
+        userId,
+        shopId,
+        status,
+        membershipExpiry,
+        entVer,
+        "oms",
+        Instant.now().plusSeconds(600),
+        List.of("oms"));
   }
 
   static String token(
@@ -108,7 +115,15 @@ final class AuthTestSupport {
       Instant expiresAt,
       List<String> entitlements) {
     return token(
-        userId, shopId, status, membershipExpiry, entVer, audience, expiresAt, entitlements, "OWNER");
+        userId,
+        shopId,
+        status,
+        membershipExpiry,
+        entVer,
+        audience,
+        expiresAt,
+        entitlements,
+        "OWNER");
   }
 
   static String token(
@@ -145,7 +160,91 @@ final class AuthTestSupport {
     if ("oms-internal".equals(audience)) {
       claims.claim("azp", userId);
     }
+    JwtClaimsSet built = claims.build();
     JwsHeader header = JwsHeader.with(SignatureAlgorithm.RS256).keyId(RSA_KEY.getKeyID()).build();
-    return ENCODER.encode(JwtEncoderParameters.from(header, claims.build())).getTokenValue();
+    return ENCODER.encode(JwtEncoderParameters.from(header, built)).getTokenValue();
+  }
+
+  static String invalidRoleToken(String userId, String shopId) {
+    return token(
+        userId,
+        shopId,
+        "ACTIVE",
+        Instant.now().plusSeconds(86400),
+        1,
+        "oms",
+        Instant.now().plusSeconds(600),
+        List.of("oms"),
+        "NOPE");
+  }
+
+  static String dualAudienceToken(String userId, String shopId) {
+    JwtClaimsSet claims =
+        JwtClaimsSet.builder()
+            .issuer(ISSUER)
+            .audience(List.of("oms", "oms-internal"))
+            .subject(userId)
+            .issuedAt(Instant.now().minusSeconds(30))
+            .expiresAt(Instant.now().plusSeconds(600))
+            .claim("tsf_shop_id", shopId)
+            .claim("shop_role", "OWNER")
+            .claim("membership", Map.of("tier", "PRO", "status", "ACTIVE"))
+            .claim("entitlements", List.of("oms"))
+            .claim("ent_ver", 1)
+            .claim("azp", "tsf-checkout")
+            .build();
+    JwsHeader header = JwsHeader.with(SignatureAlgorithm.RS256).keyId(RSA_KEY.getKeyID()).build();
+    return ENCODER.encode(JwtEncoderParameters.from(header, claims)).getTokenValue();
+  }
+
+  static String wrongIssuerToken(String userId, String shopId) throws Exception {
+    return sign(
+        attackClaims("https://evil.example", shopId, userId),
+        JWSAlgorithm.RS256,
+        RSA_KEY.getKeyID(),
+        true);
+  }
+
+  static String noneAlgorithmToken(String userId, String shopId) throws Exception {
+    return new PlainJWT(attackClaims(ISSUER, shopId, userId)).serialize();
+  }
+
+  static String hs256WithPublicKeyToken(String userId, String shopId) throws Exception {
+    SignedJWT jwt =
+        new SignedJWT(
+            new com.nimbusds.jose.JWSHeader.Builder(JWSAlgorithm.HS256)
+                .keyID(RSA_KEY.getKeyID())
+                .build(),
+            attackClaims(ISSUER, shopId, userId));
+    jwt.sign(new MACSigner(RSA_KEY.toRSAPublicKey().getEncoded()));
+    return jwt.serialize();
+  }
+
+  static String unknownKeyIdToken(String userId, String shopId) throws Exception {
+    return sign(attackClaims(ISSUER, shopId, userId), JWSAlgorithm.RS256, "missing-key", true);
+  }
+
+  private static JWTClaimsSet attackClaims(String issuer, String shopId, String userId) {
+    return new JWTClaimsSet.Builder()
+        .issuer(issuer)
+        .audience("oms")
+        .subject(userId)
+        .expirationTime(Date.from(Instant.now().plusSeconds(600)))
+        .issueTime(Date.from(Instant.now().minusSeconds(30)))
+        .claim("tsf_shop_id", shopId)
+        .claim("shop_role", "OWNER")
+        .claim("ent_ver", 1)
+        .build();
+  }
+
+  private static String sign(JWTClaimsSet claims, JWSAlgorithm algorithm, String keyId, boolean rsa)
+      throws Exception {
+    SignedJWT jwt =
+        new SignedJWT(
+            new com.nimbusds.jose.JWSHeader.Builder(algorithm).keyID(keyId).build(), claims);
+    if (rsa) {
+      jwt.sign(new RSASSASigner(RSA_KEY.toRSAPrivateKey()));
+    }
+    return jwt.serialize();
   }
 }

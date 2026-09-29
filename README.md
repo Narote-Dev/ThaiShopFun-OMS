@@ -34,13 +34,15 @@ The backend waits up to 60 seconds for Postgres to accept connections. Flyway V1
 | `.github/workflows/ci.yml` | Backend `./mvnw verify` and frontend `npm ci && npm run lint && npm run build && npm test`. |
 | `.railway/railway.ts` | Staging infrastructure. Dockerfiles are in each service directory. |
 
-Flyway V1 is `backend/src/main/resources/db/migration/V1__foundation_rls.sql`. It creates `tenant`, `app_user`, `tenant_membership`, `audit_log`, `idempotency_key`, `inbox_event`, and `outbox_event`, plus `oms_migrator`, `oms_app` (`NOBYPASSRLS`), and `oms_maint`. Tenant tables use `ENABLE` and `FORCE ROW LEVEL SECURITY`. V2 is `V2__jit_provision.sql`: `SECURITY DEFINER` functions `upsert_app_user`, `provision_tenant`, and `provision_membership`, owned by `oms_maint`, executable only by `oms_app`. Do not edit a version that has already been merged. The next migration is V3.
+Flyway V1 is `backend/src/main/resources/db/migration/V1__foundation_rls.sql`. It creates `tenant`, `app_user`, `tenant_membership`, `audit_log`, `idempotency_key`, `inbox_event`, and `outbox_event`, plus `oms_migrator`, `oms_app` (`NOBYPASSRLS`), and `oms_maint`. Tenant tables use `ENABLE` and `FORCE ROW LEVEL SECURITY`. V2 is `V2__jit_provision.sql`: `SECURITY DEFINER` functions `upsert_app_user`, `provision_tenant`, `provision_membership`, and read-only `lookup_login`, owned by `oms_maint`, executable only by `oms_app`. Do not edit a version that has already been merged. The next migration is V3 (catalog, T06).
+
+The process refuses to start if the runtime role is superuser or has `BYPASSRLS`, unless `oms.security.allow-rls-bypass=true` is set explicitly. That flag is off by default and is not set for local Docker. If `DATABASE_USERNAME` / `DATABASE_PASSWORD` are set, they win over the user embedded in a `postgresql://` URL. Flyway still uses that URL user.
 
 ## Working rules
 
 - Cursor opens feature PRs on `feat/Txx-*`.
 - Codex does the second-pass review of every Cursor PR, and does isolated work (tests, adapters, migrations, contracts) on `codex/Txx-*`.
-- Only Codex writes Flyway migrations. A Cursor task that needs a new column asks for a migration task first.
+- Flyway migrations may be written by Cursor or Codex, one migration per PR, never edit a merged version. Codex reviews every migration PR.
 - One task per PR. A change past about 600 lines, not counting tests, is split.
 - Narote approves every merge to `main`. Branch protection is green CI, Codex review, and Narote's approval.
 - Do not commit secrets, production passwords, or real PII.

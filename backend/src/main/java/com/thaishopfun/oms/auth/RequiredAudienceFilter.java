@@ -39,6 +39,7 @@ final class RequiredAudienceFilter extends OncePerRequestFilter {
   protected void doFilterInternal(
       HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
       throws ServletException, IOException {
+    // Step 1: A user token on /internal, or the reverse, is an authentication failure.
     Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
     if (!(authentication instanceof JwtAuthenticationToken jwtAuth)) {
       errors.unauthorized(request, response, null);
@@ -51,6 +52,7 @@ final class RequiredAudienceFilter extends OncePerRequestFilter {
       return;
     }
     if (allowedClientIds != null) {
+      // Step 2: Internal callers are an allowlist, not "any client that can sign".
       String clientId = jwtAuth.getToken().getClaimAsString("azp");
       if (clientId == null || clientId.isBlank()) {
         clientId = jwtAuth.getToken().getClaimAsString("client_id");

@@ -20,7 +20,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.postgresql.util.PSQLException;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.junit.jupiter.Container;
@@ -47,12 +46,17 @@ class FlywayV1RlsTest {
           "inbox_event",
           "outbox_event");
 
-  @Container @ServiceConnection
-  static PostgreSQLContainer postgres = new PostgreSQLContainer("postgres:16-alpine");
+  @Container
+  static PostgreSQLContainer postgres =
+      new PostgreSQLContainer("postgres:16-alpine").withInitScript("db/test-oms-app-login.sql");
 
   @DynamicPropertySource
-  static void flywayUsesContainerSuperuser(DynamicPropertyRegistry registry) {
-    // Change: application.yml points Flyway at the local `oms` login. This database has `test`.
+  static void runtimeIsOmsApp(DynamicPropertyRegistry registry) {
+    // Change: the runtime pool is oms_app. Flyway stays on the container superuser.
+    registry.add("spring.datasource.url", postgres::getJdbcUrl);
+    registry.add("spring.datasource.username", () -> "oms_app");
+    registry.add("spring.datasource.password", () -> APP_PASSWORD);
+    registry.add("spring.flyway.url", postgres::getJdbcUrl);
     registry.add("spring.flyway.user", postgres::getUsername);
     registry.add("spring.flyway.password", postgres::getPassword);
   }

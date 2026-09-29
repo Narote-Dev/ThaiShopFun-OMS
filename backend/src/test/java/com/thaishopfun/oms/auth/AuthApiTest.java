@@ -90,16 +90,20 @@ class AuthApiTest {
                     + "JOIN pg_namespace n ON n.oid = p.pronamespace "
                     + "JOIN pg_roles r ON r.oid = p.proowner "
                     + "WHERE n.nspname = 'public' AND p.proname IN "
-                    + "('upsert_app_user', 'provision_tenant', 'provision_membership')")) {
+                    + "('upsert_app_user', 'provision_tenant', 'provision_membership', 'lookup_login')")) {
       int seen = 0;
       while (rows.next()) {
         seen++;
         assertThat(rows.getBoolean("prosecdef")).isTrue();
         assertThat(rows.getString("owner")).isEqualTo("oms_maint");
-        assertThat(rows.getString("result")).isEqualTo("uuid");
+        if ("lookup_login".equals(rows.getString("proname"))) {
+          assertThat(rows.getString("result")).contains("ent_ver").contains("membership_status");
+        } else {
+          assertThat(rows.getString("result")).isEqualTo("uuid");
+        }
         assertThat(rows.getString("config")).contains("search_path=pg_catalog, pg_temp");
       }
-      assertThat(seen).isEqualTo(3);
+      assertThat(seen).isEqualTo(4);
     }
 
     try (Connection admin = AuthTestSupport.admin();
@@ -112,7 +116,9 @@ class AuthApiTest {
                     + "has_function_privilege('public', 'public.upsert_app_user(text, text, text)', 'EXECUTE') AS public_user_fn, "
                     + "has_function_privilege('oms_app', 'public.provision_tenant(text, text, text, text, timestamptz, bigint)', 'EXECUTE') AS app_tenant_fn, "
                     + "has_function_privilege('oms_migrator', 'public.provision_tenant(text, text, text, text, timestamptz, bigint)', 'EXECUTE') AS mig_tenant_fn, "
-                    + "has_function_privilege('oms_app', 'public.provision_membership(uuid, uuid, text)', 'EXECUTE') AS app_member_fn, "
+                    + "has_function_privilege('oms_app', 'public.provision_membership(uuid, uuid, text, bigint)', 'EXECUTE') AS app_member_fn, "
+                    + "has_function_privilege('oms_app', 'public.lookup_login(text, text)', 'EXECUTE') AS app_lookup, "
+                    + "has_function_privilege('public', 'public.lookup_login(text, text)', 'EXECUTE') AS public_lookup, "
                     + "has_table_privilege('oms_app', 'public.app_user', 'SELECT') AS user_read, "
                     + "has_table_privilege('oms_app', 'public.app_user', 'INSERT') AS user_write")) {
       assertThat(privileges.next()).isTrue();
@@ -122,6 +128,8 @@ class AuthApiTest {
       assertThat(privileges.getBoolean("app_tenant_fn")).isTrue();
       assertThat(privileges.getBoolean("mig_tenant_fn")).isFalse();
       assertThat(privileges.getBoolean("app_member_fn")).isTrue();
+      assertThat(privileges.getBoolean("app_lookup")).isTrue();
+      assertThat(privileges.getBoolean("public_lookup")).isFalse();
       assertThat(privileges.getBoolean("user_read")).isFalse();
       assertThat(privileges.getBoolean("user_write")).isFalse();
     }
@@ -260,13 +268,26 @@ class AuthApiTest {
     String userId = user();
     HttpResult first =
         get("/api/v1/me", AuthTestSupport.userToken(userId, shopId, "ACTIVE", future(), 2));
+    assertThat(first.status()).isEqualTo(200);
+    String userMark =
+        text(
+            "SELECT last_login_at::text || ctid::text FROM app_user WHERE tsf_user_id = ?", userId);
+    String tenantMark = text("SELECT ctid::text FROM tenant WHERE tsf_shop_id = ?", shopId);
     HttpResult stale =
         get("/api/v1/me", AuthTestSupport.userToken(userId, shopId, "SUSPENDED", future(), 1));
 
-    assertThat(first.status()).isEqualTo(200);
     assertError(stale, 401, "ENTITLEMENT_STALE");
+    assertThat(JSON.readTree(stale.body()).path("message").asString())
+        .isEqualTo(TenantContextFilter.UNAUTHORIZED_MESSAGE);
     assertThat(count("SELECT ent_ver FROM tenant WHERE tsf_shop_id = ?", shopId)).isEqualTo(2);
     assertThat(count("SELECT count(*) FROM audit_log WHERE actor_id = ?", userId)).isEqualTo(1);
+    assertThat(
+            text(
+                "SELECT last_login_at::text || ctid::text FROM app_user WHERE tsf_user_id = ?",
+                userId))
+        .isEqualTo(userMark);
+    assertThat(text("SELECT ctid::text FROM tenant WHERE tsf_shop_id = ?", shopId))
+        .isEqualTo(tenantMark);
   }
 
   @Test
@@ -338,7 +359,201 @@ class AuthApiTest {
                 shopId,
                 userId))
         .isEqualTo(1);
-    assertThat(count("SELECT count(*) FROM audit_log WHERE actor_id = ?", userId)).isEqualTo(10);
+    // Each request that still sees a missing row provisions and audits. A request that loses the
+    // race takes the read path and does not add another audit row.
+    assertThat(count("SELECT count(*) FROM audit_log WHERE actor_id = ?", userId))
+        .isBetween(1L, 10L);
+  }
+
+  @Test
+  void repeatedRequestsWithTheSameTokenDoNotWrite() throws Exception {
+    String shopId = shop();
+    String userId = user();
+    String token = AuthTestSupport.userToken(userId, shopId, "ACTIVE", future(), 1);
+    assertThat(get("/api/v1/me", token).status()).isEqualTo(200);
+    String userMark =
+        text(
+            "SELECT last_login_at::text || ctid::text FROM app_user WHERE tsf_user_id = ?", userId);
+    String tenantMark = text("SELECT ctid::text FROM tenant WHERE tsf_shop_id = ?", shopId);
+    String memberMark =
+        text(
+            "SELECT m.ctid::text FROM tenant_membership m JOIN app_user u ON u.id = m.user_id WHERE u.tsf_user_id = ?",
+            userId);
+
+    for (int i = 0; i < 100; i++) {
+      assertThat(get("/api/v1/me", token).status()).as("repeat %s", i).isEqualTo(200);
+    }
+
+    assertThat(count("SELECT count(*) FROM audit_log WHERE actor_id = ?", userId)).isEqualTo(1);
+    assertThat(
+            text(
+                "SELECT last_login_at::text || ctid::text FROM app_user WHERE tsf_user_id = ?",
+                userId))
+        .isEqualTo(userMark);
+    assertThat(text("SELECT ctid::text FROM tenant WHERE tsf_shop_id = ?", shopId))
+        .isEqualTo(tenantMark);
+    assertThat(
+            text(
+                "SELECT m.ctid::text FROM tenant_membership m JOIN app_user u ON u.id = m.user_id WHERE u.tsf_user_id = ?",
+                userId))
+        .isEqualTo(memberMark);
+  }
+
+  @Test
+  void revokedMembershipIs403AndIsNotReactivated() throws Exception {
+    String shopId = shop();
+    String userId = user();
+    String token = AuthTestSupport.userToken(userId, shopId, "ACTIVE", future(), 1);
+    assertThat(get("/api/v1/me", token).status()).isEqualTo(200);
+    try (Connection admin = AuthTestSupport.admin();
+        var statement =
+            admin.prepareStatement(
+                "UPDATE tenant_membership m SET status = 'REVOKED' FROM app_user u "
+                    + "WHERE m.user_id = u.id AND u.tsf_user_id = ?")) {
+      statement.setString(1, userId);
+      assertThat(statement.executeUpdate()).isEqualTo(1);
+    }
+
+    HttpResult denied = get("/api/v1/me", token);
+    assertError(denied, 403, "MEMBERSHIP_REVOKED");
+    assertThat(
+            text(
+                "SELECT m.status FROM tenant_membership m JOIN app_user u ON u.id = m.user_id WHERE u.tsf_user_id = ?",
+                userId))
+        .isEqualTo("REVOKED");
+    assertThat(count("SELECT count(*) FROM audit_log WHERE actor_id = ?", userId)).isEqualTo(1);
+
+    try (Connection app =
+        java.sql.DriverManager.getConnection(
+            AuthTestSupport.POSTGRES.getJdbcUrl(), "oms_app", AuthTestSupport.APP_PASSWORD)) {
+      UUID tenantId =
+          UUID.fromString(text("SELECT id::text FROM tenant WHERE tsf_shop_id = ?", shopId));
+      UUID appUserId =
+          UUID.fromString(text("SELECT id::text FROM app_user WHERE tsf_user_id = ?", userId));
+      try (var statement = app.prepareStatement("SELECT provision_membership(?, ?, 'STAFF', 99)")) {
+        statement.setObject(1, tenantId);
+        statement.setObject(2, appUserId);
+        try (ResultSet rows = statement.executeQuery()) {
+          assertThat(rows.next()).isTrue();
+        }
+      }
+    }
+    assertThat(
+            text(
+                "SELECT m.status FROM tenant_membership m JOIN app_user u ON u.id = m.user_id WHERE u.tsf_user_id = ?",
+                userId))
+        .isEqualTo("REVOKED");
+  }
+
+  @Test
+  void staleEntVerDoesNotOverwriteRole() throws Exception {
+    String shopId = shop();
+    String userId = user();
+    assertThat(
+            get("/api/v1/me", AuthTestSupport.userToken(userId, shopId, "ACTIVE", future(), 5))
+                .status())
+        .isEqualTo(200);
+    UUID tenantId =
+        UUID.fromString(text("SELECT id::text FROM tenant WHERE tsf_shop_id = ?", shopId));
+    UUID appUserId =
+        UUID.fromString(text("SELECT id::text FROM app_user WHERE tsf_user_id = ?", userId));
+
+    try (Connection app =
+        java.sql.DriverManager.getConnection(
+            AuthTestSupport.POSTGRES.getJdbcUrl(), "oms_app", AuthTestSupport.APP_PASSWORD)) {
+      // Step 1: An older token must not replace OWNER with STAFF.
+      try (var statement = app.prepareStatement("SELECT provision_membership(?, ?, 'STAFF', 1)")) {
+        statement.setObject(1, tenantId);
+        statement.setObject(2, appUserId);
+        try (ResultSet rows = statement.executeQuery()) {
+          assertThat(rows.next()).isTrue();
+        }
+      }
+      // Step 2: The same ent_ver may change the role. A revoked row still cannot.
+      try (var statement = app.prepareStatement("SELECT provision_membership(?, ?, 'ADMIN', 5)")) {
+        statement.setObject(1, tenantId);
+        statement.setObject(2, appUserId);
+        try (ResultSet rows = statement.executeQuery()) {
+          assertThat(rows.next()).isTrue();
+        }
+      }
+    }
+
+    assertThat(
+            text(
+                "SELECT m.role FROM tenant_membership m JOIN app_user u ON u.id = m.user_id WHERE u.tsf_user_id = ?",
+                userId))
+        .isEqualTo("ADMIN");
+  }
+
+  @Test
+  void gracePastExpiryIsInactive() {
+    HttpResult expired =
+        get(
+            "/api/v1/me",
+            AuthTestSupport.userToken(
+                user(), shop(), "GRACE", Instant.now().minus(1, ChronoUnit.DAYS), 1));
+    assertError(expired, 403, "ENTITLEMENT_INACTIVE");
+  }
+
+  @Test
+  void badTokensAreGeneric401() throws Exception {
+    String shopId = shop();
+    String userId = user();
+    List<String> tokens =
+        List.of(
+            AuthTestSupport.wrongIssuerToken(userId, shopId),
+            AuthTestSupport.noneAlgorithmToken(userId, shopId),
+            AuthTestSupport.hs256WithPublicKeyToken(userId, shopId),
+            AuthTestSupport.unknownKeyIdToken(userId, shopId),
+            AuthTestSupport.invalidRoleToken(userId, shopId),
+            AuthTestSupport.dualAudienceToken(userId, shopId));
+    for (String token : tokens) {
+      HttpResult result = get("/api/v1/me", token);
+      assertThat(result.status()).isEqualTo(401);
+      JsonNode body = JSON.readTree(result.body());
+      assertThat(body.path("error").asString()).isEqualTo("UNAUTHORIZED");
+      assertThat(body.path("message").asString())
+          .isEqualTo(TenantContextFilter.UNAUTHORIZED_MESSAGE);
+      assertThat(body.toString()).doesNotContain("shop_role").doesNotContain("NOPE");
+    }
+    assertThat(count("SELECT count(*) FROM tenant WHERE tsf_shop_id = ?", shopId)).isZero();
+
+    HttpResult unknownClient =
+        get(
+            "/internal/v1/health",
+            AuthTestSupport.token(
+                "other-client",
+                shop(),
+                "ACTIVE",
+                future(),
+                1,
+                "oms-internal",
+                Instant.now().plusSeconds(600),
+                List.of()));
+    assertThat(unknownClient.status()).isEqualTo(401);
+    assertThat(JSON.readTree(unknownClient.body()).path("message").asString())
+        .isEqualTo(TenantContextFilter.UNAUTHORIZED_MESSAGE);
+  }
+
+  @Test
+  void auditIpUsesForwardedFor() throws Exception {
+    String userId = user();
+    String token = AuthTestSupport.userToken(userId, shop(), "ACTIVE", future(), 1);
+    RestClient.RequestHeadersSpec<?> spec = client.get().uri("/api/v1/me");
+    spec.header(HttpHeaders.AUTHORIZATION, "Bearer " + token);
+    spec.header("X-Forwarded-For", "203.0.113.9");
+    HttpResult result =
+        spec.exchange(
+            (request, response) ->
+                new HttpResult(
+                    response.getStatusCode().value(),
+                    new String(
+                        response.getBody().readAllBytes(),
+                        java.nio.charset.StandardCharsets.UTF_8)));
+    assertThat(result.status()).isEqualTo(200);
+    assertThat(text("SELECT host(ip) FROM audit_log WHERE actor_id = ?", userId))
+        .isEqualTo("203.0.113.9");
   }
 
   @Test
@@ -385,6 +600,19 @@ class AuthApiTest {
     assertThat(body.path("error").asString()).isEqualTo(code);
     assertThat(body.path("message").asString()).isNotBlank();
     assertThat(body.path("trace_id").asString()).hasSize(32);
+  }
+
+  private String text(String sql, String... args) throws Exception {
+    try (Connection admin = AuthTestSupport.admin();
+        var statement = admin.prepareStatement(sql)) {
+      for (int i = 0; i < args.length; i++) {
+        statement.setString(i + 1, args[i]);
+      }
+      try (ResultSet rows = statement.executeQuery()) {
+        assertThat(rows.next()).isTrue();
+        return rows.getString(1);
+      }
+    }
   }
 
   private long count(String sql, String... args) throws Exception {
