@@ -1,0 +1,13 @@
+# Per-service settings mirrored in .railway/railway.ts.
+# New Railway services do not read this file. Apply .railway/railway.ts instead.
+# Do not set this path as the service Config File if you use Infrastructure as Code.
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+healthcheckPath = "/"
+healthcheckTimeout = 60
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 5

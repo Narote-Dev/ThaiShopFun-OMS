@@ -1,0 +1,26 @@
+# Local defaults match docker-compose.yml. Railway overrides DATABASE_* (see README).
+# Flyway is intentionally not on the classpath. Codex owns migrations starting at T02.
+spring:
+  application:
+    name: oms
+  datasource:
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/oms}
+    username: ${DATABASE_USERNAME:oms}
+    password: ${DATABASE_PASSWORD:oms}
+    hikari:
+      # Wait for Postgres when `docker compose up -d` and the app start together.
+      initialization-fail-timeout: 60000
+
+server:
+  port: ${PORT:8080}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: never
+      probes:
+        enabled: true

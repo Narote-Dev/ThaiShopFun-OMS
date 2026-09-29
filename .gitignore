@@ -1,0 +1,24 @@
+.idea/
+.vscode/
+*.iml
+.DS_Store
+*.log
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Backend
+backend/target/
+
+# Node
+node_modules/
+frontend/dist/
+frontend/coverage/
+
+# Railway CLI local link
+.railway/linked
+
+# Local browser checks
+.playwright-mcp/
