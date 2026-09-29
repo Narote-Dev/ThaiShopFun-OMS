@@ -1,5 +1,6 @@
 package com.thaishopfun.oms.inbox;
 
+import java.time.Duration;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.core.annotation.Order;
@@ -35,23 +36,21 @@ public class InboxStartupGuard implements ApplicationRunner {
       throw new IllegalStateException(
           "oms.inbox.hmac-secrets is required outside the local and test profiles");
     }
-    // Step 2: One batch must finish inside the lease, or a later worker can claim the same rows.
+    // Step 2: Compare the lease claim_inbox_batch will actually store (millis, rounded up).
+    Duration lease = InboxLimits.claimedLease(properties.getLease());
     if (properties.getBatchSize() < 1
         || properties.getHandlerTimeout().isZero()
         || properties.getHandlerTimeout().isNegative()
-        || properties.getLease().compareTo(properties.getHandlerTimeout()) <= 0) {
+        || lease.compareTo(properties.getHandlerTimeout()) <= 0) {
       throw new IllegalStateException("oms.inbox handler timeout must be shorter than the lease");
     }
-    if (properties
-            .getHandlerTimeout()
-            .multipliedBy(properties.getBatchSize())
-            .compareTo(properties.getLease())
+    if (properties.getHandlerTimeout().multipliedBy(properties.getBatchSize()).compareTo(lease)
         >= 0) {
       throw new IllegalStateException(
           "oms.inbox batch-size times handler-timeout must be shorter than the lease");
     }
     // Step 3: claim_inbox_batch rejects a lease above InboxLimits.MAX_LEASE (1 hour).
-    if (properties.getLease().compareTo(InboxLimits.MAX_LEASE) > 0) {
+    if (lease.compareTo(InboxLimits.MAX_LEASE) > 0) {
       throw new IllegalStateException(
           "oms.inbox.lease must be at most 1 hour (InboxLimits.MAX_LEASE, claim_inbox_batch)");
     }

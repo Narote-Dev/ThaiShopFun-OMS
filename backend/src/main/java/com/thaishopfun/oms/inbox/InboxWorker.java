@@ -55,6 +55,20 @@ public class InboxWorker {
 
   private static final Logger log = LoggerFactory.getLogger(InboxWorker.class);
 
+  private static final String LAST_PROCESSED_VERSION =
+      """
+      SELECT MAX(aggregate_version)
+      FROM inbox_event
+      WHERE tenant_id = ?
+        AND source = ?
+        AND aggregate_id = ?
+        AND status = 'PROCESSED'
+        AND aggregate_version > 0
+        AND id <> ?
+        AND event_type NOT IN (%s)
+      """
+          .formatted(InboxEntitlementPolicy.entVerOrderedTypeLiterals());
+
   private final InboxProperties properties;
   private final InboxHandlerRegistry registry;
   private final InboxEntitlementPolicy policy;
@@ -115,14 +129,15 @@ public class InboxWorker {
 
   private List<Claimed> claim(int limit) {
     int bounded = Math.min(Math.max(limit, 1), 1000);
-    long leaseSeconds = Math.max(properties.getLease().toSeconds(), 1);
+    // Step 1: Milliseconds, rounded up. toSeconds() would shorten a 1.2s lease to 1s.
+    long leaseMillis = InboxLimits.claimedLease(properties.getLease()).toMillis();
     List<Claimed> rows =
         claimTx.execute(
             status ->
                 jdbc.query(
                     """
                     SELECT id, tenant_id, next_attempt_at
-                    FROM claim_inbox_batch(?, (? * interval '1 second'))
+                    FROM claim_inbox_batch(?, (? * interval '1 millisecond'))
                     """,
                     (rs, row) ->
                         new Claimed(
@@ -130,8 +145,13 @@ public class InboxWorker {
                             rs.getObject("tenant_id", UUID.class),
                             rs.getObject("next_attempt_at", OffsetDateTime.class)),
                     bounded,
-                    leaseSeconds));
+                    leaseMillis));
     return rows == null ? List.of() : rows;
+  }
+
+  /** Claims one batch and returns each row's lease. Tests check sub-second leases. */
+  List<OffsetDateTime> claimLeases(int limit) {
+    return claim(limit).stream().map(Claimed::leaseUntil).toList();
   }
 
   private void processClaim(Claimed claimed) {
@@ -190,12 +210,12 @@ public class InboxWorker {
       return;
     }
     // Step 5: One aggregate at a time, then drop a version that is already applied.
-    // membership.changed is ordered by ent_ver inside its handler, not by aggregate_version.
+    // Events ordered by ent_ver are not part of this history, and do not use it.
     lockAggregate(row);
     Long lastVersion = lastProcessedVersion(row);
-    boolean membership = InboxEntitlementPolicy.MEMBERSHIP_CHANGED.equals(row.eventType());
+    boolean entVerOrdered = InboxEntitlementPolicy.ordersByEntVer(row.eventType());
     boolean stale =
-        !membership
+        !entVerOrdered
             && row.aggregateVersion() > 0
             && lastVersion != null
             && row.aggregateVersion() <= lastVersion;
@@ -259,17 +279,9 @@ public class InboxWorker {
   }
 
   private Long lastProcessedVersion(InboxRow row) {
+    // Step 1: Skip ent_ver-ordered types so a membership version cannot hide a business event.
     return jdbc.queryForObject(
-        """
-        SELECT MAX(aggregate_version)
-        FROM inbox_event
-        WHERE tenant_id = ?
-          AND source = ?
-          AND aggregate_id = ?
-          AND status = 'PROCESSED'
-          AND aggregate_version > 0
-          AND id <> ?
-        """,
+        LAST_PROCESSED_VERSION,
         Long.class,
         row.tenantId(),
         row.source(),

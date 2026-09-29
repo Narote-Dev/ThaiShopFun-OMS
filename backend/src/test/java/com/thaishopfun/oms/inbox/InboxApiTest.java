@@ -79,6 +79,7 @@ class InboxApiTest {
   @Autowired private JdbcTemplate jdbc;
   @Autowired private PlatformTransactionManager transactions;
   @Autowired private MeterRegistry meters;
+  @Autowired private InboxProperties inboxProperties;
 
   @Autowired
   @Qualifier("orderCreated")
@@ -484,6 +485,43 @@ class InboxApiTest {
         .isEqualTo("ACTIVE");
     assertThat(count("SELECT ent_ver FROM tenant WHERE id = ?::uuid", shop.id().toString()))
         .isEqualTo(3);
+  }
+
+  @Test
+  void membershipVersionDoesNotHideALaterBusinessEvent() throws Exception {
+    Shop shop = seed("ACTIVE", future(), 1);
+    String membershipId = id();
+    postMembership(shop, membershipId, "ACTIVE", 2, future(), 100);
+    assertThat(worker.processAvailable()).isEqualTo(1);
+    assertThat(text("SELECT status FROM inbox_event WHERE event_id = ?", membershipId))
+        .isEqualTo("PROCESSED");
+
+    String orderId = id();
+    postOrder(shop, orderId, shop.shopId(), 2);
+    orderCreated.reset();
+    assertThat(worker.processAvailable()).isEqualTo(1);
+    assertThat(text("SELECT status FROM inbox_event WHERE event_id = ?", orderId))
+        .isEqualTo("PROCESSED");
+    assertThat(orderCreated.calls.get()).isEqualTo(1);
+  }
+
+  @Test
+  void subsecondLeaseReachesTheDatabaseWithoutTruncation() throws Exception {
+    Duration lease = inboxProperties.getLease();
+    Duration timeout = inboxProperties.getHandlerTimeout();
+    inboxProperties.setLease(Duration.ofMillis(1500));
+    inboxProperties.setHandlerTimeout(Duration.ofMillis(400));
+    try {
+      Shop shop = seed("ACTIVE", future(), 1);
+      insertInbox(shop.id(), "subsec-lease", "RECEIVED", 0, 1, 1, null);
+      List<OffsetDateTime> leases = worker.claimLeases(1);
+      assertThat(leases).hasSize(1);
+      long remaining = Duration.between(Instant.now(), leases.get(0).toInstant()).toMillis();
+      assertThat(remaining).isGreaterThan(1100).isLessThan(2000);
+    } finally {
+      inboxProperties.setLease(lease);
+      inboxProperties.setHandlerTimeout(timeout);
+    }
   }
 
   @Test

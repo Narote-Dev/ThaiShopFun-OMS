@@ -25,7 +25,31 @@ public class InboxEntitlementPolicy {
 
   static final String MEMBERSHIP_CHANGED = "membership.changed";
 
-  private static final Set<String> ALWAYS = Set.of(MEMBERSHIP_CHANGED);
+  /**
+   * Ordered by {@code ent_ver}, not {@code aggregate_version}. Kept out of that version history.
+   */
+  private static final Set<String> ENT_VER_ORDERED = Set.of(MEMBERSHIP_CHANGED);
+
+  private static final Set<String> ALWAYS = ENT_VER_ORDERED;
+
+  static boolean ordersByEntVer(String eventType) {
+    return ENT_VER_ORDERED.contains(eventType);
+  }
+
+  /** Quoted literals for {@code event_type NOT IN (...)}. Values are constants in this class. */
+  static String entVerOrderedTypeLiterals() {
+    StringBuilder literals = new StringBuilder();
+    for (String type : ENT_VER_ORDERED) {
+      if (!type.matches("[a-z0-9.]+")) {
+        throw new IllegalStateException("event type is not a safe SQL literal");
+      }
+      if (literals.length() > 0) {
+        literals.append(", ");
+      }
+      literals.append('\'').append(type).append('\'');
+    }
+    return literals.toString();
+  }
 
   private final Clock clock;
 

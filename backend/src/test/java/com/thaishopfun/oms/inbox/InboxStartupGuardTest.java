@@ -1,5 +1,6 @@
 package com.thaishopfun.oms.inbox;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -45,6 +46,26 @@ class InboxStartupGuardTest {
         .isInstanceOf(IllegalStateException.class)
         .hasMessageContaining("1 hour")
         .hasMessageContaining("InboxLimits.MAX_LEASE");
+  }
+
+  @Test
+  void subsecondLeaseIsKeptAboveTheHandlerTimeout() {
+    MockEnvironment environment = new MockEnvironment();
+    environment.setActiveProfiles("test");
+    InboxProperties properties = new InboxProperties();
+    properties.setBatchSize(1);
+    // 1.2s lease and 1.1s timeout. Truncating the lease to whole seconds would make it 1s.
+    properties.setHandlerTimeout(Duration.ofMillis(1100));
+    properties.setLease(Duration.ofMillis(1200));
+    assertThat(InboxLimits.claimedLease(properties.getLease())).isEqualTo(Duration.ofMillis(1200));
+    assertThatCode(() -> InboxStartupGuard.verify(environment, properties))
+        .doesNotThrowAnyException();
+
+    properties.setLease(Duration.ofNanos(1_500_000));
+    properties.setHandlerTimeout(Duration.ofMillis(1));
+    assertThat(InboxLimits.claimedLease(properties.getLease())).isEqualTo(Duration.ofMillis(2));
+    assertThatCode(() -> InboxStartupGuard.verify(environment, properties))
+        .doesNotThrowAnyException();
   }
 
   @Test
