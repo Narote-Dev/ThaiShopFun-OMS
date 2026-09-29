@@ -23,7 +23,7 @@ public class ApiErrors {
   public void unauthorized(
       HttpServletRequest request, HttpServletResponse response, AuthenticationException ignored)
       throws IOException {
-    write(request, response, 401, "UNAUTHORIZED", "Invalid or expired token");
+    write(request, response, 401, "UNAUTHORIZED", TenantContextFilter.UNAUTHORIZED_MESSAGE);
   }
 
   public void forbidden(
