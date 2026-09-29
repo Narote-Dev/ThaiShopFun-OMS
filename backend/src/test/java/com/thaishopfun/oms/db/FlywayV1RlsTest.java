@@ -51,14 +51,20 @@ class FlywayV1RlsTest {
   @BeforeEach
   void resetRowsAndEnableTestLogins() throws SQLException {
     // Step 1: Let the test connect as the two non-superuser roles. V1 creates them NOLOGIN.
-    // Step 2: Clear rows so each acceptance test starts from the migrated empty schema.
     try (Connection admin = openAdmin();
         Statement statement = admin.createStatement()) {
       statement.execute("ALTER ROLE oms_app LOGIN PASSWORD '" + APP_PASSWORD + "'");
       statement.execute("ALTER ROLE oms_migrator LOGIN PASSWORD '" + MIGRATOR_PASSWORD + "'");
-      statement.execute(
-          "TRUNCATE TABLE audit_log, idempotency_key, inbox_event, outbox_event, "
-              + "tenant_membership, app_user, tenant CASCADE");
+      // Step 2: Clear rows. The append-only trigger blocks TRUNCATE, including for the superuser.
+      // Replica role is the maintenance bypass used only to reset fixtures.
+      statement.execute("SET session_replication_role = replica");
+      try {
+        statement.execute(
+            "TRUNCATE TABLE audit_log, idempotency_key, inbox_event, outbox_event, "
+                + "tenant_membership, app_user, tenant CASCADE");
+      } finally {
+        statement.execute("SET session_replication_role = origin");
+      }
     }
   }
 
@@ -275,7 +281,8 @@ class FlywayV1RlsTest {
                     + "has_table_privilege('oms_app', 'public.audit_log', 'UPDATE') AS audit_update, "
                     + "has_table_privilege('oms_app', 'public.audit_log', 'DELETE') AS audit_delete, "
                     + "has_table_privilege('oms_app', 'public.app_user', 'SELECT') AS user_read, "
-                    + "has_table_privilege('oms_app', 'public.app_user', 'INSERT') AS user_write")) {
+                    + "has_table_privilege('oms_app', 'public.app_user', 'INSERT') AS user_write, "
+                    + "has_table_privilege('oms_app', 'public.tenant', 'DELETE') AS tenant_delete")) {
       assertThat(privileges.next()).isTrue();
       assertThat(privileges.getBoolean("inbox_read")).isTrue();
       assertThat(privileges.getBoolean("inbox_write")).isTrue();
@@ -284,6 +291,7 @@ class FlywayV1RlsTest {
       assertThat(privileges.getBoolean("audit_delete")).isFalse();
       assertThat(privileges.getBoolean("user_read")).isFalse();
       assertThat(privileges.getBoolean("user_write")).isFalse();
+      assertThat(privileges.getBoolean("tenant_delete")).isFalse();
     }
   }
 
@@ -325,9 +333,19 @@ class FlywayV1RlsTest {
           .isEqualTo(
               new FunctionShape("channel text, external_shop_id text", "uuid", true, "oms_maint"));
       assertThat(functions.get("claim_inbox_batch"))
-          .isEqualTo(new FunctionShape("n integer", "TABLE(id uuid)", true, "oms_maint"));
+          .isEqualTo(
+              new FunctionShape(
+                  "n integer, p_lease interval",
+                  "TABLE(id uuid, tenant_id uuid)",
+                  true,
+                  "oms_maint"));
       assertThat(functions.get("claim_outbox_batch"))
-          .isEqualTo(new FunctionShape("n integer", "TABLE(id uuid)", true, "oms_maint"));
+          .isEqualTo(
+              new FunctionShape(
+                  "n integer, p_lease interval",
+                  "TABLE(id uuid, tenant_id uuid)",
+                  true,
+                  "oms_maint"));
 
       insertTenant(admin, active, "shop-active", "ACTIVE");
       insertTenant(admin, grace, "shop-grace", "GRACE");
@@ -341,7 +359,7 @@ class FlywayV1RlsTest {
       Set<UUID> activeIds = new HashSet<>();
       try (Statement statement = app.createStatement();
           ResultSet rows = statement.executeQuery("SELECT id FROM list_active_tenant_ids()")) {
-        assertUuidColumn(rows);
+        assertUuidColumn(rows, 1);
         while (rows.next()) {
           activeIds.add(rows.getObject(1, UUID.class));
         }
@@ -352,25 +370,30 @@ class FlywayV1RlsTest {
         statement.setString(1, "TSF");
         statement.setString(2, "shop-active");
         try (ResultSet rows = statement.executeQuery()) {
-          assertUuidColumn(rows);
+          assertUuidColumn(rows, 1);
           assertThat(rows.next()).isTrue();
           assertThat(rows.getObject(1, UUID.class)).isEqualTo(active);
         }
         statement.setString(1, "SHOPEE");
         statement.setString(2, "shop-active");
         try (ResultSet rows = statement.executeQuery()) {
-          assertUuidColumn(rows);
+          assertUuidColumn(rows, 1);
           assertThat(rows.next()).isTrue();
           assertThat(rows.getObject(1, UUID.class)).isNull();
         }
       }
 
-      // Step 3: Claims return the id only. Outbox moves to IN_FLIGHT. A bad limit is rejected.
-      assertThat(claimInbox(app, 10)).isEqualTo(inboxId);
-      assertThat(claimOutbox(app, 10)).isEqualTo(outboxId);
+      // Step 3: Claims return id and tenant_id. A bad limit or lease is rejected.
       assertThatThrownBy(() -> claimInbox(app, 0))
           .isInstanceOf(PSQLException.class)
           .hasMessageContaining("between 1 and 1000");
+      assertThatThrownBy(() -> claimInbox(app, 1, "2 hours"))
+          .isInstanceOf(PSQLException.class)
+          .hasMessageContaining("at most 1 hour");
+      Claimed claimedInbox = claimInbox(app, 10);
+      Claimed claimedOutbox = claimOutbox(app, 10);
+      assertThat(claimedInbox).isEqualTo(new Claimed(inboxId, active));
+      assertThat(claimedOutbox).isEqualTo(new Claimed(outboxId, grace));
     }
 
     try (Connection admin = openAdmin();
@@ -409,23 +432,26 @@ class FlywayV1RlsTest {
       try (Statement statement = right.createStatement()) {
         statement.execute("SET statement_timeout = '3s'");
       }
-      UUID leftId = claimInbox(left, 1);
-      UUID rightId = claimInbox(right, 1);
-      assertThat(Set.of(leftId, rightId)).containsExactlyInAnyOrder(first, second);
+      Claimed leftClaim = claimInbox(left, 1);
+      Claimed rightClaim = claimInbox(right, 1);
+      assertThat(Set.of(leftClaim.id(), rightClaim.id())).containsExactlyInAnyOrder(first, second);
+      assertThat(leftClaim.tenantId()).isEqualTo(tenant);
+      assertThat(rightClaim.tenantId()).isEqualTo(tenant);
       left.commit();
       right.commit();
     }
 
     // Step 2: The inbox lease hides those rows. A live outbox lease does too.
     try (Connection app = openApp()) {
-      try (PreparedStatement inbox = app.prepareStatement("SELECT id FROM claim_inbox_batch(10)")) {
+      try (PreparedStatement inbox =
+          app.prepareStatement("SELECT id, tenant_id FROM claim_inbox_batch(10)")) {
         try (ResultSet rows = inbox.executeQuery()) {
           assertThat(rows.next()).isFalse();
         }
       }
-      assertThat(claimOutbox(app, 10)).isEqualTo(expired);
+      assertThat(claimOutbox(app, 10)).isEqualTo(new Claimed(expired, tenant));
       try (PreparedStatement again =
-          app.prepareStatement("SELECT id FROM claim_outbox_batch(10)")) {
+          app.prepareStatement("SELECT id, tenant_id FROM claim_outbox_batch(10)")) {
         try (ResultSet rows = again.executeQuery()) {
           assertThat(rows.next()).isFalse();
         }
@@ -441,7 +467,7 @@ class FlywayV1RlsTest {
               + "'");
     }
     try (Connection app = openApp()) {
-      assertThat(claimOutbox(app, 10)).isEqualTo(expired);
+      assertThat(claimOutbox(app, 10)).isEqualTo(new Claimed(expired, tenant));
     }
     try (Connection admin = openAdmin();
         Statement statement = admin.createStatement();
@@ -488,6 +514,66 @@ class FlywayV1RlsTest {
   }
 
   @Test
+  void definerFunctionsAreExecutableOnlyByApp() throws SQLException {
+    // Step 1: Each SECURITY DEFINER function pins search_path to pg_catalog, pg_temp.
+    Set<String> names = new HashSet<>();
+    try (Connection admin = openAdmin();
+        Statement statement = admin.createStatement();
+        ResultSet rows =
+            statement.executeQuery(
+                "SELECT p.proname, p.proconfig::text AS config "
+                    + "FROM pg_proc p "
+                    + "JOIN pg_namespace n ON n.oid = p.pronamespace "
+                    + "WHERE n.nspname = 'public' AND p.proname IN ("
+                    + "'list_active_tenant_ids', 'resolve_tenant', "
+                    + "'claim_inbox_batch', 'claim_outbox_batch')")) {
+      while (rows.next()) {
+        names.add(rows.getString("proname"));
+        assertThat(rows.getString("config")).contains("search_path=pg_catalog, pg_temp");
+      }
+    }
+    assertThat(names)
+        .containsExactlyInAnyOrder(
+            "list_active_tenant_ids", "resolve_tenant", "claim_inbox_batch", "claim_outbox_batch");
+
+    // Step 2: oms_app may execute them. oms_migrator is denied.
+    try (Connection admin = openAdmin();
+        Statement statement = admin.createStatement();
+        ResultSet privileges =
+            statement.executeQuery(
+                "SELECT "
+                    + "has_function_privilege('oms_app', 'public.list_active_tenant_ids()', 'EXECUTE') AS app_list, "
+                    + "has_function_privilege('oms_migrator', 'public.list_active_tenant_ids()', 'EXECUTE') AS mig_list, "
+                    + "has_function_privilege('oms_app', 'public.resolve_tenant(text, text)', 'EXECUTE') AS app_resolve, "
+                    + "has_function_privilege('oms_migrator', 'public.resolve_tenant(text, text)', 'EXECUTE') AS mig_resolve, "
+                    + "has_function_privilege('oms_app', 'public.claim_inbox_batch(integer, interval)', 'EXECUTE') AS app_inbox, "
+                    + "has_function_privilege('oms_migrator', 'public.claim_inbox_batch(integer, interval)', 'EXECUTE') AS mig_inbox, "
+                    + "has_function_privilege('oms_app', 'public.claim_outbox_batch(integer, interval)', 'EXECUTE') AS app_outbox, "
+                    + "has_function_privilege('oms_migrator', 'public.claim_outbox_batch(integer, interval)', 'EXECUTE') AS mig_outbox")) {
+      assertThat(privileges.next()).isTrue();
+      assertThat(privileges.getBoolean("app_list")).isTrue();
+      assertThat(privileges.getBoolean("mig_list")).isFalse();
+      assertThat(privileges.getBoolean("app_resolve")).isTrue();
+      assertThat(privileges.getBoolean("mig_resolve")).isFalse();
+      assertThat(privileges.getBoolean("app_inbox")).isTrue();
+      assertThat(privileges.getBoolean("mig_inbox")).isFalse();
+      assertThat(privileges.getBoolean("app_outbox")).isTrue();
+      assertThat(privileges.getBoolean("mig_outbox")).isFalse();
+    }
+
+    try (Connection migrator = openMigrator();
+        Statement statement = migrator.createStatement()) {
+      assertThatThrownBy(() -> statement.executeQuery("SELECT id FROM list_active_tenant_ids()"))
+          .isInstanceOf(PSQLException.class)
+          .hasMessageContaining("permission denied");
+      assertThatThrownBy(
+              () -> statement.executeQuery("SELECT id, tenant_id FROM claim_outbox_batch(1)"))
+          .isInstanceOf(PSQLException.class)
+          .hasMessageContaining("permission denied");
+    }
+  }
+
+  @Test
   void auditLogIsAppendOnly() throws SQLException {
     UUID tenant = UUID.randomUUID();
     try (Connection admin = openAdmin()) {
@@ -505,6 +591,14 @@ class FlywayV1RlsTest {
               () -> {
                 try (Statement statement = admin.createStatement()) {
                   statement.executeUpdate("DELETE FROM audit_log");
+                }
+              })
+          .isInstanceOf(PSQLException.class)
+          .hasMessageContaining("append-only");
+      assertThatThrownBy(
+              () -> {
+                try (Statement statement = admin.createStatement()) {
+                  statement.execute("TRUNCATE TABLE audit_log");
                 }
               })
           .isInstanceOf(PSQLException.class)
@@ -582,35 +676,48 @@ class FlywayV1RlsTest {
     }
   }
 
-  private static void assertUuidColumn(ResultSet rows) throws SQLException {
-    assertThat(rows.getMetaData().getColumnCount()).isEqualTo(1);
-    assertThat(rows.getMetaData().getColumnTypeName(1)).isEqualToIgnoringCase("uuid");
+  private static void assertUuidColumn(ResultSet rows, int columns) throws SQLException {
+    assertThat(rows.getMetaData().getColumnCount()).isEqualTo(columns);
+    for (int column = 1; column <= columns; column++) {
+      assertThat(rows.getMetaData().getColumnTypeName(column)).isEqualToIgnoringCase("uuid");
+    }
   }
 
-  private static UUID claimInbox(Connection connection, int limit) throws SQLException {
-    try (PreparedStatement statement =
-        connection.prepareStatement("SELECT id FROM claim_inbox_batch(?)")) {
+  private static Claimed claimInbox(Connection connection, int limit) throws SQLException {
+    return claimInbox(connection, limit, null);
+  }
+
+  private static Claimed claimInbox(Connection connection, int limit, String lease)
+      throws SQLException {
+    String sql =
+        lease == null
+            ? "SELECT id, tenant_id FROM claim_inbox_batch(?)"
+            : "SELECT id, tenant_id FROM claim_inbox_batch(?, ?::interval)";
+    try (PreparedStatement statement = connection.prepareStatement(sql)) {
       statement.setInt(1, limit);
+      if (lease != null) {
+        statement.setString(2, lease);
+      }
       try (ResultSet rows = statement.executeQuery()) {
-        assertUuidColumn(rows);
+        assertUuidColumn(rows, 2);
         assertThat(rows.next()).isTrue();
-        UUID id = rows.getObject(1, UUID.class);
+        Claimed claimed = new Claimed(rows.getObject(1, UUID.class), rows.getObject(2, UUID.class));
         assertThat(rows.next()).isFalse();
-        return id;
+        return claimed;
       }
     }
   }
 
-  private static UUID claimOutbox(Connection connection, int limit) throws SQLException {
+  private static Claimed claimOutbox(Connection connection, int limit) throws SQLException {
     try (PreparedStatement statement =
-        connection.prepareStatement("SELECT id FROM claim_outbox_batch(?)")) {
+        connection.prepareStatement("SELECT id, tenant_id FROM claim_outbox_batch(?)")) {
       statement.setInt(1, limit);
       try (ResultSet rows = statement.executeQuery()) {
-        assertUuidColumn(rows);
+        assertUuidColumn(rows, 2);
         assertThat(rows.next()).isTrue();
-        UUID id = rows.getObject(1, UUID.class);
+        Claimed claimed = new Claimed(rows.getObject(1, UUID.class), rows.getObject(2, UUID.class));
         assertThat(rows.next()).isFalse();
-        return id;
+        return claimed;
       }
     }
   }
@@ -742,6 +849,8 @@ class FlywayV1RlsTest {
   private record RoleFlags(boolean superuser, boolean bypassRls, boolean canLogin) {}
 
   private record FunctionShape(String args, String result, boolean securityDefiner, String owner) {}
+
+  private record Claimed(UUID id, UUID tenantId) {}
 
   private record TablePolicy(
       String owner,

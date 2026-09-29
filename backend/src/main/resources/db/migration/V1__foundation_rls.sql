@@ -22,7 +22,8 @@
 -- * list_active_tenant_ids returns entitlement_status = 'ACTIVE' only.
 -- * inbox has no IN_FLIGHT status. claim_inbox_batch leases a row by moving
 --   next_attempt_at forward and incrementing attempts. Outbox claim sets
---   IN_FLIGHT and lease_until. The lease is 5 minutes.
+--   IN_FLIGHT and lease_until. Both return (id, tenant_id) and take an optional
+--   lease, default 5 minutes, capped at 1 hour.
 -- * tenant_membership.status is constrained to ACTIVE/REVOKED.
 
 -- Step 1: Create roles. Superuser only, because BYPASSRLS cannot be granted otherwise.
@@ -234,8 +235,10 @@ BEGIN
 END
 $connect$;
 
+-- oms_app must not delete a tenant. Phase 0 has no caller for that.
+GRANT SELECT, INSERT, UPDATE ON tenant TO oms_app;
+
 GRANT SELECT, INSERT, UPDATE, DELETE ON
-  tenant,
   tenant_membership,
   idempotency_key,
   inbox_event,
@@ -276,6 +279,11 @@ CREATE TRIGGER audit_log_append_only
   FOR EACH ROW
   EXECUTE FUNCTION audit_log_reject_mutation();
 
+CREATE TRIGGER audit_log_append_only_truncate
+  BEFORE TRUNCATE ON audit_log
+  FOR EACH STATEMENT
+  EXECUTE FUNCTION audit_log_reject_mutation();
+
 -- Step 7: Cross-tenant functions. Owned by oms_maint (BYPASSRLS) so FORCE RLS
 -- does not hide other tenants. Each one returns ids only.
 CREATE FUNCTION list_active_tenant_ids()
@@ -283,7 +291,7 @@ RETURNS TABLE (id uuid)
 LANGUAGE sql
 STABLE
 SECURITY DEFINER
-SET search_path = pg_catalog, public
+SET search_path = pg_catalog, pg_temp
 AS $fn$
   SELECT t.id
   FROM public.tenant AS t
@@ -295,7 +303,7 @@ RETURNS uuid
 LANGUAGE sql
 STABLE
 SECURITY DEFINER
-SET search_path = pg_catalog, public
+SET search_path = pg_catalog, pg_temp
 AS $fn$
   SELECT t.id
   FROM public.tenant AS t
@@ -303,21 +311,28 @@ AS $fn$
     AND t.tsf_shop_id = external_shop_id
 $fn$;
 
-CREATE FUNCTION claim_inbox_batch(n integer)
-RETURNS TABLE (id uuid)
+CREATE FUNCTION claim_inbox_batch(
+  n integer,
+  p_lease interval DEFAULT interval '5 minutes'
+)
+RETURNS TABLE (id uuid, tenant_id uuid)
 LANGUAGE plpgsql
 VOLATILE
 SECURITY DEFINER
-SET search_path = pg_catalog, public
+SET search_path = pg_catalog, pg_temp
 AS $fn$
 BEGIN
-  -- Step 1: Reject a limit that would scan or lock an unbounded batch.
+  -- Step 1: Reject a limit or lease that would scan an unbounded batch or hide it too long.
   IF n IS NULL OR n < 1 OR n > 1000 THEN
     RAISE EXCEPTION 'claim_inbox_batch limit must be between 1 and 1000';
+  END IF;
+  IF p_lease IS NULL OR p_lease <= interval '0' OR p_lease > interval '1 hour' THEN
+    RAISE EXCEPTION 'claim_inbox_batch lease must be greater than 0 and at most 1 hour';
   END IF;
 
   -- Step 2: Lease due RECEIVED/FAILED rows. Inbox has no IN_FLIGHT status, so the
   -- lease is next_attempt_at. SKIP LOCKED keeps parallel workers off the same row.
+  -- Return tenant_id so the worker can open a per-tenant transaction.
   RETURN QUERY
   WITH picked AS (
     SELECT i.id
@@ -330,24 +345,30 @@ BEGIN
   )
   UPDATE public.inbox_event AS e
   SET attempts = e.attempts + 1,
-      next_attempt_at = now() + interval '5 minutes'
+      next_attempt_at = pg_catalog.now() + p_lease
   FROM picked
   WHERE e.id = picked.id
-  RETURNING e.id;
+  RETURNING e.id, e.tenant_id;
 END
 $fn$;
 
-CREATE FUNCTION claim_outbox_batch(n integer)
-RETURNS TABLE (id uuid)
+CREATE FUNCTION claim_outbox_batch(
+  n integer,
+  p_lease interval DEFAULT interval '5 minutes'
+)
+RETURNS TABLE (id uuid, tenant_id uuid)
 LANGUAGE plpgsql
 VOLATILE
 SECURITY DEFINER
-SET search_path = pg_catalog, public
+SET search_path = pg_catalog, pg_temp
 AS $fn$
 BEGIN
-  -- Step 1: Reject a limit that would scan or lock an unbounded batch.
+  -- Step 1: Reject a limit or lease that would scan an unbounded batch or hide it too long.
   IF n IS NULL OR n < 1 OR n > 1000 THEN
     RAISE EXCEPTION 'claim_outbox_batch limit must be between 1 and 1000';
+  END IF;
+  IF p_lease IS NULL OR p_lease <= interval '0' OR p_lease > interval '1 hour' THEN
+    RAISE EXCEPTION 'claim_outbox_batch lease must be greater than 0 and at most 1 hour';
   END IF;
 
   -- Step 2: Claim due PENDING rows, and IN_FLIGHT rows whose lease expired.
@@ -371,33 +392,33 @@ BEGIN
   UPDATE public.outbox_event AS e
   SET status = 'IN_FLIGHT',
       attempts = e.attempts + 1,
-      lease_until = now() + interval '5 minutes'
+      lease_until = pg_catalog.now() + p_lease
   FROM picked
   WHERE e.id = picked.id
-  RETURNING e.id;
+  RETURNING e.id, e.tenant_id;
 END
 $fn$;
 
 ALTER FUNCTION list_active_tenant_ids() OWNER TO oms_maint;
 ALTER FUNCTION resolve_tenant(text, text) OWNER TO oms_maint;
-ALTER FUNCTION claim_inbox_batch(integer) OWNER TO oms_maint;
-ALTER FUNCTION claim_outbox_batch(integer) OWNER TO oms_maint;
+ALTER FUNCTION claim_inbox_batch(integer, interval) OWNER TO oms_maint;
+ALTER FUNCTION claim_outbox_batch(integer, interval) OWNER TO oms_maint;
 
 REVOKE ALL ON FUNCTION list_active_tenant_ids() FROM PUBLIC;
 REVOKE ALL ON FUNCTION resolve_tenant(text, text) FROM PUBLIC;
-REVOKE ALL ON FUNCTION claim_inbox_batch(integer) FROM PUBLIC;
-REVOKE ALL ON FUNCTION claim_outbox_batch(integer) FROM PUBLIC;
+REVOKE ALL ON FUNCTION claim_inbox_batch(integer, interval) FROM PUBLIC;
+REVOKE ALL ON FUNCTION claim_outbox_batch(integer, interval) FROM PUBLIC;
 
-GRANT EXECUTE ON FUNCTION list_active_tenant_ids() TO oms_app, oms_migrator;
-GRANT EXECUTE ON FUNCTION resolve_tenant(text, text) TO oms_app, oms_migrator;
-GRANT EXECUTE ON FUNCTION claim_inbox_batch(integer) TO oms_app, oms_migrator;
-GRANT EXECUTE ON FUNCTION claim_outbox_batch(integer) TO oms_app, oms_migrator;
+GRANT EXECUTE ON FUNCTION list_active_tenant_ids() TO oms_app;
+GRANT EXECUTE ON FUNCTION resolve_tenant(text, text) TO oms_app;
+GRANT EXECUTE ON FUNCTION claim_inbox_batch(integer, interval) TO oms_app;
+GRANT EXECUTE ON FUNCTION claim_outbox_batch(integer, interval) TO oms_app;
 
 COMMENT ON FUNCTION list_active_tenant_ids() IS
   'Cross-tenant. Returns id only, for entitlement_status ACTIVE.';
 COMMENT ON FUNCTION resolve_tenant(text, text) IS
   'Cross-tenant. Returns the tenant id for channel TSF and tsf_shop_id. No other columns.';
-COMMENT ON FUNCTION claim_inbox_batch(integer) IS
-  'Cross-tenant lease of inbox ids. FOR UPDATE SKIP LOCKED. Returns id only.';
-COMMENT ON FUNCTION claim_outbox_batch(integer) IS
-  'Cross-tenant lease of outbox ids. Sets IN_FLIGHT. FOR UPDATE SKIP LOCKED. Returns id only.';
+COMMENT ON FUNCTION claim_inbox_batch(integer, interval) IS
+  'Cross-tenant lease of inbox rows. FOR UPDATE SKIP LOCKED. Returns id and tenant_id only.';
+COMMENT ON FUNCTION claim_outbox_batch(integer, interval) IS
+  'Cross-tenant lease of outbox rows. Sets IN_FLIGHT. FOR UPDATE SKIP LOCKED. Returns id and tenant_id only.';
