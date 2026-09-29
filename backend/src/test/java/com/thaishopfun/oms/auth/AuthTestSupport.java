@@ -1,9 +1,15 @@
 package com.thaishopfun.oms.auth;
 
+import com.nimbusds.jose.JWSAlgorithm;
+import com.nimbusds.jose.crypto.MACSigner;
+import com.nimbusds.jose.crypto.RSASSASigner;
 import com.nimbusds.jose.jwk.JWKSet;
 import com.nimbusds.jose.jwk.RSAKey;
 import com.nimbusds.jose.jwk.gen.RSAKeyGenerator;
 import com.nimbusds.jose.jwk.source.ImmutableJWKSet;
+import com.nimbusds.jwt.JWTClaimsSet;
+import com.nimbusds.jwt.PlainJWT;
+import com.nimbusds.jwt.SignedJWT;
 import com.sun.net.httpserver.HttpServer;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
@@ -11,6 +17,7 @@ import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.time.Instant;
+import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -77,6 +84,7 @@ final class AuthTestSupport {
     registry.add("oms.security.jwks-uri", () -> JWKS_URI);
     registry.add("oms.security.audience", () -> "oms");
     registry.add("oms.security.internal-audience", () -> "oms-internal");
+    registry.add("oms.security.internal-client-ids", () -> "tsf-checkout");
   }
 
   static Connection admin() throws SQLException {
@@ -87,14 +95,7 @@ final class AuthTestSupport {
   static String userToken(
       String userId, String shopId, String status, Instant membershipExpiry, long entVer) {
     return token(
-        userId,
-        shopId,
-        status,
-        membershipExpiry,
-        entVer,
-        "oms",
-        Instant.now().plusSeconds(600),
-        List.of("oms"));
+        userId, shopId, status, membershipExpiry, entVer, "oms", Instant.now().plusSeconds(600), List.of("oms"));
   }
 
   static String token(
@@ -106,13 +107,27 @@ final class AuthTestSupport {
       String audience,
       Instant expiresAt,
       List<String> entitlements) {
+    return token(
+        userId, shopId, status, membershipExpiry, entVer, audience, expiresAt, entitlements, "OWNER");
+  }
+
+  static String token(
+      String userId,
+      String shopId,
+      String status,
+      Instant membershipExpiry,
+      long entVer,
+      String audience,
+      Instant expiresAt,
+      List<String> entitlements,
+      String role) {
     Map<String, Object> membership = new LinkedHashMap<>();
     membership.put("tier", "PRO");
     membership.put("status", status);
     if (membershipExpiry != null) {
       membership.put("expires_at", membershipExpiry.toString());
     }
-    JwtClaimsSet claims =
+    JwtClaimsSet.Builder claims =
         JwtClaimsSet.builder()
             .issuer(ISSUER)
             .audience(List.of(audience))
@@ -123,12 +138,14 @@ final class AuthTestSupport {
             .claim("name", "Owner")
             .claim("shop_name", "Shop " + shopId)
             .claim("tsf_shop_id", shopId)
-            .claim("shop_role", "OWNER")
+            .claim("shop_role", role)
             .claim("membership", membership)
             .claim("entitlements", entitlements)
-            .claim("ent_ver", entVer)
-            .build();
+            .claim("ent_ver", entVer);
+    if ("oms-internal".equals(audience)) {
+      claims.claim("azp", userId);
+    }
     JwsHeader header = JwsHeader.with(SignatureAlgorithm.RS256).keyId(RSA_KEY.getKeyID()).build();
-    return ENCODER.encode(JwtEncoderParameters.from(header, claims)).getTokenValue();
+    return ENCODER.encode(JwtEncoderParameters.from(header, claims.build())).getTokenValue();
   }
 }
