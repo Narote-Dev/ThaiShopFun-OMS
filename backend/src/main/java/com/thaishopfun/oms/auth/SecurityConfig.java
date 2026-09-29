@@ -26,7 +26,6 @@ public class SecurityConfig {
 
   @Bean
   JwtDecoder jwtDecoder(OmsSecurityProperties properties) {
-    // Step 1: Local boot has no IdP yet. Reject tokens instead of failing startup.
     if (properties.getJwksUri() == null || properties.getJwksUri().isBlank()) {
       return new RejectingJwtDecoder();
     }
@@ -55,7 +54,8 @@ public class SecurityConfig {
     http.authorizeHttpRequests(auth -> auth.anyRequest().authenticated());
     oauth(http, jwtDecoder, errors);
     http.addFilterAfter(
-        new RequiredAudienceFilter(errors, properties.getInternalAudience()),
+        new RequiredAudienceFilter(
+            errors, properties.getInternalAudience(), properties.getInternalClientIds()),
         BearerTokenAuthenticationFilter.class);
     return http.build();
   }
@@ -112,7 +112,6 @@ public class SecurityConfig {
                 .jwt(jwt -> jwt.decoder(jwtDecoder)));
   }
 
-  /** Accepts either the user audience or the internal audience. The chain then narrows it. */
   private static final class AudienceValidator implements OAuth2TokenValidator<Jwt> {
 
     private final String audience;
@@ -126,7 +125,9 @@ public class SecurityConfig {
     @Override
     public OAuth2TokenValidatorResult validate(Jwt token) {
       List<String> aud = token.getAudience();
-      if (aud != null && (aud.contains(audience) || aud.contains(internalAudience))) {
+      boolean user = aud != null && aud.contains(audience);
+      boolean internal = aud != null && aud.contains(internalAudience);
+      if (user ^ internal) {
         return OAuth2TokenValidatorResult.success();
       }
       return OAuth2TokenValidatorResult.failure(
