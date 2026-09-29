@@ -10,7 +10,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * Reads the tenant under RLS and appends one {@code auth.login} audit row. Call only after {@code
+ * Reads the tenant under RLS. {@code auth.login} is written only when provisioning actually wrote
+ * (first login or a newer {@code ent_ver}), not on every request. Call only after {@code
  * TenantContext} is set so {@code doBegin} binds {@code app.tenant_id}.
  */
 @Service
@@ -22,24 +23,13 @@ public class TenantSessionService {
     this.jdbc = jdbc;
   }
 
-  @Transactional
-  public TenantSnapshot open(UserClaims claims, UUID tenantId, UUID userId, String remoteAddr) {
-    // Step 1: The policy hides every other shop. No row means the context did not stick.
-    TenantSnapshot snapshot = load(tenantId, userId);
-    // Step 2: A stale token is not a login. The caller returns 401 without an audit row.
-    if (snapshot.entVer() > claims.entVer()) {
-      return snapshot;
-    }
-    recordLogin(claims, snapshot, remoteAddr);
-    return snapshot;
-  }
-
-  private TenantSnapshot load(UUID tenantId, UUID userId) {
+  @Transactional(readOnly = true)
+  public TenantSnapshot load(UUID tenantId, UUID userId) {
     TenantSnapshot snapshot =
         jdbc.query(
             """
             SELECT t.id, t.name, t.tsf_shop_id, t.membership_tier, t.entitlement_status,
-                   t.entitlement_expires_at, t.ent_ver, m.role, m.user_id
+                   t.entitlement_expires_at, t.ent_ver, m.role, m.user_id, m.status AS membership_status
             FROM tenant t
             JOIN tenant_membership m ON m.tenant_id = t.id
             WHERE t.id = ? AND m.user_id = ?
@@ -55,7 +45,8 @@ public class TenantSessionService {
     return snapshot;
   }
 
-  private void recordLogin(UserClaims claims, TenantSnapshot snapshot, String remoteAddr) {
+  @Transactional
+  public void recordLogin(UserClaims claims, TenantSnapshot snapshot, String remoteAddr) {
     // Step 3: Audit stores the user id and entitlement, never email or display name.
     String after =
         "{\"entitlement_status\":\""
@@ -94,6 +85,7 @@ public class TenantSessionService {
         rs.getString("membership_tier"),
         rs.getString("role"),
         rs.getString("entitlement_status"),
+        rs.getString("membership_status"),
         expires == null ? null : expires.toInstant(),
         rs.getLong("ent_ver"));
   }
