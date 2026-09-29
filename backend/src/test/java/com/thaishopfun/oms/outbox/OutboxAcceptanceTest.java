@@ -49,6 +49,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.test.web.server.LocalServerPort;
+import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
@@ -152,6 +153,7 @@ class OutboxAcceptanceTest {
   @Autowired private OutboxStore store;
   @Autowired private OutboxProperties outboxProperties;
   @Autowired private CrashHooks hooks;
+  @Autowired private ApplicationContext applicationContext;
   @LocalServerPort private int port;
 
   private RestClient client;
@@ -178,6 +180,15 @@ class OutboxAcceptanceTest {
   void clearTenant() {
     hooks.reset();
     TenantContext.clear();
+  }
+
+  @Test
+  void publisherSchedulerIsSeparateFromTheInboxScheduler() {
+    Object outbox = applicationContext.getBean("outboxTaskScheduler");
+    Object shared = applicationContext.getBean("taskScheduler");
+    assertThat(outbox)
+        .isInstanceOf(org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler.class);
+    assertThat(shared).isNotSameAs(outbox);
   }
 
   @Test

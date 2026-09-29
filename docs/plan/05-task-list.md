@@ -9,17 +9,15 @@
 - **Flyway migrations may be written by Cursor or Codex, one migration per PR, never edit a merged version; Codex reviews every migration PR.**
 - **Definition of Done:** CI เขียว (รวม contract test), test ครอบ AC, ไม่มี PII ใน log, invariant check ผ่าน, อัปเดต `docs/` ถ้าเปลี่ยน contract (แก้ spec ใน `tsf-oms-contracts` ก่อนเสมอ)
 
-### Flyway versions (current)
+### Flyway
 
-| Version | Task | Status |
-|---|---|---|
-| V1 | T02 | merged — foundation RLS, inbox, outbox |
-| V2 | T03 | merged — `V2__jit_provision.sql` |
-| V3 | T06 | reserved — catalog |
-| V4 | T10 | reserved — orders |
-| V5 | T50M | reserved — allocation |
-| V6 | T11 | used by T11 — inbox |
-| V7 | T14 | reserved, unused by T14 (no schema change); T11 uses V6 |
+| Rule | Detail |
+|---|---|
+| Numbering | Versions are taken in merge order as the next free number |
+| Per PR | One migration per PR. Never edit a merged migration |
+| V1 | T02 |
+| V2 | T03 |
+| T14 | T14 adds no migration |
 
 ## สรุปจำนวน
 | Phase | Cursor | Codex | รวม |

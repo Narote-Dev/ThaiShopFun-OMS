@@ -13,9 +13,19 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 public class OutboxConfig {
 
   /**
-   * The publisher does not share Spring's single-thread scheduler, so an inbox worker can still run
-   * while a batch is in flight.
+   * Default pool for {@code @Scheduled} methods that do not name a scheduler, including the T11
+   * inbox worker. Defining only the outbox scheduler would make Boot skip this bean, and Spring
+   * would then run every scheduled method on the outbox pool.
    */
+  @Bean(name = "taskScheduler")
+  public ThreadPoolTaskScheduler taskScheduler() {
+    ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
+    scheduler.setPoolSize(1);
+    scheduler.setThreadNamePrefix("task-scheduler-");
+    return scheduler;
+  }
+
+  /** Own pool for the outbox publisher so a long tick cannot block the inbox worker. */
   @Bean(name = "outboxTaskScheduler")
   public ThreadPoolTaskScheduler outboxTaskScheduler() {
     ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
