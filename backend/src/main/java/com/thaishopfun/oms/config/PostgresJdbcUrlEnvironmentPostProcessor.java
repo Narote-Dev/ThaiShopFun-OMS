@@ -22,23 +22,19 @@ public class PostgresJdbcUrlEnvironmentPostProcessor implements EnvironmentPostP
   @Override
   public void postProcessEnvironment(
       ConfigurableEnvironment environment, SpringApplication application) {
-    // Step 1: Read the resolved datasource URL (yaml placeholder or env).
     String url = environment.getProperty("spring.datasource.url");
-
-    // Step 2: Convert a postgres URL and override user/password embedded in it.
     PostgresJdbcUrl.Normalized normalized = PostgresJdbcUrl.normalize(url);
     if (normalized == null) {
       return;
     }
     Map<String, Object> mapped = new HashMap<>();
     mapped.put("spring.datasource.url", normalized.jdbcUrl());
-    if (normalized.username() != null) {
+    if (!explicitRuntimeUser(environment) && normalized.username() != null) {
       mapped.put("spring.datasource.username", normalized.username());
     }
-    if (normalized.password() != null) {
+    if (!explicitRuntimePassword(environment) && normalized.password() != null) {
       mapped.put("spring.datasource.password", normalized.password());
     }
-    // Change: Flyway follows the bootstrap login embedded in a postgres URL.
     if (environment.getProperty("FLYWAY_USER") == null && normalized.username() != null) {
       mapped.put("spring.flyway.url", normalized.jdbcUrl());
       mapped.put("spring.flyway.user", normalized.username());
@@ -49,9 +45,33 @@ public class PostgresJdbcUrlEnvironmentPostProcessor implements EnvironmentPostP
     environment.getPropertySources().addFirst(new MapPropertySource(PROPERTY_SOURCE, mapped));
   }
 
+  static boolean explicitRuntimeUser(ConfigurableEnvironment environment) {
+    return hasText(environment.getProperty("DATABASE_USERNAME"))
+        || definedInSystemSource(environment, "spring.datasource.username");
+  }
+
+  static boolean explicitRuntimePassword(ConfigurableEnvironment environment) {
+    return hasText(environment.getProperty("DATABASE_PASSWORD"))
+        || definedInSystemSource(environment, "spring.datasource.password");
+  }
+
+  private static boolean definedInSystemSource(ConfigurableEnvironment environment, String key) {
+    for (org.springframework.core.env.PropertySource<?> source : environment.getPropertySources()) {
+      String name = source.getName();
+      if (("systemProperties".equals(name) || "systemEnvironment".equals(name))
+          && source.containsProperty(key)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private static boolean hasText(String value) {
+    return value != null && !value.isBlank();
+  }
+
   @Override
   public int getOrder() {
-    // After ConfigDataEnvironmentPostProcessor so application.yml is visible.
     return Ordered.LOWEST_PRECEDENCE;
   }
 }
