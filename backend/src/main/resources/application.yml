@@ -1,22 +1,30 @@
 # Local defaults match docker-compose.yml. Railway overrides DATABASE_* (see README).
-# The datasource user is the dev-only bootstrap superuser so Flyway can create roles.
-# It bypasses RLS. oms_app is the runtime role and is not this login until T03.
+# Runtime connects as oms_app (NOBYPASSRLS). Dev-only password, not for any shared environment.
+# Flyway keeps the bootstrap superuser (local user `oms`), which bypasses RLS.
 spring:
   application:
     name: oms
   datasource:
     url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/oms}
-    username: ${DATABASE_USERNAME:oms}
-    password: ${DATABASE_PASSWORD:oms}
+    username: ${DATABASE_USERNAME:oms_app}
+    password: ${DATABASE_PASSWORD:oms_app}
     hikari:
       # Wait for Postgres when `docker compose up -d` and the app start together.
       initialization-fail-timeout: 60000
   flyway:
     enabled: true
     clean-disabled: true
+    # Change: separate login from the runtime pool. URL follows spring.datasource.url
+    # unless FLYWAY_URL or a postgres:// DATABASE_URL sets it (see the post-processor).
+    user: ${FLYWAY_USER:oms}
+    password: ${FLYWAY_PASSWORD:oms}
 
 server:
   port: ${PORT:8080}
+  error:
+    include-message: never
+    include-stacktrace: never
+    include-binding-errors: never
 
 management:
   endpoints:
@@ -28,3 +36,12 @@ management:
       show-details: never
       probes:
         enabled: true
+
+# T05 sets the issuer and JWKS URI. A blank jwks-uri still boots: API calls return 401
+# and GET /actuator/health stays open.
+oms:
+  security:
+    issuer: ${OMS_JWT_ISSUER:http://localhost:9/tsf-idp}
+    audience: ${OMS_JWT_AUDIENCE:oms}
+    internal-audience: ${OMS_JWT_INTERNAL_AUDIENCE:oms-internal}
+    jwks-uri: ${TSF_JWKS_URI:${OMS_JWKS_URI:}}

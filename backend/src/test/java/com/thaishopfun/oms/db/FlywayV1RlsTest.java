@@ -21,6 +21,8 @@ import org.junit.jupiter.api.Test;
 import org.postgresql.util.PSQLException;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
@@ -47,6 +49,13 @@ class FlywayV1RlsTest {
 
   @Container @ServiceConnection
   static PostgreSQLContainer postgres = new PostgreSQLContainer("postgres:16-alpine");
+
+  @DynamicPropertySource
+  static void flywayUsesContainerSuperuser(DynamicPropertyRegistry registry) {
+    // Change: application.yml points Flyway at the local `oms` login. This database has `test`.
+    registry.add("spring.flyway.user", postgres::getUsername);
+    registry.add("spring.flyway.password", postgres::getPassword);
+  }
 
   @BeforeEach
   void resetRowsAndEnableTestLogins() throws SQLException {
@@ -76,8 +85,12 @@ class FlywayV1RlsTest {
           ResultSet history =
               statement.executeQuery(
                   "SELECT version, success FROM flyway_schema_history ORDER BY installed_rank")) {
+        // Change: V2 (JIT provisioning) is applied with V1.
         assertThat(history.next()).isTrue();
         assertThat(history.getString("version")).isEqualTo("1");
+        assertThat(history.getBoolean("success")).isTrue();
+        assertThat(history.next()).isTrue();
+        assertThat(history.getString("version")).isEqualTo("2");
         assertThat(history.getBoolean("success")).isTrue();
         assertThat(history.next()).isFalse();
       }

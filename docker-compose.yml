@@ -8,6 +8,7 @@ services:
       POSTGRES_USER: oms
       POSTGRES_PASSWORD: oms
       # Dev-only passwords for the roles created in docker/postgres/init.
+      # The API's local login is oms_app / OMS_APP_PASSWORD. Flyway uses POSTGRES_USER.
       # Override in the shell if you want. oms_maint has no login and no password.
       OMS_MIGRATOR_PASSWORD: ${OMS_MIGRATOR_PASSWORD:-oms_migrator}
       OMS_APP_PASSWORD: ${OMS_APP_PASSWORD:-oms_app}

@@ -11,6 +11,9 @@ import org.springframework.core.env.MapPropertySource;
 /**
  * Rewrites Railway's {@code DATABASE_URL} ({@code postgresql://...}) into {@code
  * spring.datasource.url} after {@code application.yml} has been loaded.
+ *
+ * <p>That URL is the bootstrap login. Flyway uses it too, unless {@code FLYWAY_USER} is set, so a
+ * deploy does not fall through to the local dev user {@code oms}.
  */
 public class PostgresJdbcUrlEnvironmentPostProcessor implements EnvironmentPostProcessor, Ordered {
 
@@ -34,6 +37,14 @@ public class PostgresJdbcUrlEnvironmentPostProcessor implements EnvironmentPostP
     }
     if (normalized.password() != null) {
       mapped.put("spring.datasource.password", normalized.password());
+    }
+    // Change: Flyway follows the bootstrap login embedded in a postgres URL.
+    if (environment.getProperty("FLYWAY_USER") == null && normalized.username() != null) {
+      mapped.put("spring.flyway.url", normalized.jdbcUrl());
+      mapped.put("spring.flyway.user", normalized.username());
+      if (normalized.password() != null) {
+        mapped.put("spring.flyway.password", normalized.password());
+      }
     }
     environment.getPropertySources().addFirst(new MapPropertySource(PROPERTY_SOURCE, mapped));
   }
