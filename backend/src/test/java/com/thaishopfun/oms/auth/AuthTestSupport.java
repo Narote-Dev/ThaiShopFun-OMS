@@ -31,7 +31,8 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
 /** Shared Postgres 16 and a localhost JWKS. The app login is {@code oms_app}. */
-final class AuthTestSupport {
+// Change: public so the outbox acceptance test can reuse the JWKS and the app login.
+public final class AuthTestSupport {
 
   static final String APP_PASSWORD = "oms-app-test-only";
   static final String ISSUER = "http://127.0.0.1/tsf-test";
@@ -73,7 +74,7 @@ final class AuthTestSupport {
 
   private AuthTestSupport() {}
 
-  static void register(DynamicPropertyRegistry registry) {
+  public static void register(DynamicPropertyRegistry registry) {
     registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
     registry.add("spring.datasource.username", () -> "oms_app");
     registry.add("spring.datasource.password", () -> APP_PASSWORD);
@@ -87,12 +88,12 @@ final class AuthTestSupport {
     registry.add("oms.security.internal-client-ids", () -> "tsf-checkout");
   }
 
-  static Connection admin() throws SQLException {
+  public static Connection admin() throws SQLException {
     return DriverManager.getConnection(
         POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
   }
 
-  static String userToken(
+  public static String userToken(
       String userId, String shopId, String status, Instant membershipExpiry, long entVer) {
     return token(
         userId,
@@ -126,7 +127,7 @@ final class AuthTestSupport {
         "OWNER");
   }
 
-  static String token(
+  public static String token(
       String userId,
       String shopId,
       String status,

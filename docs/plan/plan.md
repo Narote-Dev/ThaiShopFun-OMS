@@ -758,6 +758,16 @@ Error format ทุก endpoint:
 - **Flyway migrations may be written by Cursor or Codex, one migration per PR, never edit a merged version; Codex reviews every migration PR.**
 - **Definition of Done:** CI เขียว (รวม contract test), test ครอบ AC, ไม่มี PII ใน log, invariant check ผ่าน, อัปเดต `docs/` ถ้าเปลี่ยน contract (แก้ spec ใน `tsf-oms-contracts` ก่อนเสมอ)
 
+### Flyway
+
+| Rule | Detail |
+|---|---|
+| Numbering | Versions are taken in merge order as the next free number |
+| Per PR | One migration per PR. Never edit a merged migration |
+| V1 | T02 |
+| V2 | T03 |
+| T14 | T14 adds no migration |
+
 ## สรุปจำนวน
 | Phase | Cursor | Codex | รวม |
 |---|---|---|---|

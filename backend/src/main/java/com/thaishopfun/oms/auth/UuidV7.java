@@ -4,13 +4,14 @@ import java.security.SecureRandom;
 import java.util.UUID;
 
 /** UUIDv7 for ids the application inserts. Provisioning functions use {@code gen_random_uuid}. */
-final class UuidV7 {
+// Change: public so the outbox appender can mint the same ids as the rest of the app.
+public final class UuidV7 {
 
   private static final SecureRandom RANDOM = new SecureRandom();
 
   private UuidV7() {}
 
-  static UUID generate() {
+  public static UUID generate() {
     long millis = System.currentTimeMillis();
     byte[] bytes = new byte[16];
     bytes[0] = (byte) (millis >>> 40);

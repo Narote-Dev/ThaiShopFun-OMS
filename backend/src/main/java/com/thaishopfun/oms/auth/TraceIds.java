@@ -3,13 +3,14 @@ package com.thaishopfun.oms.auth;
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.UUID;
 
-final class TraceIds {
+// Change: public so the outbox admin API can return the same trace_id as other errors.
+public final class TraceIds {
 
-  static final String ATTRIBUTE = "oms.trace_id";
+  public static final String ATTRIBUTE = "oms.trace_id";
 
   private TraceIds() {}
 
-  static String current(HttpServletRequest request) {
+  public static String current(HttpServletRequest request) {
     Object existing = request.getAttribute(ATTRIBUTE);
     if (existing instanceof String text && !text.isEmpty()) {
       return text;
