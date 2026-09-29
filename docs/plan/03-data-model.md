@@ -104,13 +104,19 @@ erDiagram
 ### Sync / Platform
 | ตาราง | columns สำคัญ | หมายเหตุ |
 |---|---|---|
-| `inbox_event` | id, tenant_id, source, event_id, event_type, aggregate_id, payload jsonb, status (`RECEIVED/PROCESSED/FAILED/DEAD`), attempts, next_attempt_at, last_error, received_at, processed_at, **UNIQUE(source, event_id)** | payload ที่มี PII ล้างหลัง PROCESSED 7 วัน |
+| `inbox_event` | id, tenant_id, source, event_id, event_type, aggregate_id, aggregate_version, payload jsonb, payload_sha256 bytea, status (`RECEIVED/PROCESSED/FAILED/DEAD`), attempts, next_attempt_at, last_error, received_at, processed_at, **UNIQUE(tenant_id, source, event_id)** | V3. V1 was `UNIQUE(source, event_id)`, which collided across shops. payload ที่มี PII ล้างหลัง PROCESSED 7 วัน |
 | `outbox_event` | id, tenant_id, aggregate_type, aggregate_id, event_type, payload jsonb, status (`PENDING/IN_FLIGHT/SENT/DEAD`), attempts, next_attempt_at, lease_until, created_at, sent_at | เขียนใน transaction เดียวกับ business change |
 | `sync_cursor` | tenant_id, channel_account_id, resource (`ORDERS/LISTINGS`), cursor, last_success_at, PK(channel_account_id, resource) | |
 | `idempotency_key` | tenant_id, scope, key, request_hash, response_status, response_body jsonb, created_at, PK(tenant_id, scope, key) | ลบหลัง 24 ชม. |
 | `shadow_diff` | id, tenant_id, channel_account_id, kind (`STOCK/ORDER/RESERVATION`), ref, oms_value, channel_value, observed_at | ใช้ตัดสินเลื่อน mode |
 | `reconciliation_issue` | id, tenant_id, run_id, rule, order_id NULL, details jsonb, status (`OPEN/ACK/RESOLVED`), UNIQUE(tenant_id, rule, order_id) WHERE status<>'RESOLVED' | |
 | `audit_log` | id, tenant_id, actor_type (`USER/SYSTEM/TSF/PLATFORM_ADMIN`), actor_id, action, entity_type, entity_id, before jsonb, after jsonb, ip, created_at | append-only, PII แทนด้วย `"[PII]"` |
+
+Inbox entitlement (T11), applied by the worker after `claim_inbox_batch`. The claim function does not filter it.
+
+- `ACTIVE`, and `GRACE` that has not passed `entitlement_expires_at`: process the event. GRACE still blocks user API writes. Inbound events keep flowing so the shop does not lose orders during grace.
+- `SUSPENDED`, a passed expiry, or any other status: defer business events. Status stays `RECEIVED` or `FAILED`, the claim does not consume an attempt, and `next_attempt_at` is pushed out. The row is not deleted and does not become `DEAD` only because the shop is suspended.
+- `membership.changed` is processed in every state, including `SUSPENDED`, so a renewal can set the tenant back to `ACTIVE`.
 
 ## PII lifecycle
 | ข้อมูล | เก็บที่ | ป้องกัน | อายุ |

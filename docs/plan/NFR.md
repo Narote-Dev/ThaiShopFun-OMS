@@ -19,7 +19,7 @@
 | รายการ | เป้า | วัดจาก |
 |---|---|---|
 | Checkout reserve API | p95 < 150 ms · p99 < 300 ms | server-side, T43 |
-| Webhook ingestion (รับ → ตอบ 202) | p95 < 100 ms · p99 < 300 ms | T11 metric |
+| Webhook ingestion (รับ → ตอบ 202) | p95 < 100 ms · p99 < 300 ms | T11 metric `oms.inbox.ack` |
 | Order processing lag (รับ event → ออเดอร์ + reservation commit) | p95 < 5 วิ · p99 < 30 วิ | `processed_at − received_at` |
 | Stock propagation lag (inventory เปลี่ยน → TSF รับ `stock.updated`) | TSF p95 < 10 วิ · marketplace p95 < 60 วิ | outbox `sent_at − ledger.created_at` |
 | หน้า orders list (10,000 ออเดอร์) | < 1 วิ | T17 |

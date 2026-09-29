@@ -1,0 +1,4 @@
+# Dev-only inbox HMAC. Active with the `local` profile. Not a production secret.
+oms:
+  inbox:
+    hmac-secrets: dev-inbox-hmac-secret

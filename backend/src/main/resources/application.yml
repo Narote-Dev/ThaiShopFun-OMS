@@ -50,6 +50,20 @@ oms:
     # Client ids (azp or client_id) allowed to call /internal/**. Empty rejects every service token.
     internal-client-ids: []
     # allow-rls-bypass stays at the Java default false. Do not set it here.
+  inbox:
+    # Comma-separated HMAC secrets, current key first. Empty outside local/test refuses to boot.
+    # The dev value is application-local.yml (profile local), not this file.
+    hmac-secrets: ${OMS_INBOX_HMAC_SECRETS:}
+    # Polls claim_inbox_batch. Tests set this to false and call InboxWorker directly.
+    worker-enabled: ${OMS_INBOX_WORKER_ENABLED:true}
+    worker-delay-ms: ${OMS_INBOX_WORKER_DELAY_MS:1000}
+    # 5 x handler-timeout (30s) stays inside the 5m lease.
+    # lease is at most 1 hour (InboxLimits.MAX_LEASE), the claim_inbox_batch ceiling.
+    batch-size: 5
+    lease: 5m
+    handler-timeout: 30s
+    suspend-defer: 5m
+    jitter-ratio: 0.2
   # T14 outbox publisher. Blank URL or secret: the scheduler does not claim rows.
   # A set secret must be at least 32 bytes. The URL must be absolute http or https.
   # Lease must be at least 1s and longer than (batch-size + 1) * http-timeout.
@@ -59,6 +73,6 @@ oms:
     batch-size: 20
     lease: 5m
     http-timeout: 10s
+    jitter-ratio: 0.2
     destination-url: ${TSF_OMS_EVENTS_URL:}
     webhook-secret: ${OMS_OUTBOX_WEBHOOK_SECRET:}
-    jitter-ratio: 0.2
