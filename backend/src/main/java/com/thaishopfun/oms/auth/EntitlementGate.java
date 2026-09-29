@@ -7,8 +7,9 @@ import java.time.Instant;
 import org.springframework.stereotype.Component;
 
 /**
- * ACTIVE with {@code oms} is full access. GRACE is read-only. SUSPENDED, a past {@code expires_at}
- * on ACTIVE, or a missing {@code oms} entitlement is {@code ENTITLEMENT_INACTIVE}.
+ * ACTIVE with {@code oms} is full access. GRACE that has not expired is read-only. SUSPENDED, a
+ * past {@code expires_at} (including GRACE), or a missing {@code oms} entitlement is {@code
+ * ENTITLEMENT_INACTIVE}.
  */
 @Component
 public class EntitlementGate {
@@ -25,13 +26,13 @@ public class EntitlementGate {
       UserClaims claims,
       TenantSnapshot snapshot)
       throws IOException {
-    // Step 1: Suspended and expired memberships cannot call the API.
-    if ("SUSPENDED".equals(snapshot.status())) {
-      errors.write(request, response, 403, "ENTITLEMENT_INACTIVE", "Membership suspended");
+    // Step 1: Suspended and expired memberships cannot call the API. Grace expires too.
+    if (snapshot.expired(Instant.now())) {
+      errors.write(request, response, 403, "ENTITLEMENT_INACTIVE", "Membership expired");
       return false;
     }
-    if ("ACTIVE".equals(snapshot.status()) && snapshot.expired(Instant.now())) {
-      errors.write(request, response, 403, "ENTITLEMENT_INACTIVE", "Membership expired");
+    if ("SUSPENDED".equals(snapshot.status())) {
+      errors.write(request, response, 403, "ENTITLEMENT_INACTIVE", "Membership suspended");
       return false;
     }
     if (!"ACTIVE".equals(snapshot.status()) && !"GRACE".equals(snapshot.status())) {

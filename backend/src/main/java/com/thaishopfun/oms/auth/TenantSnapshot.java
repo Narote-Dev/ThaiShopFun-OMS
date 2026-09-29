@@ -12,6 +12,7 @@ public record TenantSnapshot(
     String tier,
     String role,
     String status,
+    String membershipStatus,
     Instant expiresAt,
     long entVer) {
 
