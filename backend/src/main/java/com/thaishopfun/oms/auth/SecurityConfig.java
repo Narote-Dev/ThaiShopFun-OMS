@@ -1,5 +1,6 @@
 package com.thaishopfun.oms.auth;
 
+import java.util.ArrayList;
 import java.util.List;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -38,13 +39,13 @@ public class SecurityConfig {
         NimbusJwtDecoder.withJwkSetUri(properties.getJwksUri())
             .jwsAlgorithm(SignatureAlgorithm.RS256)
             .build();
-    // Step 1: Require typ=at+jwt. createDefaultWithIssuer also inserts JwtTypeValidator.jwt(),
-    // which rejects that header, so issuer and type are passed in explicitly.
+    // Step 1: Pass typ ourselves. createDefaultWithIssuer inserts JwtTypeValidator.jwt(), which
+    // accepts only JWT and would ignore oms.security.accepted-token-types.
     decoder.setJwtValidator(
         JwtValidators.createDefaultWithValidators(
             List.of(
                 new JwtIssuerValidator(properties.getIssuer()),
-                new JwtTypeValidator("at+jwt"),
+                tokenTypes(properties.getAcceptedTokenTypes()),
                 new AudienceValidator(
                     properties.getAudience(), properties.getInternalAudience()))));
     return decoder;
@@ -116,6 +117,32 @@ public class SecurityConfig {
                 .authenticationEntryPoint(errors::unauthorized)
                 .accessDeniedHandler(errors::forbidden)
                 .jwt(jwt -> jwt.decoder(jwtDecoder)));
+  }
+
+  /**
+   * Named entries are allowed {@code typ} values. A blank entry allows a missing {@code typ}.
+   * Audience still rejects an {@code id_token}.
+   */
+  private static JwtTypeValidator tokenTypes(List<String> configured) {
+    if (configured == null || configured.isEmpty()) {
+      throw new IllegalStateException("oms.security.accepted-token-types must not be empty");
+    }
+    boolean allowMissing = false;
+    List<String> types = new ArrayList<>();
+    for (String value : configured) {
+      if (value == null || value.isBlank()) {
+        allowMissing = true;
+      } else if (!types.contains(value)) {
+        types.add(value);
+      }
+    }
+    if (types.isEmpty()) {
+      throw new IllegalStateException(
+          "oms.security.accepted-token-types must name at least one typ");
+    }
+    JwtTypeValidator validator = new JwtTypeValidator(types);
+    validator.setAllowEmpty(allowMissing);
+    return validator;
   }
 
   /** Accepts either the user audience or the internal audience. The chain then narrows it. */

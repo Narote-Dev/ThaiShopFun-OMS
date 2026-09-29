@@ -6,6 +6,9 @@ oms:
     jwks-uri: http://localhost:8090/tsf-idp/.well-known/jwks.json
     internal-client-ids:
       - tsf
+    # The mock mints typ=at+jwt. A real TSF may send JWT or no typ; that stays on the default list.
+    accepted-token-types:
+      - at+jwt
   inbox:
     hmac-secrets: dev-inbox-hmac-secret
   outbox:

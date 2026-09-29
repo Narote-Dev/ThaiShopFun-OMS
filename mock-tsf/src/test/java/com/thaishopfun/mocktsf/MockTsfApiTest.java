@@ -516,6 +516,75 @@ class MockTsfApiTest {
   }
 
   @Test
+  void checkoutReportFollowsTheOperation() throws Exception {
+    java.util.concurrent.atomic.AtomicInteger posts =
+        new java.util.concurrent.atomic.AtomicInteger();
+    java.util.concurrent.atomic.AtomicInteger deletes =
+        new java.util.concurrent.atomic.AtomicInteger();
+    String created =
+        "{\"reservation_id\":\"rsv_1\",\"expires_at\":\"2026-09-29T08:30:00Z\",\"enforced\":true,"
+            + "\"items\":[{\"listing_sku_id\":\"tsf_sku_7781\",\"qty\":1,\"enforced\":true}]}";
+    com.sun.net.httpserver.HttpServer scripted =
+        com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress("127.0.0.1", 0), 0);
+    scripted.createContext(
+        "/",
+        exchange -> {
+          exchange.getRequestBody().readAllBytes();
+          String method = exchange.getRequestMethod();
+          if ("POST".equals(method) && posts.incrementAndGet() == 1) {
+            byte[] body = created.getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(201, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+            return;
+          }
+          if ("POST".equals(method)) {
+            exchange.sendResponseHeaders(204, -1);
+            exchange.close();
+            return;
+          }
+          if ("DELETE".equals(method) && deletes.incrementAndGet() == 1) {
+            exchange.sendResponseHeaders(204, -1);
+            exchange.close();
+            return;
+          }
+          byte[] body = created.getBytes(StandardCharsets.UTF_8);
+          exchange.sendResponseHeaders(201, body.length);
+          exchange.getResponseBody().write(body);
+          exchange.close();
+        });
+    scripted.start();
+    try {
+      endpoint.setBaseUrl("http://127.0.0.1:" + scripted.getAddress().getPort());
+      String request =
+          "{\"checkout_id\":\"chk_1\",\"tsf_shop_id\":\"shop_45021\",\"items\":[{\"listing_sku_id\":\"tsf_sku_7781\",\"qty\":1}]}";
+      JsonNode reserved = JSON.readTree(post("/control/checkout/reservations", request).body());
+      assertThat(reserved.path("oms_status").asInt()).isEqualTo(201);
+      assertThat(reserved.path("response_schema_valid").asBoolean()).isTrue();
+      JsonNode wrongRelease = JSON.readTree(post("/control/checkout/reservations", request).body());
+      assertThat(wrongRelease.path("oms_status").asInt()).isEqualTo(204);
+      assertThat(wrongRelease.path("response_schema_valid").asBoolean()).isFalse();
+      JsonNode released = JSON.readTree(delete("/control/checkout/reservations/rsv_1").body());
+      assertThat(released.path("oms_status").asInt()).isEqualTo(204);
+      assertThat(released.path("response_schema_valid").asBoolean()).isTrue();
+      JsonNode wrongReserve = JSON.readTree(delete("/control/checkout/reservations/rsv_1").body());
+      assertThat(wrongReserve.path("oms_status").asInt()).isEqualTo(201);
+      assertThat(wrongReserve.path("response_schema_valid").asBoolean()).isFalse();
+    } finally {
+      scripted.stop(0);
+      endpoint.setBaseUrl("http://127.0.0.1:" + oms.getAddress().getPort());
+    }
+  }
+
+  @Test
+  void bumpShopIsInTheCatalog() throws Exception {
+    String service = serviceToken("oms-service", "dev-oms-service-secret");
+    HttpResponse<String> orders = get("/internal/v1/shops/shop_bump/orders", service);
+    assertThat(orders.statusCode()).isEqualTo(200);
+    assertThat(JSON.readTree(orders.body()).path("orders").isArray()).isTrue();
+  }
+
+  @Test
   void duplicateMembershipDoesNotRewriteTheSeed() throws Exception {
     java.util.concurrent.atomic.AtomicInteger calls =
         new java.util.concurrent.atomic.AtomicInteger();
@@ -614,6 +683,10 @@ class MockTsfApiTest {
       builder.header("Idempotency-Key", idempotency);
     }
     return http.send(builder.build(), HttpResponse.BodyHandlers.ofString());
+  }
+
+  private HttpResponse<String> delete(String path) throws Exception {
+    return http.send(request(path).DELETE().build(), HttpResponse.BodyHandlers.ofString());
   }
 
   private HttpRequest.Builder request(String path) {

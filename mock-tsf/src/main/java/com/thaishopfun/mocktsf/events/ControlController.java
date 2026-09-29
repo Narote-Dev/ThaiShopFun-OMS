@@ -248,7 +248,7 @@ public class ControlController {
     String checkoutId = body.path("checkout_id").asString();
     OmsCaller.CallResult result =
         oms.postReservation(raw.getBytes(StandardCharsets.UTF_8), checkoutId);
-    return responses.outbound(200, "checkout-result", checkoutResult(result));
+    return responses.outbound(200, "checkout-result", checkoutResult(result, true));
   }
 
   @DeleteMapping("/checkout/reservations/{reservationId}")
@@ -257,7 +257,7 @@ public class ControlController {
       throw ApiException.badRequest("BAD_REQUEST", "reservation id is required");
     }
     return responses.outbound(
-        200, "checkout-result", checkoutResult(oms.deleteReservation(reservationId)));
+        200, "checkout-result", checkoutResult(oms.deleteReservation(reservationId), false));
   }
 
   @GetMapping("/received-events")
@@ -317,30 +317,31 @@ public class ControlController {
     return row;
   }
 
-  private Map<String, Object> checkoutResult(OmsCaller.CallResult result) {
+  private Map<String, Object> checkoutResult(OmsCaller.CallResult result, boolean reserve) {
     Map<String, Object> body = new LinkedHashMap<>();
     body.put("oms_status", result.status());
     body.put("oms_body", snippet(result.body()));
-    body.put("response_schema_valid", schemaOk(result));
+    body.put("response_schema_valid", schemaOk(result, reserve));
     return body;
   }
 
-  private boolean schemaOk(OmsCaller.CallResult result) {
+  private boolean schemaOk(OmsCaller.CallResult result, boolean reserve) {
     if (!result.reached()) {
       return false;
     }
     String body = result.body() == null ? "" : result.body();
     try {
-      // Step 1: A non-JSON body is invalid. Do not fail the checkout report itself.
-      if (result.status() == 204) {
-        return body.isBlank();
-      }
-      if (result.status() == 201) {
+      // Step 1: Reserve is 201, 409, or an error. Release is 204 or an error. Anything else is
+      // invalid. A non-JSON body is invalid and must not fail the checkout report itself.
+      if (reserve && result.status() == 201) {
         return responses.validator().restErrors("reservation-created", body).isEmpty();
       }
-      if (result.status() == 409) {
+      if (reserve && result.status() == 409) {
         return responses.validator().restErrors("reservation-conflict", body).isEmpty()
             || responses.validator().restErrors("error", body).isEmpty();
+      }
+      if (!reserve && result.status() == 204) {
+        return body.isBlank();
       }
       if (result.status() >= 400) {
         return responses.validator().restErrors("error", body).isEmpty();

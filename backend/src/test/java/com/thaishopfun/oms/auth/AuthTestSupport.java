@@ -172,12 +172,15 @@ public final class AuthTestSupport {
     return ENCODER.encode(JwtEncoderParameters.from(header, built)).getTokenValue();
   }
 
-  /** Same issuer and {@code aud=oms} as an access token, but {@code typ} is {@code JWT}. */
+  /**
+   * OIDC {@code id_token}: {@code typ=JWT} and {@code aud=oms-web}. OMS rejects it because the
+   * audience is not {@code oms}, including when {@code JWT} is an accepted access-token type.
+   */
   public static String idToken(String userId, String shopId) throws Exception {
     JWTClaimsSet claims =
         new JWTClaimsSet.Builder()
             .issuer(ISSUER)
-            .audience("oms")
+            .audience("oms-web")
             .subject(userId)
             .expirationTime(Date.from(Instant.now().plusSeconds(600)))
             .issueTime(Date.from(Instant.now().minusSeconds(30)))
@@ -191,6 +194,39 @@ public final class AuthTestSupport {
                 .type(com.nimbusds.jose.JOSEObjectType.JWT)
                 .build(),
             claims);
+    jwt.sign(new RSASSASigner(RSA_KEY.toRSAPrivateKey()));
+    return jwt.serialize();
+  }
+
+  /**
+   * User access token with an explicit {@code typ}, or none when {@code typ} is null. Claims match
+   * a normal {@code /api/v1/me} token ({@code aud=oms}).
+   */
+  public static String userTokenWithTyp(String userId, String shopId, String typ) throws Exception {
+    Map<String, Object> membership = new LinkedHashMap<>();
+    membership.put("tier", "PRO");
+    membership.put("status", "ACTIVE");
+    membership.put("expires_at", Instant.now().plusSeconds(86400).toString());
+    JWTClaimsSet claims =
+        new JWTClaimsSet.Builder()
+            .issuer(ISSUER)
+            .audience("oms")
+            .subject(userId)
+            .expirationTime(Date.from(Instant.now().plusSeconds(600)))
+            .issueTime(Date.from(Instant.now().minusSeconds(30)))
+            .claim("shop_name", "Shop " + shopId)
+            .claim("tsf_shop_id", shopId)
+            .claim("shop_role", "OWNER")
+            .claim("membership", membership)
+            .claim("entitlements", List.of("oms"))
+            .claim("ent_ver", 1)
+            .build();
+    com.nimbusds.jose.JWSHeader.Builder header =
+        new com.nimbusds.jose.JWSHeader.Builder(JWSAlgorithm.RS256).keyID(RSA_KEY.getKeyID());
+    if (typ != null) {
+      header.type(new com.nimbusds.jose.JOSEObjectType(typ));
+    }
+    SignedJWT jwt = new SignedJWT(header.build(), claims);
     jwt.sign(new RSASSASigner(RSA_KEY.toRSAPrivateKey()));
     return jwt.serialize();
   }

@@ -17,7 +17,7 @@ import org.springframework.stereotype.Component;
 public class TsfCatalog {
 
   private static final Set<String> SHOPS =
-      Set.of("shop_active", "shop_grace", "shop_suspended", "shop_expired");
+      Set.of("shop_active", "shop_grace", "shop_suspended", "shop_expired", "shop_bump");
 
   private final List<Order> orders = new ArrayList<>();
   private final List<Map<String, Object>> listings = new ArrayList<>();

@@ -26,6 +26,8 @@ class EnvelopeSchemaTest {
     assertThat(validator.envelopeErrors(stock(true, "2", "1"))).isNotEmpty();
     assertThat(validator.envelopeErrors(stock(true, "1", "9223372036854775807"))).isEmpty();
     assertThat(validator.envelopeErrors(stock(true, "1", "9223372036854775808"))).isNotEmpty();
+    assertThat(validator.envelopeErrors(membershipEntVer("9223372036854775807"))).isEmpty();
+    assertThat(validator.envelopeErrors(membershipEntVer("9223372036854775808"))).isNotEmpty();
   }
 
   private static String membership(boolean version) {
@@ -39,6 +41,20 @@ class EnvelopeSchemaTest {
         + "\"aggregate_id\":\"shop_active\","
         + versionField
         + "\"data\":{\"tier\":\"PRO\",\"status\":\"ACTIVE\",\"ent_ver\":1}"
+        + "}";
+  }
+
+  private static String membershipEntVer(String entVer) {
+    return "{"
+        + "\"event_id\":\"evt-m\","
+        + "\"event_type\":\"membership.changed\","
+        + "\"schema_version\":1,"
+        + "\"occurred_at\":\"2026-09-29T08:15:02Z\","
+        + "\"tsf_shop_id\":\"shop_active\","
+        + "\"aggregate_id\":\"shop_active\","
+        + "\"data\":{\"tier\":\"PRO\",\"status\":\"ACTIVE\",\"ent_ver\":"
+        + entVer
+        + "}"
         + "}";
   }
 

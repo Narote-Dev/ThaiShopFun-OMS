@@ -49,6 +49,12 @@ oms:
     jwks-uri: ${TSF_JWKS_URI:${OMS_JWKS_URI:}}
     # Client ids (azp or client_id) allowed to call /internal/**. Empty rejects every service token.
     internal-client-ids: []
+    # Access-token typ. A blank entry allows a missing typ. local and test narrow this to at+jwt.
+    # An id_token is rejected by audience (oms-web), not by this list.
+    accepted-token-types:
+      - at+jwt
+      - JWT
+      - ""
     # allow-rls-bypass stays at the Java default false. Do not set it here.
   inbox:
     # Comma-separated HMAC secrets, current key first. Empty outside local/test refuses to boot.

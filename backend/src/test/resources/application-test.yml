@@ -1,0 +1,5 @@
+# Tests mint typ=at+jwt. The permissive default lives in application.yml.
+oms:
+  security:
+    accepted-token-types:
+      - at+jwt
