@@ -4,7 +4,8 @@ COPY mock-tsf/.mvn mock-tsf/.mvn
 COPY mock-tsf/mvnw mock-tsf/pom.xml mock-tsf/
 COPY mock-tsf/src mock-tsf/src
 COPY contracts contracts
-RUN chmod +x mock-tsf/mvnw && mock-tsf/mvnw -B -DskipTests package
+# Change: the wrapper lives in mock-tsf/. Maven must run there so it sees pom.xml and ../contracts.
+RUN chmod +x mock-tsf/mvnw && cd mock-tsf && ./mvnw -B -DskipTests package
 
 FROM eclipse-temurin:17-jre-jammy
 RUN apt-get update \
