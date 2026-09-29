@@ -1,5 +1,6 @@
 # Local defaults match docker-compose.yml. Railway overrides DATABASE_* (see README).
-# Flyway is intentionally not on the classpath. Codex owns migrations starting at T02.
+# The datasource user is the dev-only bootstrap superuser so Flyway can create roles.
+# It bypasses RLS. oms_app is the runtime role and is not this login until T03.
 spring:
   application:
     name: oms
@@ -10,6 +11,9 @@ spring:
     hikari:
       # Wait for Postgres when `docker compose up -d` and the app start together.
       initialization-fail-timeout: 60000
+  flyway:
+    enabled: true
+    clean-disabled: true
 
 server:
   port: ${PORT:8080}

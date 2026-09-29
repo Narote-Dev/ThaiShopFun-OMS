@@ -3,8 +3,14 @@ services:
     image: postgres:16-alpine
     environment:
       POSTGRES_DB: oms
+      # Dev-only bootstrap superuser. Flyway uses this login to create roles.
+      # It bypasses row-level security. Do not reuse these values outside local Docker.
       POSTGRES_USER: oms
       POSTGRES_PASSWORD: oms
+      # Dev-only passwords for the roles created in docker/postgres/init.
+      # Override in the shell if you want. oms_maint has no login and no password.
+      OMS_MIGRATOR_PASSWORD: ${OMS_MIGRATOR_PASSWORD:-oms_migrator}
+      OMS_APP_PASSWORD: ${OMS_APP_PASSWORD:-oms_app}
     ports:
       - "5432:5432"
     healthcheck:
@@ -14,6 +20,7 @@ services:
       retries: 10
     volumes:
       - oms-pgdata:/var/lib/postgresql/data
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
 
 volumes:
   oms-pgdata:
