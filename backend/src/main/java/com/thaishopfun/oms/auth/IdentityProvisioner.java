@@ -10,8 +10,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * First-login upserts through the V2 definers. Runs before {@code TenantContext} is set: the
- * functions are {@code SECURITY DEFINER} and do not need {@code app.tenant_id}.
+ * JIT provisioning through the V2 definers. {@link #lookup} is read-only and runs before any
+ * upsert. A stale {@code ent_ver} must be rejected by the caller with no call to {@link
+ * #provision}.
  */
 @Service
 public class IdentityProvisioner {
@@ -22,14 +23,58 @@ public class IdentityProvisioner {
     this.jdbc = jdbc;
   }
 
+  public record LoginLookup(
+      UUID tenantId, UUID userId, UUID membershipId, long entVer, String membershipStatus) {}
+
   public record Provisioned(UUID tenantId, UUID userId, UUID membershipId) {}
 
+  public LoginLookup lookup(String shopId, String userId) {
+    // Step 1: Definer read. No tenant setting and no row changes.
+    return jdbc.query(
+        "SELECT tenant_id, user_id, membership_id, ent_ver, membership_status FROM lookup_login(?, ?)",
+        ps -> {
+          ps.setString(1, shopId);
+          ps.setString(2, userId);
+        },
+        rs -> {
+          if (!rs.next()) {
+            return null;
+          }
+          return new LoginLookup(
+              rs.getObject("tenant_id", UUID.class),
+              rs.getObject("user_id", UUID.class),
+              rs.getObject("membership_id", UUID.class),
+              rs.getLong("ent_ver"),
+              rs.getString("membership_status"));
+        });
+  }
+
+  public static boolean needsProvision(LoginLookup found, UserClaims claims) {
+    if (found == null
+        || found.tenantId() == null
+        || found.userId() == null
+        || found.membershipId() == null) {
+      return true;
+    }
+    return found.entVer() < claims.entVer();
+  }
+
   @Transactional
-  public Provisioned provision(UserClaims claims) {
-    // Step 1: Shop, then user, then membership. Advisory locks inside the functions use that order.
-    UUID tenantId = provisionTenant(claims);
-    UUID userId = upsertUser(claims);
-    UUID membershipId = provisionMembership(tenantId, userId, claims.role());
+  public Provisioned provision(UserClaims claims, LoginLookup found) {
+    // Step 1: Touch a row only when it is missing or the token entitlement is newer.
+    boolean newer = found != null && found.tenantId() != null && found.entVer() < claims.entVer();
+    UUID tenantId = found == null ? null : found.tenantId();
+    UUID userId = found == null ? null : found.userId();
+    UUID membershipId = found == null ? null : found.membershipId();
+    if (tenantId == null || newer) {
+      tenantId = provisionTenant(claims);
+    }
+    if (userId == null || newer) {
+      userId = upsertUser(claims);
+    }
+    if (membershipId == null || newer) {
+      membershipId = provisionMembership(tenantId, userId, claims.role());
+    }
     return new Provisioned(tenantId, userId, membershipId);
   }
 
