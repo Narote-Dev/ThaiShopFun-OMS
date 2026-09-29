@@ -7,6 +7,18 @@
 - **Narote approve ทุก merge** เข้า `main` (branch protection: CI เขียว + Codex review + Narote approve)
 - 1 task = 1 PR (ใหญ่เกิน ~600 บรรทัดไม่นับ test → แตก PR)
 - **Flyway migrations may be written by Cursor or Codex, one migration per PR, never edit a merged version; Codex reviews every migration PR.**
+
+### Flyway versions (current)
+
+| Version | Task | Status |
+|---|---|---|
+| V1 | T02 | merged — foundation RLS, inbox, outbox |
+| V2 | T03 | merged — `V2__jit_provision.sql` |
+| V3 | T06 | reserved — catalog |
+| V4 | T10 | reserved — orders |
+| V5 | T50M | reserved — allocation |
+| V6 | T11 | reserved — inbox (parallel) |
+| V7 | T14 | not used — outbox publisher needs no schema change |
 - **Definition of Done:** CI เขียว (รวม contract test), test ครอบ AC, ไม่มี PII ใน log, invariant check ผ่าน, อัปเดต `docs/` ถ้าเปลี่ยน contract (แก้ spec ใน `tsf-oms-contracts` ก่อนเสมอ)
 
 ## สรุปจำนวน

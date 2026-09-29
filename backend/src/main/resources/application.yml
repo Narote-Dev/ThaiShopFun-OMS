@@ -50,3 +50,13 @@ oms:
     # Client ids (azp or client_id) allowed to call /internal/**. Empty rejects every service token.
     internal-client-ids: []
     # allow-rls-bypass stays at the Java default false. Do not set it here.
+  # T14 outbox publisher. Blank URL or secret: the scheduler does not claim rows.
+  outbox:
+    publisher-enabled: true
+    poll-delay-ms: 2000
+    batch-size: 20
+    lease: 5m
+    http-timeout: 10s
+    destination-url: ${TSF_OMS_EVENTS_URL:}
+    webhook-secret: ${OMS_OUTBOX_WEBHOOK_SECRET:}
+    jitter-ratio: 0.2
