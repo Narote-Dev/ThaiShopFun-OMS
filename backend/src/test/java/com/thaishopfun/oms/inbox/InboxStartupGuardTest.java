@@ -49,21 +49,31 @@ class InboxStartupGuardTest {
   }
 
   @Test
+  void handlerTransactionTimeoutRoundsUpToWholeSeconds() {
+    assertThat(InboxLimits.handlerTransactionTimeout(Duration.ofMillis(1100)))
+        .isEqualTo(Duration.ofSeconds(2));
+    assertThat(InboxLimits.handlerTransactionTimeoutSeconds(Duration.ofMillis(1100))).isEqualTo(2);
+    assertThat(InboxLimits.handlerTransactionTimeout(Duration.ofSeconds(2)))
+        .isEqualTo(Duration.ofSeconds(2));
+    assertThat(InboxLimits.handlerTransactionTimeout(Duration.ofMillis(400)))
+        .isEqualTo(Duration.ofSeconds(1));
+  }
+
+  @Test
   void subsecondLeaseIsKeptAboveTheHandlerTimeout() {
     MockEnvironment environment = new MockEnvironment();
     environment.setActiveProfiles("test");
     InboxProperties properties = new InboxProperties();
     properties.setBatchSize(1);
-    // 1.2s lease and 1.1s timeout. Truncating the lease to whole seconds would make it 1s.
     properties.setHandlerTimeout(Duration.ofMillis(1100));
     properties.setLease(Duration.ofMillis(1200));
     assertThat(InboxLimits.claimedLease(properties.getLease())).isEqualTo(Duration.ofMillis(1200));
-    assertThatCode(() -> InboxStartupGuard.verify(environment, properties))
-        .doesNotThrowAnyException();
+    // 1.1s becomes a 2s transaction timeout, which does not fit in a 1.2s lease.
+    assertThatThrownBy(() -> InboxStartupGuard.verify(environment, properties))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("lease");
 
-    properties.setLease(Duration.ofNanos(1_500_000));
-    properties.setHandlerTimeout(Duration.ofMillis(1));
-    assertThat(InboxLimits.claimedLease(properties.getLease())).isEqualTo(Duration.ofMillis(2));
+    properties.setLease(Duration.ofSeconds(3));
     assertThatCode(() -> InboxStartupGuard.verify(environment, properties))
         .doesNotThrowAnyException();
   }

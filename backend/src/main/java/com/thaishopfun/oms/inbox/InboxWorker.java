@@ -93,7 +93,9 @@ public class InboxWorker {
     this.policy = policy;
     this.jdbc = jdbc;
     this.claimTx = new TransactionTemplate(transactions);
-    int timeoutSeconds = (int) Math.max(properties.getHandlerTimeout().toSeconds(), 1);
+    // Step 1: TransactionTemplate takes whole seconds and truncates. Ceil so 1.1s is 2s, not 1s.
+    int timeoutSeconds =
+        InboxLimits.handlerTransactionTimeoutSeconds(properties.getHandlerTimeout());
     this.applyTx = new TransactionTemplate(transactions);
     this.applyTx.setTimeout(timeoutSeconds);
     this.failureTx = new TransactionTemplate(transactions);

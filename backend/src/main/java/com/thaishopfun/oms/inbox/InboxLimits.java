@@ -31,4 +31,28 @@ public final class InboxLimits {
     }
     return Duration.ofMillis(millis);
   }
+
+  /**
+   * Seconds for {@code TransactionTemplate.setTimeout}. That API truncates fractional seconds, so
+   * this rounds up. The minimum is 1. Startup compares the lease to this same duration.
+   */
+  public static Duration handlerTransactionTimeout(Duration configured) {
+    return Duration.ofSeconds(handlerTransactionTimeoutSeconds(configured));
+  }
+
+  public static int handlerTransactionTimeoutSeconds(Duration configured) {
+    // Step 1: A missing or non-positive timeout still gets the one-second floor.
+    if (configured == null || configured.isZero() || configured.isNegative()) {
+      return 1;
+    }
+    // Step 2: Any leftover nanos mean the whole-second value is too short. Ceil it.
+    long seconds = configured.getSeconds();
+    if (configured.getNano() > 0) {
+      seconds++;
+    }
+    if (seconds < 1) {
+      seconds = 1;
+    }
+    return seconds > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) seconds;
+  }
 }

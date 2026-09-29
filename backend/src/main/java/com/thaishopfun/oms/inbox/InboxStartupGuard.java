@@ -36,16 +36,17 @@ public class InboxStartupGuard implements ApplicationRunner {
       throw new IllegalStateException(
           "oms.inbox.hmac-secrets is required outside the local and test profiles");
     }
-    // Step 2: Compare the lease claim_inbox_batch will actually store (millis, rounded up).
+    // Step 2: Compare the lease and the timeout the worker will actually use.
+    // claimedLease rounds up to milliseconds. handlerTransactionTimeout ceils to whole seconds.
     Duration lease = InboxLimits.claimedLease(properties.getLease());
+    Duration timeout = InboxLimits.handlerTransactionTimeout(properties.getHandlerTimeout());
     if (properties.getBatchSize() < 1
         || properties.getHandlerTimeout().isZero()
         || properties.getHandlerTimeout().isNegative()
-        || lease.compareTo(properties.getHandlerTimeout()) <= 0) {
+        || lease.compareTo(timeout) <= 0) {
       throw new IllegalStateException("oms.inbox handler timeout must be shorter than the lease");
     }
-    if (properties.getHandlerTimeout().multipliedBy(properties.getBatchSize()).compareTo(lease)
-        >= 0) {
+    if (timeout.multipliedBy(properties.getBatchSize()).compareTo(lease) >= 0) {
       throw new IllegalStateException(
           "oms.inbox batch-size times handler-timeout must be shorter than the lease");
     }
