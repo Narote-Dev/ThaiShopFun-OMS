@@ -14,24 +14,25 @@ cd backend && ./mvnw spring-boot:run
 cd frontend && npm ci && npm run dev
 ```
 
-- Postgres 16 listens on `localhost:5432` (database `oms`, user `oms`, password `oms`). Those values are local defaults only.
+- Postgres 16 listens on `localhost:5432` (database `oms`, user `oms`, password `oms`). Those values are local defaults only. `oms` is a dev-only bootstrap superuser so Flyway can create roles. It bypasses row-level security.
+- On a new volume, `docker/postgres/init` also creates `oms_migrator` and `oms_app` with dev-only passwords `oms_migrator` and `oms_app` (override with `OMS_MIGRATOR_PASSWORD` and `OMS_APP_PASSWORD`). `oms_maint` is `NOLOGIN`. An existing volume skips that script; Flyway still creates the roles without those passwords.
 - API: <http://localhost:8080> — `GET /actuator/health` returns `{"status":"UP"}`.
 - UI: <http://localhost:5173>
 
-The backend waits up to 60 seconds for Postgres to accept connections.
+The backend waits up to 60 seconds for Postgres to accept connections. Flyway V1 runs on startup.
 
 ## Layout
 
 | Path | What it is |
 |---|---|
-| `backend/` | Spring Boot 4.1, Java 17, Maven wrapper. Actuator health. Spotless on `verify`. |
+| `backend/` | Spring Boot 4.1, Java 17, Maven wrapper. Actuator health. Flyway V1. Spotless on `verify`. |
 | `frontend/` | Vite, React, TypeScript. Vitest and ESLint. |
 | `docker-compose.yml` | Postgres 16 for local development. |
 | `docs/plan/` | Plan v2 (process map, scope, data model, API contract, task list, NFR). |
 | `.github/workflows/ci.yml` | Backend `./mvnw verify` and frontend `npm ci && npm run lint && npm run build && npm test`. |
 | `.railway/railway.ts` | Staging infrastructure. Dockerfiles are in each service directory. |
 
-Flyway is not on the classpath. Codex adds `V1` and row-level security in T02. Do not add `db/migration` scripts from a feature PR.
+Flyway V1 is `backend/src/main/resources/db/migration/V1__foundation_rls.sql`. It creates `tenant`, `app_user`, `tenant_membership`, `audit_log`, `idempotency_key`, `inbox_event`, and `outbox_event`, plus `oms_migrator`, `oms_app` (`NOBYPASSRLS`), and `oms_maint`. Tenant tables use `ENABLE` and `FORCE ROW LEVEL SECURITY`. Later migrations stay a migration task; do not edit a version that has already been merged.
 
 ## Working rules
 
