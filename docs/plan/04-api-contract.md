@@ -112,9 +112,10 @@ X-Signature: t=1790665202,v1=5f2b...e9
 - `aggregate_version` บังคับสำหรับ event ธุรกิจ (ไม่มีหรือเกิน bigint = `400`). `membership.changed` จัดลำดับด้วย `ent_ver` และละเว้น version ได้
 - `\u0000` ใน JSON = `400`
 - event type ที่ยังไม่มี handler: คง `RECEIVED`, เลื่อน 1 ชม. โดยไม่นับ attempt (replay ได้เมื่อมี handler)
-- `aggregate_version` ≤ ที่เก็บ = ข้าม; มี gap = handler ใช้ snapshot เต็มจนกว่าจะมี REST refetch (T10)
+- `aggregate_version` ≤ ที่เก็บ = ข้าม ยกเว้น `membership.changed` (ลำดับอยู่ที่ `ent_ver` เท่านั้น); มี gap = handler ใช้ snapshot เต็มจนกว่าจะมี REST refetch (T10)
 - event ที่ aggregate เดียวกัน ประมวลผลทีละตัว (`pg_advisory_xact_lock(aggregate)`)
-- **GRACE:** event ขาเข้ายังประมวลผลระหว่าง `GRACE` ที่ยังไม่หมดอายุ (ออเดอร์ไม่หาย). การเขียนของ user ยังถูกบล็อก. `SUSPENDED` หรือหมดอายุเลื่อน event ธุรกิจไว้ ไม่ลบ และไม่ทำให้ `DEAD` แค่เพราะร้านถูกระงับ. กลับมา `ACTIVE`/`GRACE` แล้วแถวที่ถูกเลื่อนไว้ถูกปลุก (`next_attempt_at = now()`)
+- **GRACE:** event ขาเข้ายังประมวลผลระหว่าง `GRACE` ที่ยังไม่หมดอายุ (ออเดอร์ไม่หาย). การเขียนของ user ยังถูกบล็อก. `SUSPENDED` หรือหมดอายุเลื่อน event ธุรกิจไว้ (`last_error = ENTITLEMENT_DEFERRED`) ไม่ลบ และไม่ทำให้ `DEAD` แค่เพราะร้านถูกระงับ. กลับมา `ACTIVE`/`GRACE` แล้วปลุกเฉพาะแถวที่มี marker นั้น (`next_attempt_at = now()`). backoff ของ `FAILED` ปกติไม่ถูกปลุก
+- `claim_inbox_batch` เรียง `COALESCE(next_attempt_at, received_at)` จากเก่าไปใหม่ (index `inbox_event_due_idx`) เพื่อไม่ให้ retry ที่ถึงเวลาถูกแซงโดย event ใหม่ตลอด. lease สูงสุด 1 ชั่วโมง (`InboxLimits.MAX_LEASE`) เท่ากับที่ฟังก์ชันปฏิเสธ. ค่าที่ยาวกว่านั้นทำให้ process ไม่บูต
 
 ## 4.5 Events: TSF → OMS
 | event_type | เมื่อไร | ผลใน OMS |

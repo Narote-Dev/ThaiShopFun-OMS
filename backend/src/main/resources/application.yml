@@ -58,6 +58,7 @@ oms:
     worker-enabled: ${OMS_INBOX_WORKER_ENABLED:true}
     worker-delay-ms: ${OMS_INBOX_WORKER_DELAY_MS:1000}
     # 5 x handler-timeout (30s) stays inside the 5m lease.
+    # lease is at most 1 hour (InboxLimits.MAX_LEASE), the claim_inbox_batch ceiling.
     batch-size: 5
     lease: 5m
     handler-timeout: 30s

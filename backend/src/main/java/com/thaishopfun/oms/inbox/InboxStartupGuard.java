@@ -50,5 +50,10 @@ public class InboxStartupGuard implements ApplicationRunner {
       throw new IllegalStateException(
           "oms.inbox batch-size times handler-timeout must be shorter than the lease");
     }
+    // Step 3: claim_inbox_batch rejects a lease above InboxLimits.MAX_LEASE (1 hour).
+    if (properties.getLease().compareTo(InboxLimits.MAX_LEASE) > 0) {
+      throw new IllegalStateException(
+          "oms.inbox.lease must be at most 1 hour (InboxLimits.MAX_LEASE, claim_inbox_batch)");
+    }
   }
 }

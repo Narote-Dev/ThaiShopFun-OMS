@@ -135,7 +135,9 @@ class FlywayV1RlsTest {
       }
       assertThat(indexes)
           .contains(
-              "inbox_event_status_next_attempt_at_idx", "outbox_event_status_next_attempt_at_idx");
+              "inbox_event_status_next_attempt_at_idx",
+              "inbox_event_due_idx",
+              "outbox_event_status_next_attempt_at_idx");
     }
   }
 

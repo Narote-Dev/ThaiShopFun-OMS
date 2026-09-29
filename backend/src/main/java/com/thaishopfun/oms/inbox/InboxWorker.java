@@ -37,6 +37,10 @@ public class InboxWorker {
   public static final String DEAD_METRIC = "oms.inbox.dead";
   public static final String UNKNOWN_METRIC = "oms.inbox.unknown_type";
   static final String MAX_ATTEMPTS_ERROR = "MAX_ATTEMPTS";
+
+  /** {@code last_error} on a row pushed out because the shop cannot take business events yet. */
+  static final String ENTITLEMENT_DEFERRED = "ENTITLEMENT_DEFERRED";
+
   static final Duration UNKNOWN_DEFER = Duration.ofHours(1);
 
   static final Duration[] BACKOFF = {
@@ -168,8 +172,9 @@ public class InboxWorker {
       return;
     }
     // Step 3: Suspended and expired shops keep the event. membership.changed still runs.
+    // The marker is what a later ACTIVE/GRACE membership wakes. A normal failure backoff is not.
     if (policy.defer(row.entitlementStatus(), row.expiresAt(), row.eventType())) {
-      pushBack(row, properties.getSuspendDefer());
+      pushBack(row, properties.getSuspendDefer(), ENTITLEMENT_DEFERRED);
       return;
     }
     InboxHandler handler = registry.find(row.eventType());
@@ -185,10 +190,15 @@ public class InboxWorker {
       return;
     }
     // Step 5: One aggregate at a time, then drop a version that is already applied.
+    // membership.changed is ordered by ent_ver inside its handler, not by aggregate_version.
     lockAggregate(row);
     Long lastVersion = lastProcessedVersion(row);
+    boolean membership = InboxEntitlementPolicy.MEMBERSHIP_CHANGED.equals(row.eventType());
     boolean stale =
-        row.aggregateVersion() > 0 && lastVersion != null && row.aggregateVersion() <= lastVersion;
+        !membership
+            && row.aggregateVersion() > 0
+            && lastVersion != null
+            && row.aggregateVersion() <= lastVersion;
     // TODO: Handlers must apply the full snapshot in data until REST refetch exists (T10).
     // gap=true means aggregate_version skipped at least one version. Do not assume a delta.
     boolean gap =
@@ -268,18 +278,25 @@ public class InboxWorker {
   }
 
   private void pushBack(InboxRow row, Duration delay) {
+    pushBack(row, delay, null);
+  }
+
+  private void pushBack(InboxRow row, Duration delay, String lastError) {
     long deferMillis = Math.max(delay.toMillis(), 0);
     int updated =
         jdbc.update(
             """
             UPDATE inbox_event
             SET attempts = GREATEST(attempts - 1, 0),
-                next_attempt_at = pg_catalog.now() + (? * interval '1 millisecond')
+                next_attempt_at = pg_catalog.now() + (? * interval '1 millisecond'),
+                last_error = CASE WHEN ? THEN ? ELSE last_error END
             WHERE id = ?
               AND next_attempt_at = ?
               AND status IN ('RECEIVED', 'FAILED')
             """,
             deferMillis,
+            lastError != null,
+            lastError == null ? "" : lastError,
             row.id(),
             row.nextAttemptAt());
     if (updated != 1) {

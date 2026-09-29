@@ -31,8 +31,16 @@ CREATE INDEX inbox_event_aggregate_processed_idx
   ON inbox_event (tenant_id, source, aggregate_id, aggregate_version DESC)
   WHERE status = 'PROCESSED';
 
--- Step 2: Replace the claim function so the lease timestamp comes back with the ids.
+-- Step 2: Claim scans oldest-due first. A null next_attempt_at sorts as received_at,
+-- so a due retry is not stuck behind every new event (NULLS FIRST did that).
+-- The expression matches claim_inbox_batch ORDER BY.
+CREATE INDEX inbox_event_due_idx
+  ON inbox_event ((COALESCE(next_attempt_at, received_at)), id)
+  WHERE status IN ('RECEIVED', 'FAILED');
+
+-- Step 3: Replace the claim function so the lease timestamp comes back with the ids.
 -- CREATE OR REPLACE cannot change the return type.
+-- Lease ceiling is 1 hour, the same bound as Java InboxLimits.MAX_LEASE.
 DROP FUNCTION claim_inbox_batch(integer, interval);
 
 CREATE FUNCTION claim_inbox_batch(
@@ -47,6 +55,7 @@ SET search_path = pg_catalog, pg_temp
 AS $fn$
 BEGIN
   -- Step 1: Reject a limit or lease that would scan an unbounded batch or hide it too long.
+  -- The 1 hour ceiling is InboxLimits.MAX_LEASE. Startup refuses a longer oms.inbox.lease.
   IF n IS NULL OR n < 1 OR n > 1000 THEN
     RAISE EXCEPTION 'claim_inbox_batch limit must be between 1 and 1000';
   END IF;
@@ -54,7 +63,9 @@ BEGIN
     RAISE EXCEPTION 'claim_inbox_batch lease must be greater than 0 and at most 1 hour';
   END IF;
 
-  -- Step 2: Lease due RECEIVED/FAILED rows. The lease is next_attempt_at.
+  -- Step 2: Lease due RECEIVED/FAILED rows, oldest due first.
+  -- COALESCE(next_attempt_at, received_at) treats a new row as due at received_at,
+  -- so it does not sort ahead of a retry whose next_attempt_at is already past.
   -- SKIP LOCKED keeps parallel workers off the same row.
   RETURN QUERY
   WITH picked AS (
@@ -62,7 +73,7 @@ BEGIN
     FROM public.inbox_event AS i
     WHERE i.status IN ('RECEIVED', 'FAILED')
       AND (i.next_attempt_at IS NULL OR i.next_attempt_at <= now())
-    ORDER BY i.next_attempt_at NULLS FIRST, i.received_at, i.id
+    ORDER BY COALESCE(i.next_attempt_at, i.received_at), i.id
     LIMIT n
     FOR UPDATE SKIP LOCKED
   )

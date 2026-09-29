@@ -402,6 +402,7 @@ class InboxApiTest {
     InboxState deferred = state(orderId);
     assertThat(deferred.status()).isEqualTo("RECEIVED");
     assertThat(deferred.attempts()).isZero();
+    assertThat(deferred.lastError()).isEqualTo(InboxWorker.ENTITLEMENT_DEFERRED);
     assertThat(deferred.waitSeconds()).isBetween(3500d, 3700d);
     assertThat(orderCreated.calls.get()).isZero();
 
@@ -435,6 +436,74 @@ class InboxApiTest {
         .isEqualTo("ACTIVE");
     assertThat(count("SELECT ent_ver FROM tenant WHERE id = ?::uuid", shop.id().toString()))
         .isEqualTo(4);
+  }
+
+  @Test
+  void activeMembershipLeavesANormalFailureBackoffAlone() throws Exception {
+    Shop shop = seed("ACTIVE", future(), 1);
+    String eventId = id();
+    byte[] body = envelope(eventId, "order.fail", shop.shopId(), "agg-fail", 1, Map.of());
+    assertThat(post(body, eventId, sign(CURRENT, now(), body), serviceToken).status())
+        .isEqualTo(202);
+    assertThat(worker.processAvailable()).isEqualTo(1);
+    InboxState failed = state(eventId);
+    assertThat(failed.status()).isEqualTo("FAILED");
+    assertThat(failed.attempts()).isEqualTo(1);
+    assertThat(failed.lastError()).isEqualTo("handler failed");
+    OffsetDateTime due = nextAttemptAt(eventId);
+
+    String membershipId = id();
+    postMembership(shop, membershipId, "ACTIVE", 2, future(), 1);
+    assertThat(worker.processAvailable()).isEqualTo(1);
+    assertThat(text("SELECT status FROM inbox_event WHERE event_id = ?", membershipId))
+        .isEqualTo("PROCESSED");
+    InboxState after = state(eventId);
+    assertThat(after.status()).isEqualTo("FAILED");
+    assertThat(after.attempts()).isEqualTo(1);
+    assertThat(after.lastError()).isEqualTo("handler failed");
+    assertThat(nextAttemptAt(eventId).toInstant()).isEqualTo(due.toInstant());
+    assertThat(orderFail.calls.get()).isEqualTo(1);
+  }
+
+  @Test
+  void newerMembershipAppliesWhenAggregateVersionLooksStale() throws Exception {
+    Shop shop = seed("SUSPENDED", null, 1);
+    String first = id();
+    postMembership(shop, first, "SUSPENDED", 2, null, 10);
+    assertThat(worker.processAvailable()).isEqualTo(1);
+    assertThat(count("SELECT ent_ver FROM tenant WHERE id = ?::uuid", shop.id().toString()))
+        .isEqualTo(2);
+
+    String second = id();
+    postMembership(shop, second, "ACTIVE", 3, future(), 1);
+    assertThat(worker.processAvailable()).isEqualTo(1);
+    assertThat(text("SELECT status FROM inbox_event WHERE event_id = ?", second))
+        .isEqualTo("PROCESSED");
+    assertThat(
+            text("SELECT entitlement_status FROM tenant WHERE id = ?::uuid", shop.id().toString()))
+        .isEqualTo("ACTIVE");
+    assertThat(count("SELECT ent_ver FROM tenant WHERE id = ?::uuid", shop.id().toString()))
+        .isEqualTo(3);
+  }
+
+  @Test
+  void dueRetriesAreClaimedBeforeNewerEvents() throws Exception {
+    Shop shop = seed("ACTIVE", future(), 1);
+    UUID olderRetry =
+        insertInbox(shop.id(), "retry-old", "FAILED", 1, 7200, 10800, "handler failed");
+    UUID freshWaiting = insertInbox(shop.id(), "fresh-mid", "RECEIVED", 0, null, 5400, null);
+    UUID newerRetry =
+        insertInbox(shop.id(), "retry-new", "FAILED", 1, 1800, 4000, "handler failed");
+    insertInbox(shop.id(), "fresh-new", "RECEIVED", 0, null, 0, null);
+
+    assertThat(claimOne()).containsExactly(olderRetry);
+    assertThat(claimOne()).containsExactly(freshWaiting);
+    assertThat(claimOne()).containsExactly(newerRetry);
+    assertThat(state("fresh-new").status()).isEqualTo("RECEIVED");
+    assertThat(state("fresh-new").attempts()).isZero();
+    assertThat(state("retry-old").attempts()).isEqualTo(2);
+    assertThat(state("fresh-mid").attempts()).isEqualTo(1);
+    assertThat(state("retry-new").attempts()).isEqualTo(2);
   }
 
   @Test
@@ -807,6 +876,68 @@ class InboxApiTest {
       statement.setString(2, eventId);
       assertThat(statement.executeUpdate()).isEqualTo(1);
     }
+  }
+
+  private OffsetDateTime nextAttemptAt(String eventId) throws Exception {
+    try (Connection admin = AuthTestSupport.admin();
+        PreparedStatement statement =
+            admin.prepareStatement("SELECT next_attempt_at FROM inbox_event WHERE event_id = ?")) {
+      statement.setString(1, eventId);
+      try (ResultSet rows = statement.executeQuery()) {
+        assertThat(rows.next()).isTrue();
+        return rows.getObject(1, OffsetDateTime.class);
+      }
+    }
+  }
+
+  private UUID insertInbox(
+      UUID tenantId,
+      String eventId,
+      String status,
+      int attempts,
+      Integer nextAttemptSecondsAgo,
+      int receivedSecondsAgo,
+      String lastError)
+      throws Exception {
+    UUID id = UUID.randomUUID();
+    try (Connection admin = AuthTestSupport.admin();
+        PreparedStatement statement =
+            admin.prepareStatement(
+                """
+                INSERT INTO inbox_event (
+                  id, tenant_id, source, event_id, event_type, aggregate_id, payload,
+                  status, attempts, next_attempt_at, received_at, last_error
+                ) VALUES (
+                  ?, ?, 'tsf', ?, 'order.created', ?, '{}'::jsonb,
+                  ?, ?,
+                  CASE WHEN ? THEN pg_catalog.now() - (? * interval '1 second') END,
+                  pg_catalog.now() - (? * interval '1 second'),
+                  ?
+                )
+                """)) {
+      statement.setObject(1, id);
+      statement.setObject(2, tenantId);
+      statement.setString(3, eventId);
+      statement.setString(4, "agg-" + eventId);
+      statement.setString(5, status);
+      statement.setInt(6, attempts);
+      statement.setBoolean(7, nextAttemptSecondsAgo != null);
+      statement.setInt(8, nextAttemptSecondsAgo == null ? 0 : nextAttemptSecondsAgo);
+      statement.setInt(9, receivedSecondsAgo);
+      if (lastError == null) {
+        statement.setNull(10, Types.VARCHAR);
+      } else {
+        statement.setString(10, lastError);
+      }
+      assertThat(statement.executeUpdate()).isEqualTo(1);
+    }
+    return id;
+  }
+
+  private List<UUID> claimOne() {
+    return jdbc.query(
+        "SELECT id FROM claim_inbox_batch(1, interval '5 minutes')",
+        (rs, row) -> rs.getObject("id", UUID.class));
   }
 
   private void rewind(String eventId) throws Exception {

@@ -34,6 +34,32 @@ class InboxStartupGuardTest {
   }
 
   @Test
+  void leaseLongerThanOneHourRefusesToBoot() {
+    MockEnvironment environment = new MockEnvironment();
+    environment.setActiveProfiles("test");
+    InboxProperties properties = new InboxProperties();
+    properties.setBatchSize(1);
+    properties.setHandlerTimeout(Duration.ofSeconds(30));
+    properties.setLease(InboxLimits.MAX_LEASE.plusSeconds(1));
+    assertThatThrownBy(() -> InboxStartupGuard.verify(environment, properties))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("1 hour")
+        .hasMessageContaining("InboxLimits.MAX_LEASE");
+  }
+
+  @Test
+  void leaseOfOneHourStillBoots() {
+    MockEnvironment environment = new MockEnvironment();
+    environment.setActiveProfiles("test");
+    InboxProperties properties = new InboxProperties();
+    properties.setBatchSize(1);
+    properties.setHandlerTimeout(Duration.ofSeconds(30));
+    properties.setLease(InboxLimits.MAX_LEASE);
+    assertThatCode(() -> InboxStartupGuard.verify(environment, properties))
+        .doesNotThrowAnyException();
+  }
+
+  @Test
   void batchThatOutlastsTheLeaseRefusesToBoot() {
     MockEnvironment environment = new MockEnvironment();
     environment.setActiveProfiles("test");

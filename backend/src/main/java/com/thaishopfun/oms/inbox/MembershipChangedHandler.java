@@ -10,7 +10,8 @@ import org.springframework.stereotype.Component;
 /**
  * Applies {@code membership.changed} to {@code tenant}. A lower {@code ent_ver} is ignored. The
  * audit row stores status and {@code ent_ver} only. Moving to {@code ACTIVE} or {@code GRACE} wakes
- * deferred inbox rows for that shop.
+ * rows deferred for entitlement ({@code last_error = ENTITLEMENT_DEFERRED}). A normal failure
+ * backoff keeps its {@code next_attempt_at}.
  */
 @Component
 public class MembershipChangedHandler implements InboxHandler {
@@ -74,7 +75,7 @@ public class MembershipChangedHandler implements InboxHandler {
       return;
     }
 
-    // Step 4: A shop that can take orders again should not wait out a suspend defer.
+    // Step 4: Wake only entitlement defers. A FAILED row on the normal backoff ladder stays put.
     if ("ACTIVE".equals(incoming.status) || "GRACE".equals(incoming.status)) {
       jdbc.update(
           """
@@ -83,10 +84,12 @@ public class MembershipChangedHandler implements InboxHandler {
           WHERE tenant_id = ?
             AND id <> ?
             AND status IN ('RECEIVED', 'FAILED')
+            AND last_error = ?
             AND next_attempt_at > pg_catalog.now()
           """,
           message.tenantId(),
-          message.id());
+          message.id(),
+          InboxWorker.ENTITLEMENT_DEFERRED);
     }
 
     // Step 5: Audit the status change. No shop name, email, or event payload.
