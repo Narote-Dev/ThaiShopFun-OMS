@@ -1,0 +1,14 @@
+{
+  "checkout_id": "chk_20260929_88121",
+  "tsf_shop_id": "shop_45021",
+  "items": [
+    {
+      "listing_sku_id": "tsf_sku_7781",
+      "qty": 2
+    },
+    {
+      "listing_sku_id": "tsf_sku_9001",
+      "qty": 1
+    }
+  ]
+}

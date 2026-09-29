@@ -1,2 +1,3 @@
 backend/mvnw text eol=lf
+mock-tsf/mvnw text eol=lf
 *.jar binary

@@ -1,0 +1,10 @@
+{
+  "error": "OUT_OF_STOCK",
+  "items": [
+    {
+      "listing_sku_id": "tsf_sku_9001",
+      "requested": 1,
+      "available": 0
+    }
+  ]
+}

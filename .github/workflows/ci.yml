@@ -16,10 +16,45 @@ jobs:
           distribution: temurin
           java-version: "17"
           cache: maven
-          cache-dependency-path: backend/pom.xml
+          cache-dependency-path: |
+            backend/pom.xml
+            mock-tsf/pom.xml
+      - name: Install mock-tsf
+        working-directory: mock-tsf
+        run: ./mvnw -B -DskipTests install
       - name: Verify (tests and Spotless)
         working-directory: backend
         run: ./mvnw -B verify
+
+  mock-tsf:
+    name: Mock TSF
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+          cache-dependency-path: mock-tsf/pom.xml
+      - name: Verify (tests and Spotless)
+        working-directory: mock-tsf
+        run: ./mvnw -B verify
+
+  contracts:
+    name: Contract examples
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+          cache-dependency-path: mock-tsf/pom.xml
+      - name: Validate examples against JSON Schema
+        working-directory: mock-tsf
+        run: ./mvnw -B -Dtest=ContractExamplesTest test
 
   frontend:
     name: Frontend

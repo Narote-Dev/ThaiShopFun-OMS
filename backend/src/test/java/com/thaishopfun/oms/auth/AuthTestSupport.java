@@ -74,13 +74,17 @@ public final class AuthTestSupport {
 
   private AuthTestSupport() {}
 
-  public static void register(DynamicPropertyRegistry registry) {
+  public static void registerDatabase(DynamicPropertyRegistry registry) {
     registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
     registry.add("spring.datasource.username", () -> "oms_app");
     registry.add("spring.datasource.password", () -> APP_PASSWORD);
     registry.add("spring.flyway.url", POSTGRES::getJdbcUrl);
     registry.add("spring.flyway.user", POSTGRES::getUsername);
     registry.add("spring.flyway.password", POSTGRES::getPassword);
+  }
+
+  public static void register(DynamicPropertyRegistry registry) {
+    registerDatabase(registry);
     registry.add("oms.security.issuer", () -> ISSUER);
     registry.add("oms.security.jwks-uri", () -> JWKS_URI);
     registry.add("oms.security.audience", () -> "oms");

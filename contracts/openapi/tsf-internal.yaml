@@ -1,0 +1,179 @@
+openapi: 3.1.0
+info:
+  title: TSF internal API
+  version: 0.2.0
+  description: |
+    Section 4.7 of the OMS plan. OMS calls these routes with a client-credentials
+    token whose audience is tsf-internal. This file is written so contracts/ can
+    move into the tsf-oms-contracts repo without a rewrite.
+servers:
+  - url: "{TSF_API}/internal/v1"
+    variables:
+      TSF_API:
+        default: http://localhost:8090
+paths:
+  /shops/{shopId}/orders:
+    get:
+      operationId: listOrders
+      parameters:
+        - $ref: "#/components/parameters/shopId"
+        - name: updated_since
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: cursor
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 100
+      responses:
+        "200":
+          description: Order page
+          content:
+            application/json:
+              schema:
+                $ref: ../schemas/rest/order-page.json
+        "404":
+          $ref: "#/components/responses/Error"
+  /orders/{orderId}:
+    get:
+      operationId: getOrder
+      parameters:
+        - $ref: "#/components/parameters/orderId"
+      responses:
+        "200":
+          description: Full order
+          content:
+            application/json:
+              schema:
+                $ref: ../schemas/rest/order.json
+        "404":
+          $ref: "#/components/responses/Error"
+  /orders/{orderId}/payment-status:
+    get:
+      operationId: getPaymentStatus
+      parameters:
+        - $ref: "#/components/parameters/orderId"
+      responses:
+        "200":
+          description: Payment snapshot from TSF Pay
+          content:
+            application/json:
+              schema:
+                $ref: ../schemas/rest/payment-status.json
+  /shops/{shopId}/listings:
+    get:
+      operationId: listListings
+      parameters:
+        - $ref: "#/components/parameters/shopId"
+        - name: cursor
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Listings and the stock TSF is showing
+          content:
+            application/json:
+              schema:
+                $ref: ../schemas/rest/listing-page.json
+  /orders/{orderId}/shipments:
+    post:
+      operationId: createShipment
+      parameters:
+        - $ref: "#/components/parameters/orderId"
+        - $ref: "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: ../schemas/rest/shipment-request.json
+      responses:
+        "201":
+          description: Label requested
+          content:
+            application/json:
+              schema:
+                $ref: ../schemas/rest/shipment.json
+        "409":
+          $ref: "#/components/responses/Error"
+  /shipments/{shipmentId}/label:
+    get:
+      operationId: getLabel
+      parameters:
+        - name: shipmentId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Label PDF
+          content:
+            application/pdf:
+              schema:
+                type: string
+                contentMediaType: application/pdf
+  /orders/{orderId}/cancel-requests:
+    post:
+      operationId: requestCancel
+      parameters:
+        - $ref: "#/components/parameters/orderId"
+        - $ref: "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: ../schemas/rest/cancel-request.json
+      responses:
+        "202":
+          description: Cancel request accepted; TSF decides later
+          content:
+            application/json:
+              schema:
+                $ref: ../schemas/rest/cancel-response.json
+        "409":
+          $ref: "#/components/responses/Error"
+components:
+  securitySchemes:
+    tsfInternal:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    shopId:
+      name: shopId
+      in: path
+      required: true
+      schema:
+        type: string
+    orderId:
+      name: orderId
+      in: path
+      required: true
+      schema:
+        type: string
+    idempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema:
+        type: string
+  responses:
+    Error:
+      description: Error body from section 4.8
+      content:
+        application/json:
+          schema:
+            $ref: ../schemas/rest/error.json
+security:
+  - tsfInternal: []

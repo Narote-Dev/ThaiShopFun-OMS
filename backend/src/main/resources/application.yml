@@ -39,8 +39,8 @@ management:
       probes:
         enabled: true
 
-# T05 sets the issuer and JWKS URI. A blank jwks-uri still boots: API calls return 401
-# and GET /actuator/health stays open.
+# The local profile points the issuer and JWKS at mock-tsf. A blank jwks-uri still boots:
+# API calls return 401 and GET /actuator/health stays open.
 oms:
   security:
     issuer: ${OMS_JWT_ISSUER:http://localhost:9/tsf-idp}

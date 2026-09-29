@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "issuer",
+    "authorization_endpoint",
+    "token_endpoint",
+    "jwks_uri",
+    "response_types_supported",
+    "code_challenge_methods_supported",
+    "grant_types_supported"
+  ],
+  "properties": {
+    "issuer": {
+      "type": "string",
+      "minLength": 1
+    },
+    "authorization_endpoint": {
+      "type": "string",
+      "minLength": 1
+    },
+    "token_endpoint": {
+      "type": "string",
+      "minLength": 1
+    },
+    "jwks_uri": {
+      "type": "string",
+      "minLength": 1
+    },
+    "response_types_supported": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "subject_types_supported": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "id_token_signing_alg_values_supported": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "code_challenge_methods_supported": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "grant_types_supported": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "token_endpoint_auth_methods_supported": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}

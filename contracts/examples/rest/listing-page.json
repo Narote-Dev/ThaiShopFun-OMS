@@ -1,0 +1,12 @@
+{
+  "listings": [
+    {
+      "listing_sku_id": "tsf_sku_7781",
+      "seller_sku": "TSHIRT-BLK-M",
+      "name": "เสื้อยืดดำ M",
+      "available": 18,
+      "stock_version": 1042
+    }
+  ],
+  "next_cursor": null
+}

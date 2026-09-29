@@ -1,0 +1,17 @@
+{
+  "event_id": "01J9Z3K7Q8refundstatus",
+  "event_type": "refund.status_changed",
+  "schema_version": 1,
+  "occurred_at": "2026-09-29T08:15:02Z",
+  "tsf_shop_id": "shop_45021",
+  "aggregate_id": "xnd_rf_77",
+  "aggregate_version": 1,
+  "data": {
+    "order_id": "TSF-240929-000123",
+    "refund_id": "xnd_rf_77",
+    "return_id": "tsf_ret_311",
+    "status": "SUCCEEDED",
+    "amount": 295.0,
+    "currency": "THB"
+  }
+}

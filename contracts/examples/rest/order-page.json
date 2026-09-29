@@ -1,0 +1,10 @@
+{
+  "orders": [
+    {
+      "order_id": "TSF-240929-000123",
+      "updated_at": "2026-09-29T08:15:02Z",
+      "aggregate_version": 3
+    }
+  ],
+  "next_cursor": null
+}

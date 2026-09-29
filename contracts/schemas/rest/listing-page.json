@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "listings",
+    "next_cursor"
+  ],
+  "properties": {
+    "listings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "listing_sku_id",
+          "seller_sku",
+          "name",
+          "available",
+          "stock_version"
+        ],
+        "properties": {
+          "listing_sku_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "seller_sku": {
+            "type": "string",
+            "minLength": 1
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "available": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "stock_version": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    },
+    "next_cursor": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  }
+}

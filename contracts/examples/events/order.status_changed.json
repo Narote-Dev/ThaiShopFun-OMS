@@ -1,0 +1,13 @@
+{
+  "event_id": "01J9Z3K7Q8orderstatus_",
+  "event_type": "order.status_changed",
+  "schema_version": 1,
+  "occurred_at": "2026-09-29T08:15:02Z",
+  "tsf_shop_id": "shop_45021",
+  "aggregate_id": "TSF-240929-000123",
+  "aggregate_version": 4,
+  "data": {
+    "order_id": "TSF-240929-000123",
+    "fulfillment_status": "READY_TO_PICK"
+  }
+}

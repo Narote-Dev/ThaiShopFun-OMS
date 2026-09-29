@@ -1,0 +1,7 @@
+{
+  "shipment_id": "shp_01",
+  "order_id": "TSF-240929-000123",
+  "carrier": "FLASH",
+  "tracking_no": "TH0123456789A",
+  "status": "LABEL_READY"
+}

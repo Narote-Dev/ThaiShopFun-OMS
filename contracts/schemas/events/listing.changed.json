@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "listing_sku_id",
+    "seller_sku",
+    "action"
+  ],
+  "properties": {
+    "listing_sku_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "seller_sku": {
+      "type": "string",
+      "minLength": 1
+    },
+    "name": {
+      "type": "string"
+    },
+    "action": {
+      "type": "string",
+      "enum": [
+        "UPSERT",
+        "DELETE"
+      ]
+    }
+  }
+}

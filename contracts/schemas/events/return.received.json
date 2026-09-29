@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "order_id",
+    "return_id",
+    "lines"
+  ],
+  "properties": {
+    "order_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "return_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "lines": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "line_id",
+          "qty",
+          "condition"
+        ],
+        "properties": {
+          "line_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "qty": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "condition": {
+            "type": "string",
+            "enum": [
+              "RESELLABLE",
+              "DAMAGED"
+            ]
+          }
+        }
+      }
+    }
+  }
+}

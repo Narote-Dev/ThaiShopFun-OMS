@@ -1,0 +1,43 @@
+{
+  "event_id": "01J9Z3K7Q8X2V4M6N0P1R3S5T7",
+  "event_type": "order.created",
+  "schema_version": 1,
+  "occurred_at": "2026-09-29T08:15:02Z",
+  "tsf_shop_id": "shop_45021",
+  "aggregate_id": "TSF-240929-000123",
+  "aggregate_version": 3,
+  "data": {
+    "order_id": "TSF-240929-000123",
+    "reservation_id": "rsv_01J9Z4A1B2C3",
+    "payment_method": "PREPAID",
+    "payment_expires_at": "2026-09-29T08:45:00Z",
+    "currency": "THB",
+    "totals": {
+      "subtotal": 590.0,
+      "shipping_fee": 40.0,
+      "discount": 50.0,
+      "grand_total": 580.0
+    },
+    "recipient": {
+      "name": "สมชาย ใจดี",
+      "phone": "0812341234",
+      "address": {
+        "line1": "99/1 ถ.สุขุมวิท",
+        "district": "คลองเตย",
+        "province": "กรุงเทพมหานคร",
+        "postcode": "10110"
+      }
+    },
+    "ship_by": "2026-10-01T10:59:59Z",
+    "lines": [
+      {
+        "line_id": "L1",
+        "listing_sku_id": "tsf_sku_7781",
+        "seller_sku": "TSHIRT-BLK-M",
+        "name": "เสื้อยืดดำ M",
+        "qty": 2,
+        "unit_price": 295.0
+      }
+    ]
+  }
+}

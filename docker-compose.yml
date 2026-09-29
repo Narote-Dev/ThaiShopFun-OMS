@@ -1,5 +1,5 @@
-# Local inbox HMAC is the `local` Spring profile (backend application-local.yml),
-# not a password in this file. Do not copy that value into a shared environment.
+# Local inbox HMAC and the outbox webhook secret live in the `local` Spring profile
+# (backend application-local.yml), not in this file. Do not copy them into a shared environment.
 services:
   postgres:
     image: postgres:16-alpine
@@ -24,6 +24,25 @@ services:
     volumes:
       - oms-pgdata:/var/lib/postgresql/data
       - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
+
+  mock-tsf:
+    build:
+      context: .
+      dockerfile: mock-tsf/Dockerfile
+    ports:
+      - "8090:8090"
+    environment:
+      PORT: "8090"
+      MOCK_TSF_ISSUER: http://localhost:8090/tsf-idp
+      MOCK_OMS_BASE_URL: http://host.docker.internal:8080
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8090/actuator/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
 
 volumes:
   oms-pgdata:

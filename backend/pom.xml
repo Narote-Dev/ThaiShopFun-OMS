@@ -59,6 +59,13 @@
       <artifactId>spring-boot-starter-test</artifactId>
       <scope>test</scope>
     </dependency>
+    <!-- Change: T05 acceptance boots the mock IdP in-process. Install mock-tsf before verify. -->
+    <dependency>
+      <groupId>com.thaishopfun</groupId>
+      <artifactId>mock-tsf</artifactId>
+      <version>0.0.1-SNAPSHOT</version>
+      <scope>test</scope>
+    </dependency>
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-webmvc-test</artifactId>

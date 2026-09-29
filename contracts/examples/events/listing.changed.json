@@ -1,0 +1,15 @@
+{
+  "event_id": "01J9Z3K7Q8listingchang",
+  "event_type": "listing.changed",
+  "schema_version": 1,
+  "occurred_at": "2026-09-29T08:15:02Z",
+  "tsf_shop_id": "shop_45021",
+  "aggregate_id": "tsf_sku_7781",
+  "aggregate_version": 4,
+  "data": {
+    "listing_sku_id": "tsf_sku_7781",
+    "seller_sku": "TSHIRT-BLK-M",
+    "name": "เสื้อยืดดำ M",
+    "action": "UPSERT"
+  }
+}

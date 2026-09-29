@@ -1,0 +1,64 @@
+openapi: 3.1.0
+info:
+  title: OMS checkout reservation API
+  version: 0.2.0
+  description: |
+    Section 4.3. TSF calls these routes with a client-credentials token whose
+    audience is oms-internal. OMS does not implement them yet (T12A). The mock
+    only calls them and returns OMS's response.
+servers:
+  - url: "{OMS_API}"
+    variables:
+      OMS_API:
+        default: http://localhost:8080
+paths:
+  /internal/v1/inventory/reservations:
+    post:
+      operationId: createReservation
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: ../schemas/rest/reservation-request.json
+      responses:
+        "201":
+          description: Reserved
+          content:
+            application/json:
+              schema:
+                $ref: ../schemas/rest/reservation-created.json
+        "409":
+          description: Out of stock, or the idempotency key was reused with a different body
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: ../schemas/rest/reservation-conflict.json
+                  - $ref: ../schemas/rest/error.json
+  /internal/v1/inventory/reservations/{reservationId}:
+    delete:
+      operationId: releaseReservation
+      parameters:
+        - name: reservationId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Released. Repeating the delete is also 204.
+components:
+  securitySchemes:
+    omsInternal:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+security:
+  - omsInternal: []
