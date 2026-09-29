@@ -6,7 +6,7 @@
 - **Codex** = review รอบสองทุก PR ของ Cursor + งานแยก (test, adapter, migration, contracts) ใน branch ตัวเอง (`codex/Txx-*`)
 - **Narote approve ทุก merge** เข้า `main` (branch protection: CI เขียว + Codex review + Narote approve)
 - 1 task = 1 PR (ใหญ่เกิน ~600 บรรทัดไม่นับ test → แตก PR)
-- **Codex คนเดียวเขียนไฟล์ Flyway** กันเลข version ชน; Cursor ต้องการ column ใหม่ → ขอ task migration ก่อน
+- **Flyway migrations may be written by Cursor or Codex, one migration per PR, never edit a merged version; Codex reviews every migration PR.**
 - **Definition of Done:** CI เขียว (รวม contract test), test ครอบ AC, ไม่มี PII ใน log, invariant check ผ่าน, อัปเดต `docs/` ถ้าเปลี่ยน contract (แก้ spec ใน `tsf-oms-contracts` ก่อนเสมอ)
 
 ## สรุปจำนวน
@@ -129,7 +129,7 @@ flowchart LR
 - AC: 0 event หาย · duplicate delivery > 0 ได้ แต่ผลลัพธ์ปลายทางเหมือนส่งครั้งเดียว · รายงาน duplicate rate
 
 ## Phase 1: Catalog + Inventory (สัปดาห์ 4–6)
-**T06 · Codex · deps: T02** Flyway V2
+**T06 · Codex · deps: T02** Flyway V3
 - `channel_account` (มี `mode`, `stock_sync_paused`), `product`, `sku`, `sku_bundle_component` (+ trigger ห้าม nested/circular), `channel_listing` (`stock_control`, `safety_buffer`), `warehouse`, `inventory`, `inventory_ledger`, `stock_reservation` (owner_type/owner_ref/status/expires_at), `stock_document`, `stock_document_line` + FORCE RLS + index
 - AC: CHECK `reserved <= on_hand` ทำงาน · ใส่ bundle เป็น component → error · UNIQUE reservation ACTIVE ต่อ owner+SKU · RLS test ทุกตารางใหม่
 
@@ -157,7 +157,7 @@ flowchart LR
   - 10,000 operation สุ่ม → InvariantChecker ผ่านทุกครั้ง
 
 ## Phase 2: TSF Order Integration (สัปดาห์ 7–10)
-**T10 · Codex · deps: T06** Flyway V3
+**T10 · Codex · deps: T06** Flyway V4
 - `sales_order` (order/payment/fulfillment status + hold_reason), `order_recipient` (column เข้ารหัส), `order_line`, `order_status_history` (dimension), `shipment`, `return_request`, `return_line`, `refund`, `payment_status_snapshot`, `sync_cursor`, `shadow_diff`, `reconciliation_issue`
 - AC: UNIQUE `(channel_account_id, external_order_id)` · CHECK ค่า enum ทุก status · ผลรวม return qty ต่อ line ≤ qty (trigger) · FORCE RLS ครบ
 
@@ -257,7 +257,7 @@ flowchart LR
 - AC: เพิ่มตารางไม่มี FORCE RLS → CI fail · รายงาน finding ใน PR
 
 ## Phase 5: Multichannel (framework เริ่ม ~สัปดาห์ 14, adapter หลัง approval)
-**T50M · Codex · deps: T10** Flyway V4: `allocation_policy`, `channel_allocation`
+**T50M · Codex · deps: T10** Flyway V5: `allocation_policy`, `channel_allocation`
 - AC: CHECK ผลรวม allocation ≤ physical − buffer (ตรวจใน service + test)
 
 **T50 · Codex · deps: T16** Capability framework (ต่อยอด T16)

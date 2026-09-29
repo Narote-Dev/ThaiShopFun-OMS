@@ -14,31 +14,35 @@ cd backend && ./mvnw spring-boot:run
 cd frontend && npm ci && npm run dev
 ```
 
-- Postgres 16 listens on `localhost:5432` (database `oms`, user `oms`, password `oms`). Those values are local defaults only. `oms` is a dev-only bootstrap superuser so Flyway can create roles. It bypasses row-level security.
-- On a new volume, `docker/postgres/init` also creates `oms_migrator` and `oms_app` with dev-only passwords `oms_migrator` and `oms_app` (override with `OMS_MIGRATOR_PASSWORD` and `OMS_APP_PASSWORD`). `oms_maint` is `NOLOGIN`. An existing volume skips that script; Flyway still creates the roles without those passwords.
-- API: <http://localhost:8080> — `GET /actuator/health` returns `{"status":"UP"}`.
+- Postgres 16 listens on `localhost:5432` (database `oms`). `oms` / `oms` is a dev-only bootstrap superuser. Flyway uses it. It bypasses row-level security.
+- The API connects as `oms_app` / `oms_app` (dev-only, `NOBYPASSRLS`). Override with `DATABASE_USERNAME`, `DATABASE_PASSWORD`, and `OMS_APP_PASSWORD`. `docker/postgres/init` creates that login on a new volume. An existing volume that never ran the init script has `oms_app` as `NOLOGIN`; recreate the volume or `ALTER ROLE oms_app LOGIN PASSWORD 'oms_app'`.
+- Flyway's login defaults to `FLYWAY_USER` / `FLYWAY_PASSWORD` (`oms` / `oms`). A `postgresql://` `DATABASE_URL` (Railway) keeps Flyway on that URL's user.
+- API: <http://localhost:8080> — `GET /actuator/health` returns `{"status":"UP"}` with no token. `GET /api/v1/me` needs a user JWT (`aud=oms`). `GET /internal/v1/health` needs a service JWT (`aud=oms-internal`).
+- Without `TSF_JWKS_URI` (or `OMS_JWKS_URI`), the process still starts and API calls return 401. T05 will provide the mock IdP.
 - UI: <http://localhost:5173>
 
-The backend waits up to 60 seconds for Postgres to accept connections. Flyway V1 runs on startup.
+The backend waits up to 60 seconds for Postgres to accept connections. Flyway V1 and V2 run on startup.
 
 ## Layout
 
 | Path | What it is |
 |---|---|
-| `backend/` | Spring Boot 4.1, Java 17, Maven wrapper. Actuator health. Flyway V1. Spotless on `verify`. |
+| `backend/` | Spring Boot 4.1, Java 17, Maven wrapper. Actuator health. JWT resource server. Flyway V1 and V2. Spotless on `verify`. |
 | `frontend/` | Vite, React, TypeScript. Vitest and ESLint. |
 | `docker-compose.yml` | Postgres 16 for local development. |
 | `docs/plan/` | Plan v2 (process map, scope, data model, API contract, task list, NFR). |
 | `.github/workflows/ci.yml` | Backend `./mvnw verify` and frontend `npm ci && npm run lint && npm run build && npm test`. |
 | `.railway/railway.ts` | Staging infrastructure. Dockerfiles are in each service directory. |
 
-Flyway V1 is `backend/src/main/resources/db/migration/V1__foundation_rls.sql`. It creates `tenant`, `app_user`, `tenant_membership`, `audit_log`, `idempotency_key`, `inbox_event`, and `outbox_event`, plus `oms_migrator`, `oms_app` (`NOBYPASSRLS`), and `oms_maint`. Tenant tables use `ENABLE` and `FORCE ROW LEVEL SECURITY`. Later migrations stay a migration task; do not edit a version that has already been merged.
+Flyway V1 is `backend/src/main/resources/db/migration/V1__foundation_rls.sql`. It creates `tenant`, `app_user`, `tenant_membership`, `audit_log`, `idempotency_key`, `inbox_event`, and `outbox_event`, plus `oms_migrator`, `oms_app` (`NOBYPASSRLS`), and `oms_maint`. Tenant tables use `ENABLE` and `FORCE ROW LEVEL SECURITY`. V2 is `V2__jit_provision.sql`: `SECURITY DEFINER` functions `upsert_app_user`, `provision_tenant`, `provision_membership`, and read-only `lookup_login`, owned by `oms_maint`, executable only by `oms_app`. Do not edit a version that has already been merged. The next migration is V3 (catalog, T06).
+
+The process refuses to start if the runtime role is superuser or has `BYPASSRLS`, unless `oms.security.allow-rls-bypass=true` is set explicitly. That flag is off by default and is not set for local Docker. If `DATABASE_USERNAME` / `DATABASE_PASSWORD` are set, they win over the user embedded in a `postgresql://` URL. Flyway still uses that URL user.
 
 ## Working rules
 
 - Cursor opens feature PRs on `feat/Txx-*`.
 - Codex does the second-pass review of every Cursor PR, and does isolated work (tests, adapters, migrations, contracts) on `codex/Txx-*`.
-- Only Codex writes Flyway migrations. A Cursor task that needs a new column asks for a migration task first.
+- Flyway migrations may be written by Cursor or Codex, one migration per PR, never edit a merged version. Codex reviews every migration PR.
 - One task per PR. A change past about 600 lines, not counting tests, is split.
 - Narote approves every merge to `main`. Branch protection is green CI, Codex review, and Narote's approval.
 - Do not commit secrets, production passwords, or real PII.

@@ -20,7 +20,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.postgresql.util.PSQLException;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
@@ -45,8 +46,20 @@ class FlywayV1RlsTest {
           "inbox_event",
           "outbox_event");
 
-  @Container @ServiceConnection
-  static PostgreSQLContainer postgres = new PostgreSQLContainer("postgres:16-alpine");
+  @Container
+  static PostgreSQLContainer postgres =
+      new PostgreSQLContainer("postgres:16-alpine").withInitScript("db/test-oms-app-login.sql");
+
+  @DynamicPropertySource
+  static void runtimeIsOmsApp(DynamicPropertyRegistry registry) {
+    // Change: the runtime pool is oms_app. Flyway stays on the container superuser.
+    registry.add("spring.datasource.url", postgres::getJdbcUrl);
+    registry.add("spring.datasource.username", () -> "oms_app");
+    registry.add("spring.datasource.password", () -> APP_PASSWORD);
+    registry.add("spring.flyway.url", postgres::getJdbcUrl);
+    registry.add("spring.flyway.user", postgres::getUsername);
+    registry.add("spring.flyway.password", postgres::getPassword);
+  }
 
   @BeforeEach
   void resetRowsAndEnableTestLogins() throws SQLException {
@@ -76,8 +89,12 @@ class FlywayV1RlsTest {
           ResultSet history =
               statement.executeQuery(
                   "SELECT version, success FROM flyway_schema_history ORDER BY installed_rank")) {
+        // Change: V2 (JIT provisioning) is applied with V1.
         assertThat(history.next()).isTrue();
         assertThat(history.getString("version")).isEqualTo("1");
+        assertThat(history.getBoolean("success")).isTrue();
+        assertThat(history.next()).isTrue();
+        assertThat(history.getString("version")).isEqualTo("2");
         assertThat(history.getBoolean("success")).isTrue();
         assertThat(history.next()).isFalse();
       }
