@@ -9,15 +9,19 @@
 - **Flyway migrations may be written by Cursor or Codex, one migration per PR, never edit a merged version; Codex reviews every migration PR.**
 - **Definition of Done:** CI เขียว (รวม contract test), test ครอบ AC, ไม่มี PII ใน log, invariant check ผ่าน, อัปเดต `docs/` ถ้าเปลี่ยน contract (แก้ spec ใน `tsf-oms-contracts` ก่อนเสมอ)
 
-### Flyway
+## Flyway versions (current)
 
-| Rule | Detail |
-|---|---|
-| Numbering | Versions are taken in merge order as the next free number |
-| Per PR | One migration per PR. Never edit a merged migration |
-| V1 | T02 |
-| V2 | T03 |
-| T14 | T14 adds no migration |
+`spring.flyway.out-of-order` is on so a reserved version can be applied after a higher one.
+
+| Version | Owner | Status |
+|---|---|---|
+| V1 | T02 foundation + FORCE RLS | merged |
+| V2 | T03 JIT provision | merged |
+| V3 | T06 catalog | reserved |
+| V4 | T10 orders | reserved |
+| V5 | T50M allocation | reserved |
+| V6 | T11 inbox dedup `(tenant_id, source, event_id)` + `aggregate_version` | this task |
+| V7 | T14 outbox | reserved for the parallel branch |
 
 ## สรุปจำนวน
 | Phase | Cursor | Codex | รวม |
@@ -124,6 +128,7 @@ flowchart LR
 **T11 · Cursor · deps: T02, T03** Inbox framework
 - `POST /internal/v1/events`: ตรวจ HMAC + timestamp, `resolve_tenant`, insert inbox, ตอบ 202; worker `claim_inbox_batch` (`FOR UPDATE SKIP LOCKED`) แล้วประมวลผล **ต่อ tenant ใน transaction เดียว**: handler + `inbox_event=PROCESSED`; `pg_advisory_xact_lock` ต่อ aggregate; handler registry
 - AC: signature ผิด/เก่ากว่า 5 นาที 401 · event ซ้ำ 5 ครั้ง handler ทำงานผลลัพธ์เดียว · handler throw → rollback ทั้งหมด (ไม่มี PROCESSED ค้าง) แล้ว retry ตาม backoff → DEAD · event aggregate เดียวกันไม่ประมวลผลพร้อมกัน · ack p95 < 100 ms
+- V6 replaces V1 `UNIQUE(source, event_id)` with `UNIQUE(tenant_id, source, event_id)`. Entitlement is applied after `claim_inbox_batch` (the claim does not filter it): unexpired `ACTIVE` and `GRACE` are processed (GRACE still blocks user writes); `SUSPENDED` and a passed `entitlement_expires_at` defer business events without consuming an attempt; `membership.changed` always runs so a shop can be reactivated.
 
 **T14 · Cursor · deps: T02** Outbox publisher (at-least-once)
 - API `outbox.append()` ใช้ใน transaction ของ business; publisher `claim_outbox_batch` → `IN_FLIGHT` + `lease_until` → ส่ง HTTP (HMAC) → `SENT`; lease หมด = ส่งใหม่; backoff + jitter; DEAD; หน้า admin retry

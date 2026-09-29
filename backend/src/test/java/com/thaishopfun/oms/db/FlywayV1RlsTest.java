@@ -59,6 +59,7 @@ class FlywayV1RlsTest {
     registry.add("spring.flyway.url", postgres::getJdbcUrl);
     registry.add("spring.flyway.user", postgres::getUsername);
     registry.add("spring.flyway.password", postgres::getPassword);
+    registry.add("oms.inbox.worker-enabled", () -> "false");
   }
 
   @BeforeEach
@@ -89,14 +90,13 @@ class FlywayV1RlsTest {
           ResultSet history =
               statement.executeQuery(
                   "SELECT version, success FROM flyway_schema_history ORDER BY installed_rank")) {
-        // Change: V2 (JIT provisioning) is applied with V1.
-        assertThat(history.next()).isTrue();
-        assertThat(history.getString("version")).isEqualTo("1");
-        assertThat(history.getBoolean("success")).isTrue();
-        assertThat(history.next()).isTrue();
-        assertThat(history.getString("version")).isEqualTo("2");
-        assertThat(history.getBoolean("success")).isTrue();
-        assertThat(history.next()).isFalse();
+        // Change: V2 (JIT) and V6 (inbox dedup) are applied with V1. V3–V5 are reserved.
+        java.util.List<String> versions = new java.util.ArrayList<>();
+        while (history.next()) {
+          assertThat(history.getBoolean("success")).isTrue();
+          versions.add(history.getString("version"));
+        }
+        assertThat(versions).containsExactly("1", "2", "6");
       }
 
       // Step 2: Every foundation table exists.

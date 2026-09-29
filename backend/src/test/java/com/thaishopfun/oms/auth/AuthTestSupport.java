@@ -86,6 +86,7 @@ public final class AuthTestSupport {
     registry.add("oms.security.audience", () -> "oms");
     registry.add("oms.security.internal-audience", () -> "oms-internal");
     registry.add("oms.security.internal-client-ids", () -> "tsf-checkout");
+    registry.add("oms.inbox.worker-enabled", () -> "false");
   }
 
   public static Connection admin() throws SQLException {
@@ -106,7 +107,7 @@ public final class AuthTestSupport {
         List.of("oms"));
   }
 
-  static String token(
+  public static String token(
       String userId,
       String shopId,
       String status,

@@ -505,13 +505,19 @@ erDiagram
 ### Sync / Platform
 | ตาราง | columns สำคัญ | หมายเหตุ |
 |---|---|---|
-| `inbox_event` | id, tenant_id, source, event_id, event_type, aggregate_id, payload jsonb, status (`RECEIVED/PROCESSED/FAILED/DEAD`), attempts, next_attempt_at, last_error, received_at, processed_at, **UNIQUE(source, event_id)** | payload ที่มี PII ล้างหลัง PROCESSED 7 วัน |
+| `inbox_event` | id, tenant_id, source, event_id, event_type, aggregate_id, aggregate_version, payload jsonb, status (`RECEIVED/PROCESSED/FAILED/DEAD`), attempts, next_attempt_at, last_error, received_at, processed_at, **UNIQUE(tenant_id, source, event_id)** | V6. V1 was `UNIQUE(source, event_id)`, which collided across shops. payload ที่มี PII ล้างหลัง PROCESSED 7 วัน |
 | `outbox_event` | id, tenant_id, aggregate_type, aggregate_id, event_type, payload jsonb, status (`PENDING/IN_FLIGHT/SENT/DEAD`), attempts, next_attempt_at, lease_until, created_at, sent_at | เขียนใน transaction เดียวกับ business change |
 | `sync_cursor` | tenant_id, channel_account_id, resource (`ORDERS/LISTINGS`), cursor, last_success_at, PK(channel_account_id, resource) | |
 | `idempotency_key` | tenant_id, scope, key, request_hash, response_status, response_body jsonb, created_at, PK(tenant_id, scope, key) | ลบหลัง 24 ชม. |
 | `shadow_diff` | id, tenant_id, channel_account_id, kind (`STOCK/ORDER/RESERVATION`), ref, oms_value, channel_value, observed_at | ใช้ตัดสินเลื่อน mode |
 | `reconciliation_issue` | id, tenant_id, run_id, rule, order_id NULL, details jsonb, status (`OPEN/ACK/RESOLVED`), UNIQUE(tenant_id, rule, order_id) WHERE status<>'RESOLVED' | |
 | `audit_log` | id, tenant_id, actor_type (`USER/SYSTEM/TSF/PLATFORM_ADMIN`), actor_id, action, entity_type, entity_id, before jsonb, after jsonb, ip, created_at | append-only, PII แทนด้วย `"[PII]"` |
+
+Inbox entitlement (T11), applied by the worker after `claim_inbox_batch`. The claim function does not filter it.
+
+- `ACTIVE`, and `GRACE` that has not passed `entitlement_expires_at`: process the event. GRACE still blocks user API writes. Inbound events keep flowing so the shop does not lose orders during grace.
+- `SUSPENDED`, a passed expiry, or any other status: defer business events. Status stays `RECEIVED` or `FAILED`, the claim does not consume an attempt, and `next_attempt_at` is pushed out. The row is not deleted and does not become `DEAD` only because the shop is suspended.
+- `membership.changed` is processed in every state, including `SUSPENDED`, so a renewal can set the tenant back to `ACTIVE`.
 
 ## PII lifecycle
 | ข้อมูล | เก็บที่ | ป้องกัน | อายุ |
@@ -640,7 +646,7 @@ X-Signature: t=1790665202,v1=5f2b...e9
 ```
 - `v1 = hex(HMAC_SHA256(secret, t + "." + raw_body))` secret แยกต่อทิศ หมุนได้ (รับ 2 key ช่วงเปลี่ยน)
 - ผู้รับตรวจ signature + `|now − t| ≤ 300s` ไม่ผ่าน = `401`
-- ผู้รับ insert inbox (UNIQUE `event_id`) แล้วตอบ `202`; ซ้ำ = `200`; ประมวลผล async
+- ผู้รับ insert inbox (UNIQUE `(tenant_id, source, event_id)`, V6) แล้วตอบ `202`; ซ้ำ = `200`; ประมวลผล async
 - **at-least-once:** ผู้ส่งอาจส่งซ้ำ (เช่น ล่มหลังส่งก่อนบันทึก SENT) ผู้รับต้อง dedupe ด้วย `event_id` เสมอ
 - **Retry:** ไม่ได้ 2xx → backoff + jitter 30s, 2m, 10m, 30m, 1h, 3h, 6h (~11 ชม.) → `DEAD` + alert, retry เองได้
 - `4xx` (ยกเว้น 408/429) = ไม่ retry → DEAD
@@ -758,15 +764,19 @@ Error format ทุก endpoint:
 - **Flyway migrations may be written by Cursor or Codex, one migration per PR, never edit a merged version; Codex reviews every migration PR.**
 - **Definition of Done:** CI เขียว (รวม contract test), test ครอบ AC, ไม่มี PII ใน log, invariant check ผ่าน, อัปเดต `docs/` ถ้าเปลี่ยน contract (แก้ spec ใน `tsf-oms-contracts` ก่อนเสมอ)
 
-### Flyway
+## Flyway versions (current)
 
-| Rule | Detail |
-|---|---|
-| Numbering | Versions are taken in merge order as the next free number |
-| Per PR | One migration per PR. Never edit a merged migration |
-| V1 | T02 |
-| V2 | T03 |
-| T14 | T14 adds no migration |
+`spring.flyway.out-of-order` is on so a reserved version can be applied after a higher one.
+
+| Version | Owner | Status |
+|---|---|---|
+| V1 | T02 foundation + FORCE RLS | merged |
+| V2 | T03 JIT provision | merged |
+| V3 | T06 catalog | reserved |
+| V4 | T10 orders | reserved |
+| V5 | T50M allocation | reserved |
+| V6 | T11 inbox dedup `(tenant_id, source, event_id)` + `aggregate_version` | this task |
+| V7 | T14 outbox | reserved for the parallel branch |
 
 ## สรุปจำนวน
 | Phase | Cursor | Codex | รวม |
@@ -873,6 +883,7 @@ flowchart LR
 **T11 · Cursor · deps: T02, T03** Inbox framework
 - `POST /internal/v1/events`: ตรวจ HMAC + timestamp, `resolve_tenant`, insert inbox, ตอบ 202; worker `claim_inbox_batch` (`FOR UPDATE SKIP LOCKED`) แล้วประมวลผล **ต่อ tenant ใน transaction เดียว**: handler + `inbox_event=PROCESSED`; `pg_advisory_xact_lock` ต่อ aggregate; handler registry
 - AC: signature ผิด/เก่ากว่า 5 นาที 401 · event ซ้ำ 5 ครั้ง handler ทำงานผลลัพธ์เดียว · handler throw → rollback ทั้งหมด (ไม่มี PROCESSED ค้าง) แล้ว retry ตาม backoff → DEAD · event aggregate เดียวกันไม่ประมวลผลพร้อมกัน · ack p95 < 100 ms
+- V6 replaces V1 `UNIQUE(source, event_id)` with `UNIQUE(tenant_id, source, event_id)`. Entitlement is applied after `claim_inbox_batch` (the claim does not filter it): unexpired `ACTIVE` and `GRACE` are processed (GRACE still blocks user writes); `SUSPENDED` and a passed `entitlement_expires_at` defer business events without consuming an attempt; `membership.changed` always runs so a shop can be reactivated.
 
 **T14 · Cursor · deps: T02** Outbox publisher (at-least-once)
 - API `outbox.append()` ใช้ใน transaction ของ business; publisher `claim_outbox_batch` → `IN_FLIGHT` + `lease_until` → ส่ง HTTP (HMAC) → `SENT`; lease หมด = ส่งใหม่; backoff + jitter; DEAD; หน้า admin retry
@@ -1081,7 +1092,7 @@ flowchart LR
 | รายการ | เป้า | วัดจาก |
 |---|---|---|
 | Checkout reserve API | p95 < 150 ms · p99 < 300 ms | server-side, T43 |
-| Webhook ingestion (รับ → ตอบ 202) | p95 < 100 ms · p99 < 300 ms | T11 metric |
+| Webhook ingestion (รับ → ตอบ 202) | p95 < 100 ms · p99 < 300 ms | T11 metric `oms.inbox.ack` |
 | Order processing lag (รับ event → ออเดอร์ + reservation commit) | p95 < 5 วิ · p99 < 30 วิ | `processed_at − received_at` |
 | Stock propagation lag (inventory เปลี่ยน → TSF รับ `stock.updated`) | TSF p95 < 10 วิ · marketplace p95 < 60 วิ | outbox `sent_at − ledger.created_at` |
 | หน้า orders list (10,000 ออเดอร์) | < 1 วิ | T17 |

@@ -21,20 +21,22 @@ cd frontend && npm ci && npm run dev
 - Without `TSF_JWKS_URI` (or `OMS_JWKS_URI`), the process still starts and API calls return 401. T05 will provide the mock IdP.
 - UI: <http://localhost:5173>
 
-The backend waits up to 60 seconds for Postgres to accept connections. Flyway V1 and V2 run on startup.
+The backend waits up to 60 seconds for Postgres to accept connections. Flyway V1, V2, and V6 run on startup.
 
 ## Layout
 
 | Path | What it is |
 |---|---|
-| `backend/` | Spring Boot 4.1, Java 17, Maven wrapper. Actuator health. JWT resource server. Flyway V1 and V2. Spotless on `verify`. |
+| `backend/` | Spring Boot 4.1, Java 17, Maven wrapper. Actuator health. JWT resource server. Flyway V1, V2, and V6. Spotless on `verify`. |
 | `frontend/` | Vite, React, TypeScript. Vitest and ESLint. |
 | `docker-compose.yml` | Postgres 16 for local development. |
 | `docs/plan/` | Plan v2 (process map, scope, data model, API contract, task list, NFR). |
 | `.github/workflows/ci.yml` | Backend `./mvnw verify` and frontend `npm ci && npm run lint && npm run build && npm test`. |
 | `.railway/railway.ts` | Staging infrastructure. Dockerfiles are in each service directory. |
 
-Flyway V1 is `backend/src/main/resources/db/migration/V1__foundation_rls.sql`. It creates `tenant`, `app_user`, `tenant_membership`, `audit_log`, `idempotency_key`, `inbox_event`, and `outbox_event`, plus `oms_migrator`, `oms_app` (`NOBYPASSRLS`), and `oms_maint`. Tenant tables use `ENABLE` and `FORCE ROW LEVEL SECURITY`. V2 is `V2__jit_provision.sql`: `SECURITY DEFINER` functions `upsert_app_user`, `provision_tenant`, `provision_membership`, and read-only `lookup_login`, owned by `oms_maint`, executable only by `oms_app`. Versions are taken in merge order as the next free number: one migration per PR, and a merged version is never edited. V1 is T02 and V2 is T03. T14 adds no migration.
+Flyway V1 is `backend/src/main/resources/db/migration/V1__foundation_rls.sql`. It creates `tenant`, `app_user`, `tenant_membership`, `audit_log`, `idempotency_key`, `inbox_event`, and `outbox_event`, plus `oms_migrator`, `oms_app` (`NOBYPASSRLS`), and `oms_maint`. Tenant tables use `ENABLE` and `FORCE ROW LEVEL SECURITY`. V2 is `V2__jit_provision.sql`: `SECURITY DEFINER` functions `upsert_app_user`, `provision_tenant`, `provision_membership`, and read-only `lookup_login`, owned by `oms_maint`, executable only by `oms_app`. V6 is `V6__inbox_tenant_dedup.sql`: inbox dedup is `UNIQUE (tenant_id, source, event_id)` and `aggregate_version` is a column. Do not edit a version that has already been merged. V3 (T06), V4 (T10), and V5 (T50M) are reserved. V7 is reserved for the outbox branch. `spring.flyway.out-of-order` is true so those versions can be applied after V6.
+
+`POST /internal/v1/events` needs a service JWT and `X-Signature` (`t=<unix>,v1=<hex hmac-sha256>` over `t + "." + raw body`, skew at most 300 seconds). `OMS_INBOX_HMAC_SECRETS` is comma-separated, current key first. The local default `dev-inbox-hmac-secret` is not a production secret. The poller runs unless `OMS_INBOX_WORKER_ENABLED=false`.
 
 The outbox publisher polls `outbox_event` with `claim_outbox_batch` (at-least-once, lease, backoff). It stays idle until both `TSF_OMS_EVENTS_URL` (absolute `http` or `https`) and `OMS_OUTBOX_WEBHOOK_SECRET` (at least 32 bytes) are set. OWNER and ADMIN retry a DEAD row with `GET /api/v1/outbox` (`limit` default 50, max 100, plus `offset`) and `POST /api/v1/outbox/{id}/retry`. The screen is `#/admin/outbox` (token stays in memory). This project is localhost-only: that page reaches the API through the Vite dev proxy (`/api` → `127.0.0.1:8080`). No nginx change is required.
 

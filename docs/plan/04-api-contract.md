@@ -104,7 +104,7 @@ X-Signature: t=1790665202,v1=5f2b...e9
 ```
 - `v1 = hex(HMAC_SHA256(secret, t + "." + raw_body))` secret แยกต่อทิศ หมุนได้ (รับ 2 key ช่วงเปลี่ยน)
 - ผู้รับตรวจ signature + `|now − t| ≤ 300s` ไม่ผ่าน = `401`
-- ผู้รับ insert inbox (UNIQUE `event_id`) แล้วตอบ `202`; ซ้ำ = `200`; ประมวลผล async
+- ผู้รับ insert inbox (UNIQUE `(tenant_id, source, event_id)`, V6) แล้วตอบ `202`; ซ้ำ = `200`; ประมวลผล async
 - **at-least-once:** ผู้ส่งอาจส่งซ้ำ (เช่น ล่มหลังส่งก่อนบันทึก SENT) ผู้รับต้อง dedupe ด้วย `event_id` เสมอ
 - **Retry:** ไม่ได้ 2xx → backoff + jitter 30s, 2m, 10m, 30m, 1h, 3h, 6h (~11 ชม.) → `DEAD` + alert, retry เองได้
 - `4xx` (ยกเว้น 408/429) = ไม่ retry → DEAD

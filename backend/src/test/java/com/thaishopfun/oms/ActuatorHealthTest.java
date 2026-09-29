@@ -29,6 +29,7 @@ class ActuatorHealthTest {
     registry.add("spring.flyway.url", postgres::getJdbcUrl);
     registry.add("spring.flyway.user", postgres::getUsername);
     registry.add("spring.flyway.password", postgres::getPassword);
+    registry.add("oms.inbox.worker-enabled", () -> "false");
   }
 
   @LocalServerPort private int port;
