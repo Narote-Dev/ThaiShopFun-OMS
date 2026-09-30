@@ -118,6 +118,23 @@ class MockTsfApiTest {
   }
 
   @Test
+  void pickerListsShopsForOpenIdScope() throws Exception {
+    String verifier = "pkce-verifier-0123456789-abcdefghijklmnopqrstuvwxyz";
+    String authorize =
+        "/tsf-idp/authorize?response_type=code&client_id=oms-web"
+            + "&redirect_uri="
+            + enc("http://127.0.0.1:5173/")
+            + "&code_challenge="
+            + enc(IdpController.s256(verifier))
+            + "&code_challenge_method=S256&state=xyz&scope="
+            + enc("openid oms");
+    HttpResponse<String> page =
+        http.send(request(authorize).GET().build(), HttpResponse.BodyHandlers.ofString());
+    assertThat(page.statusCode()).isEqualTo(200);
+    assertThat(page.body()).contains("Active Shop").contains("scope=openid%20oms");
+  }
+
+  @Test
   void pkceIssuesSection41Claims() throws Exception {
     String verifier = "pkce-verifier-0123456789-abcdefghijklmnopqrstuvwxyz";
     String challenge = IdpController.s256(verifier);

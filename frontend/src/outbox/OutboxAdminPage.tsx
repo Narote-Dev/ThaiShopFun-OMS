@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { apiRequest, ApiError } from '../api/client'
 
 type DeadEvent = {
   id: string
@@ -9,8 +10,9 @@ type DeadEvent = {
   attempts: number
 }
 
-export default function OutboxAdminPage() {
-  const [token, setToken] = useState('')
+const READ_ONLY = 'This shop is read-only until membership is renewed.'
+
+export default function OutboxAdminPage({ readOnly = false }: { readOnly?: boolean }) {
   const [events, setEvents] = useState<DeadEvent[]>([])
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
@@ -20,20 +22,12 @@ export default function OutboxAdminPage() {
     setBusy(true)
     setError('')
     try {
-      const response = await fetch('/api/v1/outbox', {
-        headers: { Authorization: `Bearer ${token}` },
-      })
-      if (!response.ok) {
-        setError(`Load failed (${response.status})`)
-        setEvents([])
-        return
-      }
-      const body = (await response.json()) as { events: DeadEvent[] }
+      const body = await apiRequest<{ events: DeadEvent[] }>('/api/v1/outbox')
       setEvents(body.events)
       setLoaded(true)
-    } catch {
-      setError('Load failed')
+    } catch (err) {
       setEvents([])
+      setError(messageFor(err, 'Load failed'))
     } finally {
       setBusy(false)
     }
@@ -43,17 +37,10 @@ export default function OutboxAdminPage() {
     setBusy(true)
     setError('')
     try {
-      const response = await fetch(`/api/v1/outbox/${id}/retry`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-      })
-      if (!response.ok) {
-        setError(`Retry failed (${response.status})`)
-        return
-      }
+      await apiRequest(`/api/v1/outbox/${id}/retry`, { method: 'POST' })
       await load()
-    } catch {
-      setError('Retry failed')
+    } catch (err) {
+      setError(messageFor(err, 'Retry failed'))
     } finally {
       setBusy(false)
     }
@@ -61,19 +48,9 @@ export default function OutboxAdminPage() {
 
   return (
     <main>
-      <p className="eyebrow">ThaiShopFun</p>
       <h1>Dead outbox</h1>
-      <p>OWNER or ADMIN can send a DEAD event again. The token stays in memory.</p>
-      <label>
-        Access token
-        <input
-          type="password"
-          value={token}
-          autoComplete="off"
-          onChange={(event) => setToken(event.target.value)}
-        />
-      </label>
-      <button type="button" onClick={() => void load()} disabled={busy || token.trim() === ''}>
+      <p>OWNER or ADMIN can send a DEAD event again. The session token stays in memory.</p>
+      <button type="button" onClick={() => void load()} disabled={busy}>
         Load
       </button>
       {error ? <p role="alert">{error}</p> : null}
@@ -83,7 +60,7 @@ export default function OutboxAdminPage() {
             <span>
               {event.event_type} · {event.aggregate_id} · {event.attempts} attempts
             </span>
-            <button type="button" onClick={() => void retry(event.id)} disabled={busy}>
+            <button type="button" onClick={() => void retry(event.id)} disabled={busy || readOnly}>
               Retry
             </button>
           </li>
@@ -92,4 +69,10 @@ export default function OutboxAdminPage() {
       {loaded && events.length === 0 && !error ? <p>No DEAD events.</p> : null}
     </main>
   )
+}
+
+function messageFor(err: unknown, fallback: string): string {
+  if (err instanceof ApiError && err.code === 'ENTITLEMENT_GRACE') return READ_ONLY
+  if (err instanceof ApiError) return err.message || `${fallback} (${err.status})`
+  return fallback
 }

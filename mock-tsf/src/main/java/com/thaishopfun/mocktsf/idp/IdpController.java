@@ -286,7 +286,8 @@ public class IdpController {
         link.queryParam("state", state);
       }
       if (scope != null) {
-        link.queryParam("scope", scope);
+        // build(true) treats this query as already encoded. A raw space is illegal.
+        link.queryParam("scope", scope.replace(" ", "%20"));
       }
       if (nonce != null) {
         link.queryParam("nonce", nonce);

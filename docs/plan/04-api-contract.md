@@ -47,7 +47,7 @@ sequenceDiagram
   participant B as OMS Backend
   U->>T: กดเมนู "OMS"
   T->>F: redirect ไป OMS
-  F->>T: /authorize (client_id=oms, PKCE, scope=openid oms)
+  F->>T: /authorize (client_id=oms-web, PKCE, scope=openid oms)
   T->>U: (login อยู่แล้ว = ข้าม) เลือกร้าน
   T->>F: redirect ?code=...
   F->>T: /token (code + verifier)
@@ -57,6 +57,8 @@ sequenceDiagram
   B-->>F: { tenant, role, entitlement }
 ```
 - access token เก็บใน memory เท่านั้น; logout ที่ TSF = revoke refresh token
+- OMS web `client_id` คือ `oms-web` (public client, ไม่มี secret). `id_token` มี `aud=oms-web`. Access token ที่ส่งเป็น Bearer ไป OMS มี `aud=oms` และ `typ=at+jwt`. อย่าส่ง `id_token` เป็น Bearer
+- Mock TSF ไม่มี `revocation_endpoint` และไม่มี `end_session_endpoint`. Logout ของ mock ล้าง token ใน memory แล้วกลับหน้า signed-out. เรียก revoke หรือ end_session เฉพาะเมื่อ discovery ประกาศ endpoint นั้น
 
 ## 4.3 Checkout Reservation API (TSF → OMS, sync)
 ```http
