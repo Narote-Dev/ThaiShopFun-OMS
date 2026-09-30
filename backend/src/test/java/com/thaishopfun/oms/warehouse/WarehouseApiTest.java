@@ -5,8 +5,8 @@ import static com.thaishopfun.oms.catalog.CatalogHttp.auditsFor;
 import static com.thaishopfun.oms.catalog.CatalogHttp.count;
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.thaishopfun.oms.auth.AuthTestSupport;
 import com.thaishopfun.oms.catalog.CatalogHttp;
+import com.thaishopfun.oms.catalog.CatalogIntegrationTest;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -17,37 +17,10 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.web.server.LocalServerPort;
-import org.springframework.test.context.ActiveProfiles;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 import tools.jackson.databind.JsonNode;
 
-@ActiveProfiles("test")
-@SpringBootTest(
-    webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-    properties = {
-      "spring.datasource.hikari.maximum-pool-size=20",
-      "oms.outbox.publisher-enabled=false"
-    })
-class WarehouseApiTest {
-
-  @DynamicPropertySource
-  static void properties(DynamicPropertyRegistry registry) {
-    AuthTestSupport.register(registry);
-  }
-
-  @LocalServerPort private int port;
-
-  private CatalogHttp http;
-
-  @BeforeEach
-  void client() {
-    http = new CatalogHttp(port);
-  }
+class WarehouseApiTest extends CatalogIntegrationTest {
 
   @Test
   void crudAndDefaultSwitch() {

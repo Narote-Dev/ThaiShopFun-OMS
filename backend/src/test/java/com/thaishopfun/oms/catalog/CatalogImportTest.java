@@ -5,49 +5,21 @@ import static com.thaishopfun.oms.catalog.CatalogHttp.catalogAudits;
 import static com.thaishopfun.oms.catalog.CatalogHttp.count;
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.thaishopfun.oms.auth.AuthTestSupport;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.web.server.LocalServerPort;
-import org.springframework.test.context.ActiveProfiles;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 import tools.jackson.databind.JsonNode;
 
 /** T07 CSV import: 1,000 rows under 10 s, all-or-nothing, exact bad row numbers, idempotent. */
-@ActiveProfiles("test")
-@SpringBootTest(
-    webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-    properties = {
-      "spring.datasource.hikari.maximum-pool-size=20",
-      "oms.outbox.publisher-enabled=false"
-    })
-class CatalogImportTest {
+class CatalogImportTest extends CatalogIntegrationTest {
 
   private static final Logger log = LoggerFactory.getLogger(CatalogImportTest.class);
   private static final String HEADER =
       "product_name,sku_code,sku_name,barcode,weight_g,is_bundle,components\n";
-
-  @DynamicPropertySource
-  static void properties(DynamicPropertyRegistry registry) {
-    AuthTestSupport.register(registry);
-  }
-
-  @LocalServerPort private int port;
-
-  private CatalogHttp http;
-
-  @BeforeEach
-  void client() {
-    http = new CatalogHttp(port);
-  }
 
   @Test
   void thousandRowsWithBundlesImportUnderTenSecondsAndReimportIsIdempotent() {
