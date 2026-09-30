@@ -55,8 +55,12 @@ public class WarehouseService {
   private record Input(String code, String name, String address, JsonNode addressNode) {}
 
   public List<WarehouseView> list() {
-    // Step 1: The first list of a tenant creates MAIN. Every later call only reads.
-    defaults.ensure();
+    // Step 1: The first list by a writer creates MAIN. STAFF and GRACE only read, so their list
+    // can be empty; a GET from them never writes a warehouse or an audit row.
+    // Change: ensure only when the caller can write (was: on every list).
+    if (access.canWrite()) {
+      defaults.ensure();
+    }
     return tx.read(
         () -> jdbc.query(SELECT + " ORDER BY is_default DESC, code, id", (rs, n) -> map(rs)));
   }

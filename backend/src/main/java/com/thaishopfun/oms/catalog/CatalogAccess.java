@@ -21,6 +21,14 @@ public class CatalogAccess {
 
   public record Actor(UUID tenantId, UUID userId) {}
 
+  /** OWNER or ADMIN, and the shop is not in GRACE: the caller may write. Never throws for roles. */
+  public boolean canWrite() {
+    TenantSnapshot snapshot =
+        sessions.load(TenantContext.requireTenantId(), TenantContext.requireUserId());
+    return ("OWNER".equals(snapshot.role()) || "ADMIN".equals(snapshot.role()))
+        && !"GRACE".equals(snapshot.status());
+  }
+
   public Actor requireWriter() {
     TenantSnapshot snapshot =
         sessions.load(TenantContext.requireTenantId(), TenantContext.requireUserId());

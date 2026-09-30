@@ -93,6 +93,35 @@ class WarehouseApiTest extends CatalogIntegrationTest {
   }
 
   @Test
+  void graceAndStaffListsWriteNothing() {
+    // Step 1: STAFF lists a shop that has no warehouse yet: empty, and nothing is written.
+    CatalogHttp.Shop shop = http.shop();
+    String staff = http.member(shop, "STAFF");
+    CatalogHttp.Result staffList = http.get("/api/v1/warehouses", staff);
+    assertThat(staffList.status()).isEqualTo(200);
+    assertThat(staffList.body().path("items").size()).isZero();
+    assertThat(count("SELECT count(*) FROM warehouse WHERE tenant_id = ?", shop.tenantId()))
+        .isZero();
+    assertThat(CatalogHttp.catalogAudits(shop.tenantId())).isZero();
+
+    // Step 2: A GRACE owner (first login in GRACE) gets the same read-only answer.
+    String graceShop = "shop-" + UUID.randomUUID();
+    String grace = CatalogHttp.token("grace-" + UUID.randomUUID(), graceShop, "OWNER", "GRACE");
+    CatalogHttp.Result me = http.get("/api/v1/me", grace);
+    UUID graceTenant = UUID.fromString(me.body().path("tenant").path("id").asString());
+    CatalogHttp.Result graceList = http.get("/api/v1/warehouses", grace);
+    assertThat(graceList.status()).isEqualTo(200);
+    assertThat(graceList.body().path("items").size()).isZero();
+    assertThat(count("SELECT count(*) FROM warehouse WHERE tenant_id = ?", graceTenant)).isZero();
+    assertThat(CatalogHttp.catalogAudits(graceTenant)).isZero();
+
+    // Step 3: The owner's first list still creates MAIN once.
+    assertThat(http.get("/api/v1/warehouses", shop.owner()).body().path("items").size())
+        .isEqualTo(1);
+    assertThat(http.get("/api/v1/warehouses", staff).body().path("items").size()).isEqualTo(1);
+  }
+
+  @Test
   void defaultIsCreatedOnceUnderConcurrentFirstCalls() throws Exception {
     CatalogHttp.Shop shop = http.shop();
     List<CatalogHttp.Result> results =
