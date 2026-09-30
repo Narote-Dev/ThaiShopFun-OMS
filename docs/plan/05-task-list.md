@@ -19,6 +19,8 @@ Versions are taken in merge order as the next free number. One migration per PR.
 | V2 | T03 JIT provision |
 | V3 | T11 inbox dedup `(tenant_id, source, event_id)`, `aggregate_version`, `payload_sha256` |
 | V4 | T06 catalog, warehouse, stock (FORCE RLS) |
+| V5 | unused: reserved for T07, which shipped without a migration; never add V5 (Flyway outOfOrder is off) |
+| V6 | T08 expired-reservation tenant claim function |
 
 ## สรุปจำนวน
 | Phase | Cursor | Codex | รวม |
@@ -152,6 +154,7 @@ flowchart LR
 **T08 · Cursor · deps: T06** Reservation engine
 - `reserve(owner, items)` all-or-nothing, `transferOwner(CHECKOUT→ORDER)`, `release`, `consume`, `unpack`; แตก bundle + รวมจำนวนต่อ SKU + **lock ตาม SKU id เรียงลำดับ**; expiry job 1 นาที; คำนวณ `physical_available`, `channel_exposed`, bundle availability `min(floor(avail/qty))`; component เปลี่ยน → ส่ง internal `StockChanged` ของ bundle ที่เกี่ยวด้วย
 - AC: 50 thread จองของ 10 ชิ้น → สำเร็จ 10 พอดี · transfer ไม่เปลี่ยน `reserved` · หมดอายุคืนภายใน 2 นาที + ledger `RELEASE` · bundle ขาดลูก 1 ตัว = ไม่จองทั้งชุด · component เปลี่ยนแล้วมี `StockChanged` ของทุก bundle ที่ใช้มัน
+- Lock order (every engine write, `ReservationEngine`): `idempotency_key` row (insert, first statement) → at most one owner advisory lock `pg_advisory_xact_lock(hashtextextended('stock.owner' ‖ tenant ‖ owner_type ‖ owner_ref, 8))` (reserve, transfer target, owner-targeted release/consume/unpack) → `inventory` rows `ORDER BY id FOR UPDATE` → `stock_reservation` rows `ORDER BY id FOR UPDATE`, status re-checked under the lock. A caller that joins the engine inside its own transaction must take no stock locks before it and retry its whole transaction on 40P01/40001
 
 **T08A · Cursor · deps: T08, T07** Stock operations + history UI
 - เอกสาร Opening balance, Receive, Adjustment (บังคับ reason), Count (จำ `system_qty_at_start`), Write-off; DRAFT → POSTED (ห้ามแก้หลัง post, ยกเลิกด้วย VOID + เอกสารกลับรายการ); return restock hook; หน้า stock history ต่อ SKU (กรอง reason/วันที่, ลิงก์ไปเอกสาร/ออเดอร์)

@@ -3,3 +3,7 @@ oms:
   security:
     accepted-token-types:
       - at+jwt
+  # Change: tests run StockExpiryJob directly. A background tick would race their assertions.
+  stock:
+    expiry:
+      enabled: false

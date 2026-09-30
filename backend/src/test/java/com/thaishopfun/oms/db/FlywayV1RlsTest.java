@@ -92,13 +92,14 @@ class FlywayV1RlsTest {
           ResultSet history =
               statement.executeQuery(
                   "SELECT version, success FROM flyway_schema_history ORDER BY installed_rank")) {
-        // Change: V2 (JIT), V3 (inbox dedup), and V4 (catalog/stock) are applied with V1.
+        // Change: V2 (JIT), V3 (inbox dedup), V4 (catalog/stock), and V6 (T08 expiry claim)
+        // are applied with V1. V5 is unused (T07 shipped without one).
         java.util.List<String> versions = new java.util.ArrayList<>();
         while (history.next()) {
           assertThat(history.getBoolean("success")).isTrue();
           versions.add(history.getString("version"));
         }
-        assertThat(versions).containsExactly("1", "2", "3", "4");
+        assertThat(versions).containsExactly("1", "2", "3", "4", "6");
       }
 
       // Step 2: Every foundation table exists.

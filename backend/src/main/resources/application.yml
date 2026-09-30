@@ -89,3 +89,20 @@ oms:
     jitter-ratio: 0.2
     destination-url: ${TSF_OMS_EVENTS_URL:}
     webhook-secret: ${OMS_OUTBOX_WEBHOOK_SECRET:}
+  # T08 reservation engine. Retry is bounded (max 3). The expiry interval is capped at 60s so an
+  # expired hold is back in stock within 2 minutes. Tests set expiry.enabled=false and call
+  # StockExpiryJob directly.
+  stock:
+    checkout-ttl: 15m
+    lock-timeout: 2s
+    retry:
+      max-retries: 3
+      initial-backoff: 10ms
+      multiplier: 4
+      max-backoff: 160ms
+    expiry:
+      enabled: ${OMS_STOCK_EXPIRY_ENABLED:true}
+      interval-ms: 60000
+      batch-size: 200
+      tenant-limit: 100
+      max-batches-per-tenant: 50
