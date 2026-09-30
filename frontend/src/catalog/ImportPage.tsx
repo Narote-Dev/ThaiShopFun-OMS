@@ -43,7 +43,8 @@ export default function ImportPage({ canWrite }: { canWrite: boolean }) {
         UTF-8 CSV with a header row. Columns: <code>product_name, sku_code, sku_name, barcode, weight_g,
         is_bundle, components</code>. <code>components</code> is <code>CODE:qty|CODE:qty</code> and may name SKUs
         anywhere in the file. An existing <code>sku_code</code> is updated, so the same file can be imported
-        again. If any row is wrong, nothing is imported.
+        again. For an existing SKU, an optional column left out of the header keeps the stored value; an empty
+        cell clears it. Products are matched by <code>product_name</code>. If any row is wrong, nothing is imported.
       </p>
       <details>
         <summary>Example</summary>

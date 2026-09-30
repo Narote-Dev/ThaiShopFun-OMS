@@ -63,15 +63,22 @@ public class CatalogImportService {
     this.defaults = defaults;
   }
 
-  /** A row that passed the shape checks. {@code components} keeps file order. */
+  /**
+   * A row that passed the shape checks. An optional column that is absent from the header is "keep
+   * the stored value" for an existing SKU: {@code hasBarcode}/{@code hasWeight} are false, {@code
+   * bundle} is null, {@code components} is null. A present but empty cell clears the value. {@code
+   * components} keeps file order.
+   */
   record Row(
       int line,
       String productName,
       String code,
       String name,
       String barcode,
+      boolean hasBarcode,
       Integer weight,
-      boolean bundle,
+      boolean hasWeight,
+      Boolean bundle,
       Map<String, Integer> components) {}
 
   record Parsed(List<Row> rows, List<ImportRowError> errors, Set<String> badCodes, int total) {}
@@ -188,11 +195,15 @@ public class CatalogImportService {
           rowErrors.add(new ImportRowError(line, "weight_g", "must be a whole number"));
         }
       }
-      Boolean bundle = parseBoolean(cell(record, index, "is_bundle"));
-      if (bundle == null) {
-        rowErrors.add(new ImportRowError(line, "is_bundle", "must be true or false"));
+      Boolean bundle = null;
+      if (index.containsKey("is_bundle")) {
+        bundle = parseBoolean(cell(record, index, "is_bundle"));
+        if (bundle == null) {
+          rowErrors.add(new ImportRowError(line, "is_bundle", "must be true or false"));
+        }
       }
-      Map<String, Integer> components = new LinkedHashMap<>();
+      Map<String, Integer> components =
+          index.containsKey("components") ? new LinkedHashMap<>() : null;
       String componentText = cell(record, index, "components");
       if (componentText != null) {
         if (Boolean.FALSE.equals(bundle)) {
@@ -212,7 +223,18 @@ public class CatalogImportService {
         }
       }
       if (rowErrors.isEmpty()) {
-        rows.add(new Row(line, productName, code, name, barcode, weight, bundle, components));
+        rows.add(
+            new Row(
+                line,
+                productName,
+                code,
+                name,
+                barcode,
+                index.containsKey("barcode"),
+                weight,
+                index.containsKey("weight_g"),
+                bundle,
+                components));
       } else {
         errors.addAll(rowErrors);
         if (code != null) {
@@ -234,7 +256,9 @@ public class CatalogImportService {
     // Step 1: Lock every SKU the file names (rows and components) in id order.
     Set<String> codes = new LinkedHashSet<>(fileRows.keySet());
     for (Row row : parsed.rows()) {
-      codes.addAll(row.components().keySet());
+      if (row.components() != null) {
+        codes.addAll(row.components().keySet());
+      }
     }
     Map<String, DbSku> db = lockByCode(codes);
     Map<UUID, DbSku> dbById = new HashMap<>();
@@ -247,13 +271,47 @@ public class CatalogImportService {
     }
 
     // Step 2: Facts the rules need: current components, who uses the file SKUs, stock rows.
+    // A bundle whose components column is absent keeps its list, so it counts as a user too.
+    Set<String> replacingCodes = new HashSet<>();
+    for (Row row : parsed.rows()) {
+      if (row.components() != null) {
+        replacingCodes.add(row.code());
+      }
+    }
     Map<UUID, Map<UUID, Integer>> currentComponents = componentsOf(fileIds);
-    Map<UUID, List<String>> usedByOutsideBundles = usedByBundlesOutside(fileIds, fileRows.keySet());
+    Map<UUID, List<String>> usedByOutsideBundles = usedByBundlesOutside(fileIds, replacingCodes);
     Set<UUID> stocked = stocked(fileIds);
 
-    // Step 3: Cross-row and database rules, reported per cell like the shape checks.
+    // Step 3: Effective is_bundle per file row: the cell, else the stored value, else false.
+    Map<String, Boolean> finalBundle = new HashMap<>();
     for (Row row : parsed.rows()) {
-      for (String component : row.components().keySet()) {
+      DbSku existing = db.get(row.code());
+      finalBundle.put(
+          row.code(), row.bundle() != null ? row.bundle() : existing != null && existing.bundle());
+    }
+
+    // Step 4: Cross-row and database rules, reported per cell like the shape checks.
+    for (Row row : parsed.rows()) {
+      DbSku existing = db.get(row.code());
+      boolean bundle = finalBundle.get(row.code());
+      Map<String, Integer> listed = row.components() == null ? Map.of() : row.components();
+      if (row.bundle() == null && !listed.isEmpty() && !bundle) {
+        errors.add(
+            new ImportRowError(
+                row.line(), "components", "BUNDLE_REQUIRED: components need is_bundle = true"));
+      }
+      if (row.components() == null
+          && !bundle
+          && existing != null
+          && !currentComponents.getOrDefault(existing.id(), Map.of()).isEmpty()) {
+        errors.add(
+            new ImportRowError(
+                row.line(),
+                "is_bundle",
+                "BUNDLE_REQUIRED: the SKU still has components; add an empty components column"
+                    + " to clear them"));
+      }
+      for (String component : listed.keySet()) {
         if (component.equals(row.code())) {
           errors.add(
               new ImportRowError(
@@ -269,7 +327,7 @@ public class CatalogImportService {
           }
           continue;
         }
-        boolean componentIsBundle = inFile != null ? inFile.bundle() : inDb.bundle();
+        boolean componentIsBundle = inFile != null ? finalBundle.get(component) : inDb.bundle();
         if (componentIsBundle) {
           errors.add(
               new ImportRowError(
@@ -278,8 +336,7 @@ public class CatalogImportService {
                   "NESTED_BUNDLE: component " + component + " is a bundle"));
         }
       }
-      DbSku existing = db.get(row.code());
-      if (row.bundle() && existing != null) {
+      if (bundle && existing != null) {
         if (stocked.contains(existing.id())) {
           errors.add(
               new ImportRowError(
@@ -303,7 +360,7 @@ public class CatalogImportService {
     // file writes nothing at all.
     defaults.ensure();
 
-    // Step 4: Products by name. An existing SKU keeps its product when the name still matches.
+    // Step 5: Products by name. An existing SKU keeps its product when the name still matches.
     Set<String> neededNames = new LinkedHashSet<>();
     for (Row row : parsed.rows()) {
       DbSku existing = db.get(row.code());
@@ -326,7 +383,7 @@ public class CatalogImportService {
       }
     }
 
-    // Step 5: SKU inserts and updates. Unchanged rows produce no write at all.
+    // Step 6: SKU inserts and updates. Unchanged rows produce no write at all.
     List<SkuWrite> inserts = new ArrayList<>();
     List<SkuWrite> updates = new ArrayList<>();
     Map<String, UUID> idByCode = new HashMap<>();
@@ -341,12 +398,29 @@ public class CatalogImportService {
       if (existing == null) {
         UUID id = UuidV7.generate();
         idByCode.put(row.code(), id);
-        SkuWrite write = new SkuWrite(id, productId, row);
+        SkuWrite write =
+            new SkuWrite(
+                id,
+                productId,
+                row.code(),
+                row.name(),
+                row.barcode(),
+                row.weight(),
+                finalBundle.get(row.code()));
         inserts.add(write);
         audits.add(new CatalogAudit.Entry("SKU_CREATED", "sku", id, null, write.audit()));
         continue;
       }
-      SkuWrite write = new SkuWrite(existing.id(), productId, row);
+      // Absent optional columns keep the stored values.
+      SkuWrite write =
+          new SkuWrite(
+              existing.id(),
+              productId,
+              row.code(),
+              row.name(),
+              row.hasBarcode() ? row.barcode() : existing.barcode(),
+              row.hasWeight() ? row.weight() : existing.weight(),
+              finalBundle.get(row.code()));
       Map<String, Object> before = auditOf(existing);
       if (before.equals(write.audit())) {
         unchanged++;
@@ -358,11 +432,15 @@ public class CatalogImportService {
     }
     updates.sort(Comparator.comparing(SkuWrite::id));
 
-    // Step 6: Component lists. Replace only the ones that differ from the database.
+    // Step 7: Component lists. Replace only the ones listed in the file that differ from the
+    // database. An absent components column keeps the stored list.
     List<UUID> clearBundles = new ArrayList<>();
     List<Object[]> componentRows = new ArrayList<>();
     int replaced = 0;
     for (Row row : parsed.rows()) {
+      if (row.components() == null) {
+        continue;
+      }
       UUID bundleId = idByCode.get(row.code());
       Map<UUID, Integer> wanted = new LinkedHashMap<>();
       row.components().forEach((code, qty) -> wanted.put(idByCode.get(code), qty));
@@ -386,7 +464,7 @@ public class CatalogImportService {
               Map.of("components", componentAudit(wanted, dbById, idByCode))));
     }
 
-    // Step 7: Write in trigger-safe order: old components out, SKUs in or updated (is_bundle
+    // Step 8: Write in trigger-safe order: old components out, SKUs in or updated (is_bundle
     // flips see no stale component rows), then the new components.
     if (!newProducts.isEmpty()) {
       jdbc.batchUpdate(
@@ -426,7 +504,7 @@ public class CatalogImportService {
           componentRows);
     }
 
-    // Step 8: Per-entity audit rows plus one summary row, all in this transaction.
+    // Step 9: Per-entity audit rows plus one summary row, all in this transaction.
     ImportResult result =
         new ImportResult(
             parsed.total(),
@@ -451,16 +529,23 @@ public class CatalogImportService {
     return result;
   }
 
-  private record SkuWrite(UUID id, UUID productId, Row row) {
+  private record SkuWrite(
+      UUID id,
+      UUID productId,
+      String code,
+      String name,
+      String barcode,
+      Integer weight,
+      boolean bundle) {
 
     Map<String, Object> audit() {
       Map<String, Object> values = new LinkedHashMap<>();
       values.put("product_id", productId.toString());
-      values.put("sku_code", row.code());
-      values.put("name", row.name());
-      values.put("barcode", row.barcode());
-      values.put("weight_g", row.weight());
-      values.put("is_bundle", row.bundle());
+      values.put("sku_code", code);
+      values.put("name", name);
+      values.put("barcode", barcode);
+      values.put("weight_g", weight);
+      values.put("is_bundle", bundle);
       return values;
     }
   }
@@ -473,19 +558,19 @@ public class CatalogImportService {
           public void setValues(PreparedStatement ps, int i) throws SQLException {
             SkuWrite write = writes.get(i);
             ps.setObject(1, write.productId());
-            ps.setString(2, write.row().code());
-            ps.setString(3, write.row().name());
-            if (write.row().barcode() == null) {
+            ps.setString(2, write.code());
+            ps.setString(3, write.name());
+            if (write.barcode() == null) {
               ps.setNull(4, Types.VARCHAR);
             } else {
-              ps.setString(4, write.row().barcode());
+              ps.setString(4, write.barcode());
             }
-            if (write.row().weight() == null) {
+            if (write.weight() == null) {
               ps.setNull(5, Types.INTEGER);
             } else {
-              ps.setInt(5, write.row().weight());
+              ps.setInt(5, write.weight());
             }
-            ps.setBoolean(6, write.row().bundle());
+            ps.setBoolean(6, write.bundle());
             ps.setObject(7, write.id());
             ps.setObject(8, tenantId);
           }
@@ -551,8 +636,8 @@ public class CatalogImportService {
     return components;
   }
 
-  /** Component SKU id to the codes of bundles outside the file that use it. */
-  private Map<UUID, List<String>> usedByBundlesOutside(List<UUID> ids, Set<String> fileCodes) {
+  /** Component SKU id to the codes of bundles whose list this file does not replace. */
+  private Map<UUID, List<String>> usedByBundlesOutside(List<UUID> ids, Set<String> replacingCodes) {
     Map<UUID, List<String>> used = new HashMap<>();
     if (ids.isEmpty()) {
       return used;
@@ -569,7 +654,7 @@ public class CatalogImportService {
         ps -> ps.setArray(1, ps.getConnection().createArrayOf("uuid", array)),
         rs -> {
           String bundleCode = rs.getString("sku_code");
-          if (!fileCodes.contains(bundleCode)) {
+          if (!replacingCodes.contains(bundleCode)) {
             used.computeIfAbsent(
                     rs.getObject("component_sku_id", UUID.class), k -> new ArrayList<>())
                 .add(bundleCode);

@@ -3,6 +3,7 @@ package com.thaishopfun.oms.catalog;
 import static com.thaishopfun.oms.catalog.CatalogHttp.audits;
 import static com.thaishopfun.oms.catalog.CatalogHttp.catalogAudits;
 import static com.thaishopfun.oms.catalog.CatalogHttp.count;
+import static com.thaishopfun.oms.catalog.CatalogHttp.text;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.nio.charset.StandardCharsets;
@@ -73,6 +74,82 @@ class CatalogImportTest extends CatalogIntegrationTest {
     assertThat(again.body().path("bundles_replaced").asInt()).isZero();
     assertThat(catalogAudits(shop.tenantId())).isEqualTo(auditsBefore + 1);
     assertThat(catalogSnapshot(shop.tenantId())).isEqualTo(snapshot);
+  }
+
+  @Test
+  void absentOptionalColumnsKeepStoredValuesAndEmptyCellsClearThem() {
+    CatalogHttp.Shop shop = http.shop();
+    String full = thousandRows();
+    assertThat(http.upload("/api/v1/catalog/import", shop.owner(), "full.csv", full).status())
+        .isEqualTo(200);
+    String skus = skuState(shop.tenantId());
+    String components = componentState(shop.tenantId());
+
+    // Step 1: The required columns only, over bundles, barcodes and weights: nothing changes.
+    StringBuilder slim = new StringBuilder("product_name,sku_code,sku_name\n");
+    for (String line : full.split("\n")) {
+      if (line.startsWith("product_name")) {
+        continue;
+      }
+      String[] cells = line.split(",", -1);
+      slim.append(cells[0]).append(',').append(cells[1]).append(',').append(cells[2]).append('\n');
+    }
+    long auditsBefore = catalogAudits(shop.tenantId());
+    CatalogHttp.Result result =
+        http.upload("/api/v1/catalog/import", shop.owner(), "slim.csv", slim.toString());
+    assertThat(result.status()).as(result.raw()).isEqualTo(200);
+    assertThat(result.body().path("skus_unchanged").asInt()).isEqualTo(1000);
+    assertThat(result.body().path("skus_updated").asInt()).isZero();
+    assertThat(result.body().path("bundles_replaced").asInt()).isZero();
+    assertThat(skuState(shop.tenantId())).isEqualTo(skus);
+    assertThat(componentState(shop.tenantId())).isEqualTo(components);
+    assertThat(catalogAudits(shop.tenantId())).isEqualTo(auditsBefore + 1);
+    assertThat(audits(shop.tenantId(), "CATALOG_IMPORTED")).isEqualTo(2);
+
+    // Step 2: A present but empty cell clears the value; absent columns are still kept.
+    CatalogHttp.Result cleared =
+        http.upload(
+            "/api/v1/catalog/import",
+            shop.owner(),
+            "clear.csv",
+            "product_name,sku_code,sku_name,barcode\nProduct 0,SKU-0000,Item 0,\n");
+    assertThat(cleared.body().path("skus_updated").asInt()).isEqualTo(1);
+    assertThat(
+            text(
+                "SELECT coalesce(barcode, 'null') || '/' || weight_g FROM sku "
+                    + "WHERE tenant_id = ? AND sku_code = 'SKU-0000'",
+                shop.tenantId()))
+        .isEqualTo("null/100");
+
+    // Step 3: Components without an is_bundle column use the stored flag.
+    CatalogHttp.Result relinked =
+        http.upload(
+            "/api/v1/catalog/import",
+            shop.owner(),
+            "relink.csv",
+            "product_name,sku_code,sku_name,components\nBundles,BND-0000,Bundle 0,SKU-0001:3\n");
+    assertThat(relinked.status()).as(relinked.raw()).isEqualTo(200);
+    assertThat(relinked.body().path("bundles_replaced").asInt()).isEqualTo(1);
+    CatalogHttp.Result notBundle =
+        http.upload(
+            "/api/v1/catalog/import",
+            shop.owner(),
+            "bad.csv",
+            "product_name,sku_code,sku_name,components\nProduct 1,SKU-0001,Item 1,SKU-0002:1\n");
+    assertThat(notBundle.status()).isEqualTo(422);
+    assertThat(notBundle.body().path("errors").get(0).path("error").asString())
+        .startsWith("BUNDLE_REQUIRED");
+
+    // Step 4: Clearing is_bundle while the components column is absent keeps the list: rejected.
+    CatalogHttp.Result keepList =
+        http.upload(
+            "/api/v1/catalog/import",
+            shop.owner(),
+            "flip.csv",
+            "product_name,sku_code,sku_name,is_bundle\nBundles,BND-0001,Bundle 1,false\n");
+    assertThat(keepList.status()).isEqualTo(422);
+    assertThat(keepList.body().path("errors").get(0).path("column").asString())
+        .isEqualTo("is_bundle");
   }
 
   @Test
@@ -248,6 +325,22 @@ class CatalogImportTest extends CatalogIntegrationTest {
           .append(",false,\n");
     }
     return csv.toString();
+  }
+
+  private static String skuState(UUID tenantId) {
+    return text(
+        "SELECT string_agg(sku_code || ':' || product_id || ':' || name || ':' "
+            + "|| coalesce(barcode, '-') || ':' || coalesce(weight_g::text, '-') || ':' || is_bundle "
+            + "|| ':' || updated_at, ',' ORDER BY sku_code) FROM sku WHERE tenant_id = ?",
+        tenantId);
+  }
+
+  private static String componentState(UUID tenantId) {
+    return text(
+        "SELECT string_agg(bundle_sku_id || '>' || component_sku_id || 'x' || qty || '@' || updated_at,"
+            + " ',' ORDER BY bundle_sku_id, component_sku_id) FROM sku_bundle_component "
+            + "WHERE tenant_id = ?",
+        tenantId);
   }
 
   private static String catalogSnapshot(UUID tenantId) {
