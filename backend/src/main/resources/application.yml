@@ -18,6 +18,13 @@ spring:
     # unless FLYWAY_URL or a postgres:// DATABASE_URL sets it (see the post-processor).
     user: ${FLYWAY_USER:oms}
     password: ${FLYWAY_PASSWORD:oms}
+  # Change: T07 CSV import (at most 20,000 rows). Lazy resolution lets the catalog error handler
+  # answer an oversized upload in the section 4.8 error format.
+  servlet:
+    multipart:
+      max-file-size: 5MB
+      max-request-size: 6MB
+      resolve-lazily: true
 
 server:
   port: ${PORT:8080}
