@@ -19,6 +19,7 @@ import javax.sql.DataSource;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -26,6 +27,8 @@ import org.springframework.test.context.DynamicPropertySource;
 /** V6 {@code list_tenants_with_expired_reservations}: definer, ids only, bounded, oms_app only. */
 @ActiveProfiles("test")
 @SpringBootTest(properties = "spring.datasource.hikari.maximum-pool-size=2")
+// Closed after the class: every cached context holds a pool on the shared Postgres.
+@DirtiesContext
 class FlywayV6StockExpiryClaimTest {
 
   private static final String FUNCTION =

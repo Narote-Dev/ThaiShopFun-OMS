@@ -13,6 +13,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -30,6 +31,8 @@ import org.springframework.transaction.PlatformTransactionManager;
       "spring.datasource.hikari.minimum-idle=2"
     })
 @Import(StockTestConfig.class)
+// Closed after the class: every cached context holds a pool on the shared Postgres.
+@DirtiesContext
 abstract class StockTestBase {
 
   @DynamicPropertySource
