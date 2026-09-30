@@ -197,6 +197,7 @@ export default function SkuFormPage({ id, canWrite }: { id: string | null; canWr
             On hand {sku.on_hand} · reserved {sku.reserved ?? 0}
           </p>
         ) : null}
+        {/* Change: T08A stock history link. */}
         {sku && !sku.is_bundle ? (
           <p>
             <a href={`#/catalog/skus/${sku.id}/history`}>Stock history</a>

@@ -6,15 +6,20 @@ import { expect, test } from '@playwright/test'
 test('owner posts a RECEIVE and sees it in the SKU stock history', async ({ page }) => {
   const code = `E2E-STK-${Date.now()}`
   const reference = `PO-${Date.now()}`
+  const product = `E2E Stock ${Date.now()}`
 
-  // Step 1: Sign in through the mock IdP and create a plain SKU.
+  // Step 1: Sign in through the mock IdP, add a product, and create a plain SKU under it.
   await page.goto('/')
   await page.getByRole('link', { name: /^Active Shop/ }).click()
   await expect(page.getByRole('heading', { name: 'Active Shop' })).toBeVisible()
+  await page.getByRole('link', { name: 'Products', exact: true }).click()
+  await page.getByLabel('New product name').fill(product)
+  await page.getByRole('button', { name: 'Add product' }).click()
+  await expect(page.getByLabel(`Name of ${product}`)).toBeVisible()
   await page.getByRole('link', { name: 'SKUs', exact: true }).click()
   await page.getByRole('link', { name: 'New SKU' }).click()
-  await page.getByRole('combobox').selectOption({ label: 'New product…' })
-  await page.getByLabel('New product name').fill('E2E Stock Product')
+  // The option exists only once the product list has loaded, so this cannot race the form default.
+  await page.getByRole('combobox').selectOption({ label: product })
   await page.getByLabel('SKU code').fill(code)
   await page.getByLabel('Name', { exact: true }).fill('E2E stock item')
   await page.getByRole('button', { name: 'Create SKU' }).click()
@@ -42,7 +47,7 @@ test('owner posts a RECEIVE and sees it in the SKU stock history', async ({ page
   await page.getByRole('link', { name: 'SKUs', exact: true }).click()
   await page.getByLabel('Search SKUs').fill(code.toLowerCase())
   await page.getByRole('button', { name: 'Search' }).click()
-  await page.getByRole('link', { name: `Stock history of ${code}` }).click()
+  await page.getByRole('row', { name: new RegExp(code) }).getByRole('link', { name: 'History' }).click()
   await expect(page.getByRole('heading', { name: `Stock history · ${code}` })).toBeVisible()
   const movements = page.getByRole('table', { name: 'Stock movements' })
   await expect(movements.getByRole('row')).toHaveCount(2)

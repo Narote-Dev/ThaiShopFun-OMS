@@ -93,6 +93,7 @@ class StockTransactions {
                 }));
   }
 
+  // Change: T08A post/void never join a caller transaction.
   /**
    * A write that must own its transaction (stock document post and void). Inside a caller's
    * transaction it checks isolation and tenant first, then throws {@link IllegalStateException}.

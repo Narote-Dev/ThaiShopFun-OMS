@@ -319,6 +319,7 @@ class StockRepository {
         });
   }
 
+  // Change: T08A on_hand writes for stock documents, voids, and return restocks.
   /**
    * {@code on_hand += delta} per row, only where the result stays at or above {@code reserved} (and
    * so at or above 0). Stock documents, voids, and return restocks. Returns the rows updated.
@@ -409,6 +410,7 @@ class StockRepository {
     return found;
   }
 
+  // Change: T08A ref_type parameter; reservation callers keep the stock_reservation default.
   /** Reservation entries: {@code ref_type = stock_reservation}. */
   void insertLedger(UUID tenantId, String reason, String actor, Collection<LedgerEntry> entries) {
     insertLedger(tenantId, reason, REF_TYPE, actor, entries);

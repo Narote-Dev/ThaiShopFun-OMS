@@ -87,10 +87,9 @@ export default function SkuListPage({ canWrite }: { canWrite: boolean }) {
                 <td>{sku.is_bundle ? `Bundle (${sku.component_count})` : 'SKU'}</td>
                 <td>{sku.on_hand ?? '—'}</td>
                 <td>
+                  {/* Change: T08A stock history per SKU. Bundles have no stock of their own. */}
                   {sku.is_bundle ? null : (
-                    <a href={`#/catalog/skus/${sku.id}/history`} aria-label={`Stock history of ${sku.sku_code}`}>
-                      History
-                    </a>
+                    <a href={`#/catalog/skus/${sku.id}/history`}>History</a>
                   )}
                 </td>
               </tr>
