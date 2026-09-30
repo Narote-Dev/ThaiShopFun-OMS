@@ -1,6 +1,8 @@
 -- V6: cross-tenant lookup for the stock reservation expiry job (plan task T08).
 --
--- V5 is reserved for T07. This migration only adds one function. No table changes.
+-- V5 is unused: it was reserved for T07, which shipped without a migration. Never add a V5
+-- later. Flyway outOfOrder is off, so a V5 added after V6 is applied would fail validation.
+-- This migration only adds one function. No table changes.
 --
 -- oms_app cannot see other tenants' reservations (FORCE RLS), and list_active_tenant_ids
 -- returns ACTIVE tenants only, so GRACE and SUSPENDED shops' holds would never expire.

@@ -93,7 +93,7 @@ class FlywayV1RlsTest {
               statement.executeQuery(
                   "SELECT version, success FROM flyway_schema_history ORDER BY installed_rank")) {
         // Change: V2 (JIT), V3 (inbox dedup), V4 (catalog/stock), and V6 (T08 expiry claim)
-        // are applied with V1. V5 is reserved for T07.
+        // are applied with V1. V5 is unused (T07 shipped without one).
         java.util.List<String> versions = new java.util.ArrayList<>();
         while (history.next()) {
           assertThat(history.getBoolean("success")).isTrue();
