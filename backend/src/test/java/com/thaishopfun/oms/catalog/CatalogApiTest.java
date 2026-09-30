@@ -116,6 +116,10 @@ class CatalogApiTest extends CatalogIntegrationTest {
     update.put("sku_code", "MUG-RED-L");
     update.put("name", "Red coffee mug, large");
     update.put("weight_g", 420);
+    CatalogHttp.Result missingFlag = http.put("/api/v1/skus/" + id, shop.owner(), update);
+    assertThat(missingFlag.status()).isEqualTo(422);
+    assertThat(missingFlag.error()).isEqualTo("VALIDATION_FAILED");
+    update.put("is_bundle", false);
     CatalogHttp.Result updated = http.put("/api/v1/skus/" + id, shop.owner(), update);
     assertThat(updated.status()).as(updated.raw()).isEqualTo(200);
     assertThat(updated.body().path("sku_code").asString()).isEqualTo("MUG-RED-L");

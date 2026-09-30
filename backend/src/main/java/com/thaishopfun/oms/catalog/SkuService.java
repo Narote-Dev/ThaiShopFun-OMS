@@ -349,6 +349,10 @@ public class SkuService {
     Fields.require("name", Fields.nameError(name));
     Fields.require("barcode", Fields.barcodeError(barcode));
     Fields.require("weight_g", Fields.weightError(request.weightG()));
+    // Change: a full update must state is_bundle; omitting it must not silently clear the flag.
+    if (!create && request.bundle() == null) {
+      throw CatalogApiException.invalid("is_bundle is required");
+    }
     if (request.productId() == null) {
       if (!create) {
         throw CatalogApiException.invalid("product_id is required");
