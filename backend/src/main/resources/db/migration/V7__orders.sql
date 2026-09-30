@@ -25,15 +25,23 @@
 --
 -- Trigger errors use SQLSTATE 23514 (check_violation), a stable message prefix, and a
 -- constraint name, like V4:
--- * RETURN_QTY_EXCEEDED     (constraint return_line_qty_limit): the non-REJECTED return qty of
---                           an order line would exceed order_line.qty.
+-- * RETURN_QTY_EXCEEDED     (constraint return_line_qty_limit): the return qty of an order line,
+--                           over requests that were never rejected, would exceed order_line.qty.
 -- * READ_COMMITTED_REQUIRED (constraint return_line_isolation): a return qty check under a
 --                           snapshot isolation level, where the SUM could miss a concurrent
 --                           commit.
+-- * RETURN_REJECTED_FINAL   (constraint return_request_rejected_sticky): clearing
+--                           return_request.rejected once it is set.
+-- * RETURN_REJECTED_FINAL   (constraint return_request_status_transition): a rejected request
+--                           moving to any status other than REJECTED or CLOSED.
 --
--- Lock order for the return checks: return_request (FOR SHARE, or the row lock of its own
--- UPDATE) before order_line (FOR UPDATE, in id order). Every path takes them in that order, so
--- the checks cannot deadlock with each other. T13 should keep the same order.
+-- Lock order for the return checks: return_request (FOR SHARE) before order_line (FOR UPDATE,
+-- in id order). Within one statement the checks cannot deadlock with each other, but two
+-- transactions that insert return lines for the same order lines in opposite orders can.
+-- Note for T13:
+-- * insert the return lines of a request sorted by order_line_id;
+-- * touch (lock or update) the return_request before any order_line in the same transaction;
+-- * retry the whole transaction on 40P01 (deadlock_detected).
 
 -- Step 1: Orders. No PII here. channel_status is the channel's own status text.
 -- version is the optimistic lock (03 principles). external_version is the channel's version.
@@ -102,7 +110,8 @@ CREATE TABLE sales_order (
 );
 
 -- Step 2: Recipient PII, one row per order. *_enc columns are
--- version(1) || key_id || nonce(12) || ciphertext+tag, bound by AAD to (tenant, order, column).
+-- version(1) || kid length(1) || kid || nonce(12) || ciphertext+tag. The AAD is that header
+-- (version || kid length || kid) plus tenant, order, and column.
 -- phone_hash is HMAC-SHA256 (32 bytes) of the normalized phone, for search. phone_last4 and
 -- province/postcode stay in clear text: they survive redaction.
 CREATE TABLE order_recipient (
@@ -271,6 +280,10 @@ CREATE TABLE shipment (
 
 -- Step 6: Returns. A return does not touch the order's own status (01-process-map.md).
 -- UNIQUE (tenant_id, order_id, id) is the target of return_line's and refund's same-order FKs.
+-- rejected records that the request was ever REJECTED. It is set by trigger (Step 12) and never
+-- cleared, so a rejected request stays out of the return qty count after REJECTED -> CLOSED.
+-- The CHECK keeps it consistent with status: REJECTED implies rejected, and a rejected request
+-- can only be REJECTED or CLOSED.
 CREATE TABLE return_request (
   id uuid PRIMARY KEY,
   tenant_id uuid NOT NULL REFERENCES tenant (id),
@@ -278,6 +291,7 @@ CREATE TABLE return_request (
   external_return_id text,
   type text NOT NULL,
   status text NOT NULL DEFAULT 'REQUESTED',
+  rejected boolean NOT NULL DEFAULT false,
   reason text,
   requested_at timestamptz NOT NULL DEFAULT now(),
   received_at timestamptz,
@@ -291,6 +305,9 @@ CREATE TABLE return_request (
   CONSTRAINT return_request_type_check CHECK (type IN ('RETURN', 'RTS')),
   CONSTRAINT return_request_status_check CHECK (
     status IN ('REQUESTED', 'APPROVED', 'REJECTED', 'RECEIVED', 'CLOSED')
+  ),
+  CONSTRAINT return_request_rejected_check CHECK (
+    (status <> 'REJECTED' OR rejected) AND (NOT rejected OR status IN ('REJECTED', 'CLOSED'))
   )
 );
 
@@ -578,14 +595,13 @@ CREATE TRIGGER payment_status_snapshot_append_only_truncate
   EXECUTE FUNCTION order_append_only_reject_mutation();
 
 -- Step 12: Return quantity limit. For every order line, the qty of its return lines whose
--- request is not REJECTED must stay <= order_line.qty. Three writes can break that, and each
--- has a trigger:
+-- request was never rejected (NOT return_request.rejected) must stay <= order_line.qty.
+-- rejected is sticky (return_request_rejected_guard below): it is set when status becomes
+-- REJECTED and can never be cleared, and a rejected request may only move on to CLOSED
+-- (01-process-map.md: REJECTED -> CLOSED). So a request never starts counting again, and only
+-- two writes can break the limit, each with a trigger:
 -- * return_line INSERT, or UPDATE of qty / order_line_id / return_id / order_id.
 -- * order_line UPDATE that lowers qty.
--- * return_request UPDATE that moves status out of REJECTED (its lines start counting again).
---   This is allowed (01-process-map.md has REJECTED -> CLOSED) and re-runs the check. Note for
---   T13: a REJECTED request that moves to CLOSED counts again, because CLOSED alone does not
---   say it was rejected.
 -- Every check locks the order line FOR UPDATE and then runs the SUM as a new statement. Under
 -- READ COMMITTED that statement sees every return line committed by a writer that held the
 -- lock before us. Under REPEATABLE READ or SERIALIZABLE it would not, so those levels are
@@ -600,7 +616,7 @@ AS $fn$
 DECLARE
   v_isolation text := pg_catalog.current_setting('transaction_isolation');
   v_line_ids uuid[];
-  v_status text;
+  v_rejected boolean;
   v_line_qty integer;
   v_returned bigint;
 BEGIN
@@ -613,10 +629,10 @@ BEGIN
         || '(current: ' || v_isolation || ')';
   END IF;
 
-  -- Step 1: Lock the request first (lock order: request, then order lines). FOR SHARE blocks a
-  -- concurrent move out of REJECTED until this line commits, and vice versa.
-  SELECT r.status
-    INTO v_status
+  -- Step 1: Lock the request first (lock order: request, then order lines). rejected only ever
+  -- goes false -> true, and a concurrent rejection can only lower the count.
+  SELECT r.rejected
+    INTO v_rejected
   FROM public.return_request AS r
   WHERE r.id = NEW.return_id
   FOR SHARE;
@@ -633,8 +649,8 @@ BEGIN
   ORDER BY l.id
   FOR UPDATE;
 
-  -- Step 3: A line of a REJECTED request does not count, so there is nothing to check.
-  IF v_status IS NULL OR v_status = 'REJECTED' THEN
+  -- Step 3: A line of a rejected request never counts, so there is nothing to check.
+  IF v_rejected IS NULL OR v_rejected THEN
     RETURN NEW;
   END IF;
 
@@ -649,7 +665,7 @@ BEGIN
   JOIN public.return_request AS rr ON rr.id = rl.return_id
   WHERE rl.order_line_id = NEW.order_line_id
     AND rl.id <> NEW.id
-    AND rr.status <> 'REJECTED';
+    AND NOT rr.rejected;
 
   IF v_returned + NEW.qty > v_line_qty THEN
     RAISE EXCEPTION USING
@@ -688,7 +704,7 @@ BEGIN
   FROM public.return_line AS rl
   JOIN public.return_request AS rr ON rr.id = rl.return_id
   WHERE rl.order_line_id = NEW.id
-    AND rr.status <> 'REJECTED';
+    AND NOT rr.rejected;
 
   IF v_returned > NEW.qty THEN
     RAISE EXCEPTION USING
@@ -702,52 +718,40 @@ BEGIN
 END
 $fn$;
 
--- The UPDATE holds the request row lock, so a concurrent return_line insert (FOR SHARE on the
--- request) waits for it, then sees the new status.
-CREATE FUNCTION return_request_unreject_check()
+-- rejected is sticky. Becoming REJECTED sets it; nothing clears it; a rejected request may only
+-- stay REJECTED or move to CLOSED. Rejection only lowers the count, so no re-sum is needed.
+-- Also runs on INSERT, so a request created as REJECTED is marked too.
+CREATE FUNCTION return_request_rejected_guard()
 RETURNS trigger
 LANGUAGE plpgsql
 SET search_path = pg_catalog, public
 AS $fn$
-DECLARE
-  v_isolation text := pg_catalog.current_setting('transaction_isolation');
-  v_line_id uuid;
-  v_line_qty integer;
-  v_returned bigint;
 BEGIN
-  -- Step 0: Only READ COMMITTED sees concurrent commits in the SUM below.
-  IF v_isolation <> 'read committed' THEN
-    RAISE EXCEPTION USING
-      ERRCODE = 'check_violation',
-      CONSTRAINT = 'return_line_isolation',
-      MESSAGE = 'READ_COMMITTED_REQUIRED: a return request can only leave REJECTED under READ '
-        || 'COMMITTED (current: ' || v_isolation || ')';
-  END IF;
-
-  -- Step 1: Lock every order line this request returns, in id order, then re-check each one
-  -- counting this request's lines as well.
-  FOR v_line_id, v_line_qty IN
-    SELECT l.id, l.qty
-    FROM public.order_line AS l
-    WHERE l.id IN (SELECT rl.order_line_id FROM public.return_line AS rl WHERE rl.return_id = NEW.id)
-    ORDER BY l.id
-    FOR UPDATE
-  LOOP
-    SELECT coalesce(sum(rl.qty), 0)
-      INTO v_returned
-    FROM public.return_line AS rl
-    JOIN public.return_request AS rr ON rr.id = rl.return_id
-    WHERE rl.order_line_id = v_line_id
-      AND (rr.status <> 'REJECTED' OR rr.id = NEW.id);
-
-    IF v_returned > v_line_qty THEN
+  IF TG_OP = 'UPDATE' AND OLD.rejected THEN
+    -- Step 1: Once rejected, always rejected. Checked before Step 3 so an explicit clear is
+    -- refused, not silently re-set.
+    IF NOT NEW.rejected THEN
       RAISE EXCEPTION USING
         ERRCODE = 'check_violation',
-        CONSTRAINT = 'return_line_qty_limit',
-        MESSAGE = 'RETURN_QTY_EXCEEDED: return ' || NEW.id || ' leaving REJECTED would return '
-          || v_returned || ' of order line ' || v_line_id || ' (qty ' || v_line_qty || ')';
+        CONSTRAINT = 'return_request_rejected_sticky',
+        MESSAGE = 'RETURN_REJECTED_FINAL: return ' || NEW.id || ' was rejected; rejected cannot '
+          || 'be cleared';
     END IF;
-  END LOOP;
+
+    -- Step 2: A rejected request can only move on to CLOSED (or stay REJECTED).
+    IF NEW.status NOT IN ('REJECTED', 'CLOSED') THEN
+      RAISE EXCEPTION USING
+        ERRCODE = 'check_violation',
+        CONSTRAINT = 'return_request_status_transition',
+        MESSAGE = 'RETURN_REJECTED_FINAL: return ' || NEW.id || ' was rejected; '
+          || OLD.status || ' -> ' || NEW.status || ' is not allowed (only CLOSED)';
+    END IF;
+  END IF;
+
+  -- Step 3: REJECTED always means rejected.
+  IF NEW.status = 'REJECTED' THEN
+    NEW.rejected := true;
+  END IF;
 
   RETURN NEW;
 END
@@ -764,28 +768,27 @@ CREATE TRIGGER order_line_return_qty_check
   WHEN (NEW.qty < OLD.qty)
   EXECUTE FUNCTION order_line_return_qty_check();
 
-CREATE TRIGGER return_request_unreject_check
-  BEFORE UPDATE OF status ON return_request
+CREATE TRIGGER return_request_rejected_guard
+  BEFORE INSERT OR UPDATE OF status, rejected ON return_request
   FOR EACH ROW
-  WHEN (OLD.status = 'REJECTED' AND NEW.status <> 'REJECTED')
-  EXECUTE FUNCTION return_request_unreject_check();
+  EXECUTE FUNCTION return_request_rejected_guard();
 
 -- Step 13: Trigger functions are owned by oms_migrator and not callable by PUBLIC.
 -- Postgres does not check EXECUTE when a trigger fires, so oms_app needs no grant.
 ALTER FUNCTION order_append_only_reject_mutation() OWNER TO oms_migrator;
 ALTER FUNCTION return_line_qty_check() OWNER TO oms_migrator;
 ALTER FUNCTION order_line_return_qty_check() OWNER TO oms_migrator;
-ALTER FUNCTION return_request_unreject_check() OWNER TO oms_migrator;
+ALTER FUNCTION return_request_rejected_guard() OWNER TO oms_migrator;
 
 REVOKE ALL ON FUNCTION order_append_only_reject_mutation() FROM PUBLIC;
 REVOKE ALL ON FUNCTION return_line_qty_check() FROM PUBLIC;
 REVOKE ALL ON FUNCTION order_line_return_qty_check() FROM PUBLIC;
-REVOKE ALL ON FUNCTION return_request_unreject_check() FROM PUBLIC;
+REVOKE ALL ON FUNCTION return_request_rejected_guard() FROM PUBLIC;
 
 COMMENT ON TABLE sales_order IS
   'No PII. UNIQUE (channel_account_id, external_order_id). version is the optimistic lock.';
 COMMENT ON TABLE order_recipient IS
-  'The only PII table. *_enc = app-level AES-256-GCM (version || key_id || nonce || ct+tag, AAD tenant||order||column). REDACTED keeps province, postcode, phone_hash, phone_last4. ON DELETE CASCADE with its order.';
+  'The only PII table. *_enc = app-level AES-256-GCM (version || kid_len || kid || nonce || ct+tag, AAD header||tenant||order||column). REDACTED keeps province, postcode, phone_hash, phone_last4. ON DELETE CASCADE with its order.';
 COMMENT ON TABLE order_status_history IS
   'Append-only. UPDATE, DELETE, and TRUNCATE are rejected by trigger.';
 COMMENT ON TABLE payment_status_snapshot IS
@@ -793,6 +796,8 @@ COMMENT ON TABLE payment_status_snapshot IS
 COMMENT ON TABLE refund IS
   'Read-only mirror of TSF Pay refunds. UNIQUE (tenant_id, source_event_id).';
 COMMENT ON TABLE return_line IS
-  'Same order as its request and order line (composite FKs). Non-REJECTED qty per order line <= order_line.qty (triggers, READ COMMITTED only).';
+  'Same order as its request and order line (composite FKs). Qty per order line over never-rejected requests <= order_line.qty (triggers, READ COMMITTED only).';
+COMMENT ON COLUMN return_request.rejected IS
+  'Sticky: set when status becomes REJECTED, never cleared. Rejected requests only move to CLOSED and never count toward the return qty limit.';
 COMMENT ON INDEX reconciliation_issue_open_key IS
   'One open issue per (tenant, rule, order). NULLS NOT DISTINCT: one open shop-level issue per rule.';

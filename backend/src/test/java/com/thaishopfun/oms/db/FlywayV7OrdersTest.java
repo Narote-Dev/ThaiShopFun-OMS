@@ -91,7 +91,7 @@ class FlywayV7OrdersTest {
           "order_append_only_reject_mutation",
           "return_line_qty_check",
           "order_line_return_qty_check",
-          "return_request_unreject_check");
+          "return_request_rejected_guard");
 
   @Container
   static PostgreSQLContainer postgres =
@@ -894,22 +894,17 @@ class FlywayV7OrdersTest {
       assertThat(update(app, "UPDATE return_request SET status = 'REJECTED' WHERE id = ?", second))
           .isEqualTo(1);
       UUID third = UUID.randomUUID();
+      UUID thirdLine = UUID.randomUUID();
       insertReturn(app, third, a.tenant(), a.order(), "APPROVED");
-      insertReturnLine(app, UUID.randomUUID(), a.tenant(), a.order(), third, a.line(), 1);
-      // A line added to the REJECTED request is not counted either.
-      update(app, "UPDATE return_line SET qty = 2 WHERE id = ?", secondLine);
-
-      // Step 4: Leaving REJECTED re-runs the check: 1 + 1 + 2 > 2.
-      PSQLException unreject =
-          assertReturnQtyExceeded(
-              app,
-              () ->
-                  update(app, "UPDATE return_request SET status = 'CLOSED' WHERE id = ?", second));
-      assertThat(unreject.getServerErrorMessage().getMessage()).contains("leaving REJECTED");
-      update(app, "UPDATE return_line SET qty = 1 WHERE id = ?", secondLine);
-      update(app, "DELETE FROM return_line WHERE return_id = ?", third);
-      assertThat(update(app, "UPDATE return_request SET status = 'APPROVED' WHERE id = ?", second))
+      insertReturnLine(app, thirdLine, a.tenant(), a.order(), third, a.line(), 1);
+      // A line of the REJECTED request can grow: it is not counted either.
+      assertThat(update(app, "UPDATE return_line SET qty = 2 WHERE id = ?", secondLine))
           .isEqualTo(1);
+
+      // Step 4: Closing the rejected request does not make it count again (still 1 + 1).
+      assertThat(update(app, "UPDATE return_request SET status = 'CLOSED' WHERE id = ?", second))
+          .isEqualTo(1);
+      assertThat(countedReturnQty(app, a.line())).isEqualTo(2);
 
       // Step 5: order_line.qty cannot drop below the returned qty (now 2). Raising is fine.
       assertReturnQtyExceeded(
@@ -927,16 +922,124 @@ class FlywayV7OrdersTest {
                   app,
                   "UPDATE return_line SET order_line_id = ?, qty = 2 WHERE id = ?",
                   otherLine,
-                  secondLine));
+                  thirdLine));
       assertThat(
               update(
                   app,
                   "UPDATE return_line SET order_line_id = ? WHERE id = ?",
                   otherLine,
-                  secondLine))
+                  thirdLine))
           .isEqualTo(1);
       app.rollback();
     }
+  }
+
+  @Test
+  void rejectedReturnsNeverCountAgain() throws SQLException {
+    Graph a;
+    UUID line = UUID.randomUUID();
+    try (Connection admin = openAdmin()) {
+      a = seed(admin);
+      insertLine(admin, line, a.tenant(), a.order(), a.sku(), 1);
+    }
+    try (Connection app = openApp()) {
+      app.setAutoCommit(false);
+      setTenant(app, a.tenant());
+
+      // Step 1: R1 returns the only unit and is rejected. R2 returns the same unit again.
+      UUID r1 = UUID.randomUUID();
+      UUID r2 = UUID.randomUUID();
+      insertReturn(app, r1, a.tenant(), a.order(), "REQUESTED");
+      insertReturnLine(app, UUID.randomUUID(), a.tenant(), a.order(), r1, line, 1);
+      assertThat(update(app, "UPDATE return_request SET status = 'REJECTED' WHERE id = ?", r1))
+          .isEqualTo(1);
+      assertThat(rejectedFlag(app, r1)).isTrue();
+      insertReturn(app, r2, a.tenant(), a.order(), "REQUESTED");
+      insertReturnLine(app, UUID.randomUUID(), a.tenant(), a.order(), r2, line, 1);
+
+      // Step 2: Closing R1 (the normal REJECTED -> CLOSED) succeeds, and R1 still does not count.
+      assertThat(update(app, "UPDATE return_request SET status = 'CLOSED' WHERE id = ?", r1))
+          .isEqualTo(1);
+      assertThat(rejectedFlag(app, r1)).isTrue();
+      assertThat(countedReturnQty(app, line)).isEqualTo(1);
+      app.rollback();
+
+      // Step 3: The other order. R1 is rejected and closed first, then R2 still fits.
+      setTenant(app, a.tenant());
+      insertReturn(app, r1, a.tenant(), a.order(), "REJECTED");
+      insertReturnLine(app, UUID.randomUUID(), a.tenant(), a.order(), r1, line, 1);
+      assertThat(rejectedFlag(app, r1)).isTrue();
+      assertThat(update(app, "UPDATE return_request SET status = 'CLOSED' WHERE id = ?", r1))
+          .isEqualTo(1);
+      insertReturn(app, r2, a.tenant(), a.order(), "APPROVED");
+      insertReturnLine(app, UUID.randomUUID(), a.tenant(), a.order(), r2, line, 1);
+      assertThat(countedReturnQty(app, line)).isEqualTo(1);
+
+      // Step 4: A rejected request cannot move anywhere but CLOSED, even after closing.
+      for (String status : List.of("APPROVED", "REQUESTED", "RECEIVED")) {
+        assertRejectedFinal(
+            app,
+            "return_request_status_transition",
+            () -> update(app, "UPDATE return_request SET status = ? WHERE id = ?", status, r1));
+      }
+      UUID r3 = UUID.randomUUID();
+      insertReturn(app, r3, a.tenant(), a.order(), "REJECTED");
+      assertRejectedFinal(
+          app,
+          "return_request_status_transition",
+          () -> update(app, "UPDATE return_request SET status = 'APPROVED' WHERE id = ?", r3));
+
+      // Step 5: rejected cannot be cleared, on its own or together with a status change.
+      for (String sql :
+          List.of(
+              "UPDATE return_request SET rejected = false WHERE id = ?",
+              "UPDATE return_request SET rejected = false, status = 'CLOSED' WHERE id = ?")) {
+        assertRejectedFinal(app, "return_request_rejected_sticky", () -> update(app, sql, r3));
+        assertRejectedFinal(app, "return_request_rejected_sticky", () -> update(app, sql, r1));
+      }
+
+      // Step 6: rejected can only be set together with REJECTED or CLOSED.
+      assertCheck(
+          app,
+          "return_request_rejected_check",
+          () ->
+              update(
+                  app,
+                  "UPDATE return_request SET rejected = true WHERE id = ?",
+                  a.returnRequest()));
+      app.rollback();
+    }
+  }
+
+  private static long countedReturnQty(Connection connection, UUID orderLineId)
+      throws SQLException {
+    try (PreparedStatement statement =
+        connection.prepareStatement(
+            "SELECT coalesce(sum(rl.qty), 0) FROM return_line rl "
+                + "JOIN return_request rr ON rr.id = rl.return_id "
+                + "WHERE rl.order_line_id = ? AND NOT rr.rejected")) {
+      statement.setObject(1, orderLineId);
+      return single(statement);
+    }
+  }
+
+  private static boolean rejectedFlag(Connection connection, UUID returnId) throws SQLException {
+    try (PreparedStatement statement =
+        connection.prepareStatement("SELECT rejected FROM return_request WHERE id = ?")) {
+      statement.setObject(1, returnId);
+      try (ResultSet rows = statement.executeQuery()) {
+        assertThat(rows.next()).isTrue();
+        return rows.getBoolean(1);
+      }
+    }
+  }
+
+  private static void assertRejectedFinal(
+      Connection connection, String constraint, SqlAction action) throws SQLException {
+    PSQLException exception =
+        assertSqlState(connection, "23514", "RETURN_REJECTED_FINAL:", action, constraint);
+    assertThat(exception.getServerErrorMessage().getMessage()).startsWith("RETURN_REJECTED_FINAL:");
+    assertThat(exception.getServerErrorMessage().getConstraint()).isEqualTo(constraint);
   }
 
   @Test
@@ -1015,7 +1118,7 @@ class FlywayV7OrdersTest {
           List.of(Connection.TRANSACTION_REPEATABLE_READ, Connection.TRANSACTION_SERIALIZABLE)) {
         app.setTransactionIsolation(level);
         setTenant(app, a.tenant());
-        // Step 1: A return line write, lowering order_line.qty, and leaving REJECTED are refused.
+        // Step 1: A return line write and lowering order_line.qty are refused.
         Map<String, SqlAction> writes = new LinkedHashMap<>();
         writes.put(
             "return_line insert",
@@ -1028,10 +1131,6 @@ class FlywayV7OrdersTest {
         writes.put(
             "order_line qty",
             () -> update(app, "UPDATE order_line SET qty = 1 WHERE id = ?", a.line()));
-        writes.put(
-            "unreject",
-            () ->
-                update(app, "UPDATE return_request SET status = 'CLOSED' WHERE id = ?", rejected));
         for (Map.Entry<String, SqlAction> write : writes.entrySet()) {
           PSQLException exception =
               assertSqlState(
@@ -1041,8 +1140,12 @@ class FlywayV7OrdersTest {
           assertThat(exception.getServerErrorMessage().getConstraint())
               .isEqualTo("return_line_isolation");
         }
-        // Step 2: Writes that cannot break the limit are unaffected by the level.
+        // Step 2: Writes that cannot break the limit are unaffected by the level, including
+        // closing a rejected request (it never counts again, so nothing is re-summed).
         assertThat(update(app, "UPDATE order_line SET qty = 3 WHERE id = ?", a.line()))
+            .isEqualTo(1);
+        assertThat(
+                update(app, "UPDATE return_request SET status = 'CLOSED' WHERE id = ?", rejected))
             .isEqualTo(1);
         assertThat(
                 update(
@@ -1121,11 +1224,13 @@ class FlywayV7OrdersTest {
     Graph a;
     UUID line = UUID.randomUUID();
     UUID open = UUID.randomUUID();
+    UUID other = UUID.randomUUID();
     UUID rejected = UUID.randomUUID();
     try (Connection admin = openAdmin()) {
       a = seed(admin);
       insertLine(admin, line, a.tenant(), a.order(), a.sku(), 1);
       insertReturn(admin, open, a.tenant(), a.order(), "REQUESTED");
+      insertReturn(admin, other, a.tenant(), a.order(), "REQUESTED");
       insertReturn(admin, rejected, a.tenant(), a.order(), "REJECTED");
       insertReturnLine(admin, UUID.randomUUID(), a.tenant(), a.order(), rejected, line, 1);
     }
@@ -1134,10 +1239,10 @@ class FlywayV7OrdersTest {
       left.setAutoCommit(false);
       right.setAutoCommit(false);
 
-      // Step 1: An uncommitted un-reject holds the order line. A new return line on it waits.
+      // Step 1: An uncommitted return line (another request) holds the order line. A second
+      // return line on it waits. The rejected request's line does not count.
       setTenant(left, a.tenant());
-      assertThat(update(left, "UPDATE return_request SET status = 'CLOSED' WHERE id = ?", rejected))
-          .isEqualTo(1);
+      insertReturnLine(left, UUID.randomUUID(), a.tenant(), a.order(), other, line, 1);
       setTenant(right, a.tenant());
       lockTimeout(right);
       assertSqlState(
