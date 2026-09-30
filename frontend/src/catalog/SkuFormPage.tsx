@@ -197,6 +197,11 @@ export default function SkuFormPage({ id, canWrite }: { id: string | null; canWr
             On hand {sku.on_hand} · reserved {sku.reserved ?? 0}
           </p>
         ) : null}
+        {sku && !sku.is_bundle ? (
+          <p>
+            <a href={`#/catalog/skus/${sku.id}/history`}>Stock history</a>
+          </p>
+        ) : null}
         {error ? <p role="alert">{error}</p> : null}
         {notice ? <p>{notice}</p> : null}
         {canWrite ? (

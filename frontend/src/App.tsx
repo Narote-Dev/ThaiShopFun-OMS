@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import AuthProvider from './auth/AuthProvider'
 import { useAuth } from './auth/useAuth'
 import { normalizeHash } from './routing/hash'
+import type { Me } from './auth/AuthContext'
 import { canWriteCatalog } from './catalog/access'
 import ImportPage from './catalog/ImportPage'
 import ProductsPage from './catalog/ProductsPage'
@@ -14,15 +15,29 @@ import LoginPage from './shell/LoginPage'
 import Paywall from './shell/Paywall'
 import RequireSession from './shell/RequireSession'
 import SettingUp from './shell/SettingUp'
+import { stockAccess } from './stock/access'
+import StockDocumentPage from './stock/StockDocumentPage'
+import StockDocumentsPage from './stock/StockDocumentsPage'
+import StockHistoryPage from './stock/StockHistoryPage'
 import WarehousesPage from './warehouse/WarehousesPage'
 import type { ReactNode } from 'react'
 
 const SKU_ROUTE = /^#\/catalog\/skus\/([0-9a-f-]{36}|new)$/
+const SKU_HISTORY_ROUTE = /^#\/catalog\/skus\/([0-9a-f-]{36})\/history$/
+const DOCUMENT_ROUTE = /^#\/stock\/documents\/([0-9a-f-]{36})$/
 
 // Change: T07 catalog and warehouse pages. Writes need OWNER/ADMIN and a non-GRACE shop.
-function page(route: string, canWrite: boolean, readOnly: boolean, name: string): ReactNode {
+// Change: T08A stock documents and history. Drafts: any member; post/void rules in stockAccess.
+function page(route: string, me: Me): ReactNode {
+  const canWrite = canWriteCatalog(me)
+  const readOnly = me.entitlement.status === 'GRACE'
   if (route === '#/admin/outbox') return <OutboxAdminPage readOnly={readOnly} />
-  if (route === '#/') return <DashboardPage name={name} />
+  if (route === '#/') return <DashboardPage name={me.tenant.name} />
+  if (route === '#/stock/documents') return <StockDocumentsPage access={stockAccess(me)} />
+  const document = DOCUMENT_ROUTE.exec(route)
+  if (document) return <StockDocumentPage key={document[1]} id={document[1]} access={stockAccess(me)} />
+  const history = SKU_HISTORY_ROUTE.exec(route)
+  if (history) return <StockHistoryPage key={history[1]} skuId={history[1]} />
   if (route === '#/catalog/skus') return <SkuListPage canWrite={canWrite} />
   if (route === '#/catalog/products') return <ProductsPage canWrite={canWrite} />
   if (route === '#/catalog/import') return <ImportPage canWrite={canWrite} />
@@ -84,11 +99,9 @@ function Shell() {
       </main>
     )
   } else if (auth.me) {
-    const readOnly = auth.me.entitlement.status === 'GRACE'
-    const canWrite = canWriteCatalog(auth.me)
     body = (
       <AppLayout me={auth.me} readOnlyNotice={auth.readOnlyNotice} onLogout={auth.signOut}>
-        {page(route, canWrite, readOnly, auth.me.tenant.name)}
+        {page(route, auth.me)}
       </AppLayout>
     )
   }

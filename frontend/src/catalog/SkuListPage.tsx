@@ -72,6 +72,7 @@ export default function SkuListPage({ canWrite }: { canWrite: boolean }) {
               <th>Barcode</th>
               <th>Type</th>
               <th>On hand</th>
+              <th>Stock</th>
             </tr>
           </thead>
           <tbody>
@@ -85,6 +86,13 @@ export default function SkuListPage({ canWrite }: { canWrite: boolean }) {
                 <td>{sku.barcode ?? ''}</td>
                 <td>{sku.is_bundle ? `Bundle (${sku.component_count})` : 'SKU'}</td>
                 <td>{sku.on_hand ?? '—'}</td>
+                <td>
+                  {sku.is_bundle ? null : (
+                    <a href={`#/catalog/skus/${sku.id}/history`} aria-label={`Stock history of ${sku.sku_code}`}>
+                      History
+                    </a>
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>
