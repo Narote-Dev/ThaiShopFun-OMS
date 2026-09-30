@@ -748,6 +748,61 @@ class FlywayV4CatalogStockTest {
   }
 
   @Test
+  void newStockDocumentsMustBeDraft() throws SQLException {
+    UUID tenant = UUID.randomUUID();
+    try (Connection admin = openAdmin()) {
+      insertTenant(admin, tenant);
+    }
+    try (Connection app = openApp()) {
+      app.setAutoCommit(false);
+      setTenant(app, tenant);
+
+      // Step 1: A document cannot be born POSTED or VOID, even with posted_at set.
+      for (String status : List.of("POSTED", "VOID")) {
+        PSQLException exception =
+            assertSqlState(
+                app,
+                "23514",
+                "STOCK_DOCUMENT_IMMUTABLE",
+                () ->
+                    insert(
+                        app,
+                        "INSERT INTO stock_document (id, tenant_id, type, status, posted_at) "
+                            + "VALUES (?, ?, 'RECEIVE', ?, now())",
+                        UUID.randomUUID(),
+                        tenant,
+                        status),
+                status);
+        assertThat(exception.getServerErrorMessage().getMessage())
+            .startsWith("STOCK_DOCUMENT_IMMUTABLE: a new document must be DRAFT");
+        assertThat(exception.getServerErrorMessage().getConstraint())
+            .isEqualTo("stock_document_immutable");
+      }
+
+      // Step 2: DRAFT inserts still work.
+      UUID draft = UUID.randomUUID();
+      insertDocument(app, draft, tenant);
+      assertThat(countFor(app, "stock_document", tenant)).isEqualTo(1);
+      app.commit();
+    }
+
+    // Step 3: The trigger also fires for the superuser.
+    try (Connection admin = openAdmin()) {
+      assertSqlState(
+          admin,
+          "23514",
+          "a new document must be DRAFT",
+          () ->
+              insert(
+                  admin,
+                  "INSERT INTO stock_document (id, tenant_id, type, status, posted_at) "
+                      + "VALUES (?, ?, 'RECEIVE', 'POSTED', now())",
+                  UUID.randomUUID(),
+                  tenant));
+    }
+  }
+
+  @Test
   void stockDocumentsAreImmutableAfterPost() throws SQLException {
     Graph a;
     try (Connection admin = openAdmin()) {

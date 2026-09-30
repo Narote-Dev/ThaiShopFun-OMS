@@ -598,7 +598,9 @@ CREATE TRIGGER inventory_ledger_append_only_truncate
 
 -- Step 10: Stock document immutability. Allowed status moves: DRAFT -> POSTED and
 -- POSTED -> VOID. A POSTED header may only change status (and updated_at). A VOID
--- header is frozen. Only DRAFT documents may be deleted.
+-- header is frozen. Only DRAFT documents may be inserted or deleted, so a document
+-- cannot start life as POSTED or VOID and skip the state machine. This is a trigger, not
+-- a CHECK, because POSTED and VOID rows are legitimate once they got there by UPDATE.
 -- Posting is READ COMMITTED only. A line writer holds the document FOR SHARE but does not
 -- modify it, so under a snapshot level the post would succeed without seeing a line that
 -- committed after its snapshot. T08A should lock the document FOR UPDATE, then read lines.
@@ -608,6 +610,18 @@ LANGUAGE plpgsql
 SET search_path = pg_catalog, public
 AS $fn$
 BEGIN
+  -- Step 0: Every document starts as DRAFT.
+  IF TG_OP = 'INSERT' THEN
+    IF NEW.status <> 'DRAFT' THEN
+      RAISE EXCEPTION USING
+        ERRCODE = 'check_violation',
+        CONSTRAINT = 'stock_document_immutable',
+        MESSAGE = 'STOCK_DOCUMENT_IMMUTABLE: a new document must be DRAFT (got '
+          || NEW.status || ')';
+    END IF;
+    RETURN NEW;
+  END IF;
+
   -- Step 1: Delete is for drafts only.
   IF TG_OP = 'DELETE' THEN
     IF OLD.status <> 'DRAFT' THEN
@@ -704,7 +718,7 @@ END
 $fn$;
 
 CREATE TRIGGER stock_document_guard
-  BEFORE UPDATE OR DELETE ON stock_document
+  BEFORE INSERT OR UPDATE OR DELETE ON stock_document
   FOR EACH ROW
   EXECUTE FUNCTION stock_document_guard();
 
