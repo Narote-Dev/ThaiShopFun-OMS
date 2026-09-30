@@ -95,6 +95,22 @@ class PiiCipherTest {
   }
 
   @Test
+  void modifiedHeaderFailsEvenWhenTheKeyMatches() {
+    // Step 1: Two ids for the same key bytes, so only the AAD can tell them apart.
+    PiiCipher cipher = cipher("k1:" + KEY_1 + ",k2:" + KEY_1, "k1");
+    byte[] sealed = cipher.encrypt(NAME, TENANT, ORDER, PiiColumn.NAME);
+    assertThat(cipher.decrypt(sealed, TENANT, ORDER, PiiColumn.NAME)).isEqualTo(NAME);
+
+    // Step 2: Relabel the header k1 -> k2. The key resolves, but the header is in the AAD.
+    byte[] relabelled = sealed.clone();
+    relabelled[3] = (byte) '2';
+    assertThat(new String(relabelled, 2, 2, StandardCharsets.US_ASCII)).isEqualTo("k2");
+    assertThatThrownBy(() -> cipher.decrypt(relabelled, TENANT, ORDER, PiiColumn.NAME))
+        .isInstanceOf(PiiDecryptionException.class)
+        .hasMessageContaining("authentication");
+  }
+
+  @Test
   void rotationDecryptsOldKeyAndEncryptsWithTheNewOne() {
     // Step 1: Written under k1.
     PiiCipher before = cipher("k1:" + KEY_1, "k1");
@@ -121,11 +137,19 @@ class PiiCipherTest {
     byte[] expected = cipher.phoneHash("0812345678");
     // Step 1: National, dashed, spaced, and international forms hash the same.
     for (String phone :
-        List.of("081-234-5678", "+66812345678", "66812345678", "081 234 5678", "(081) 2345678")) {
+        List.of(
+            "081-234-5678",
+            "+66812345678",
+            "66812345678",
+            "081 234 5678",
+            "(081) 2345678",
+            "+66 081-234-5678",
+            "660812345678")) {
       assertThat(cipher.phoneHash(phone)).as(phone).isEqualTo(expected);
       assertThat(PiiCipher.phoneLast4(phone)).as(phone).isEqualTo("5678");
     }
     assertThat(PiiCipher.normalizePhone("081-234-5678")).isEqualTo("66812345678");
+    assertThat(PiiCipher.normalizePhone("+66 081-234-5678")).isEqualTo("66812345678");
     assertThat(expected).hasSize(32);
     // Step 2: Another number, or another hash key, gives another hash.
     assertThat(cipher.phoneHash("0812345679")).isNotEqualTo(expected);

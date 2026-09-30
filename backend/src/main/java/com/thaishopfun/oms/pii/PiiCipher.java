@@ -15,12 +15,13 @@ import javax.crypto.spec.GCMParameterSpec;
  *
  * <p>Ciphertext layout ({@code bytea}): {@code version (1 byte, 0x01) || key id length (1 byte) ||
  * key id (ASCII) || nonce (12 random bytes) || ciphertext || GCM tag (16 bytes)}. The AAD is {@code
- * tenant_id (16 bytes) || order_id (16 bytes) || column name (UTF-8)}, so a value copied to another
- * row, tenant, or column fails the tag.
+ * header (version || key id length || key id) || tenant_id (16 bytes) || order_id (16 bytes) ||
+ * column name (UTF-8)}, so a changed header, or a value copied to another row, tenant, or column,
+ * fails the tag.
  *
  * <p>{@code phone_hash} is HMAC-SHA256 with a separate key over the normalized phone (digits only,
- * a Thai leading {@code 0} becomes {@code 66}). Nothing here logs, and no exception message carries
- * plaintext or key material.
+ * a Thai leading {@code 0} or {@code 660} becomes {@code 66}). Nothing here logs, and no exception
+ * message carries plaintext or key material.
  */
 public final class PiiCipher {
 
@@ -42,26 +43,24 @@ public final class PiiCipher {
     if (plaintext == null) {
       return null;
     }
-    byte[] kid = ring.activeKeyIdBytes();
+    byte[] header = header(ring.activeKeyIdBytes());
     byte[] nonce = new byte[NONCE_BYTES];
     random.nextBytes(nonce);
 
-    // Step 2: Encrypt with the active key, bound to (tenant, order, column).
+    // Step 2: Encrypt with the active key, bound to (header, tenant, order, column).
     byte[] sealed;
     try {
       Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
       cipher.init(Cipher.ENCRYPT_MODE, ring.activeKey(), new GCMParameterSpec(TAG_BITS, nonce));
-      cipher.updateAAD(aad(tenantId, orderId, column));
+      cipher.updateAAD(aad(header, tenantId, orderId, column));
       sealed = cipher.doFinal(plaintext.getBytes(StandardCharsets.UTF_8));
     } catch (GeneralSecurityException ex) {
       throw new IllegalStateException("PII encryption failed", ex);
     }
 
     // Step 3: Prefix the header so decrypt can pick the key during rotation.
-    return ByteBuffer.allocate(2 + kid.length + NONCE_BYTES + sealed.length)
-        .put(VERSION)
-        .put((byte) kid.length)
-        .put(kid)
+    return ByteBuffer.allocate(header.length + NONCE_BYTES + sealed.length)
+        .put(header)
         .put(nonce)
         .put(sealed)
         .array();
@@ -82,6 +81,7 @@ public final class PiiCipher {
     }
     byte[] kidBytes = new byte[kidLength];
     buffer.get(kidBytes);
+    byte[] header = header(kidBytes);
     String kid = new String(kidBytes, StandardCharsets.US_ASCII);
     SecretKey key = ring.key(kid);
     if (key == null) {
@@ -92,11 +92,12 @@ public final class PiiCipher {
     byte[] sealed = new byte[buffer.remaining()];
     buffer.get(sealed);
 
-    // Step 2: Decrypt. A wrong row, tenant, column, or any flipped byte fails the tag.
+    // Step 2: Decrypt. A changed header, wrong row, tenant, column, or any flipped byte fails
+    // the tag.
     try {
       Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
       cipher.init(Cipher.DECRYPT_MODE, key, new GCMParameterSpec(TAG_BITS, nonce));
-      cipher.updateAAD(aad(tenantId, orderId, column));
+      cipher.updateAAD(aad(header, tenantId, orderId, column));
       return new String(cipher.doFinal(sealed), StandardCharsets.UTF_8);
     } catch (GeneralSecurityException ex) {
       throw new PiiDecryptionException("PII ciphertext failed authentication", ex);
@@ -138,23 +139,34 @@ public final class PiiCipher {
         digits.append(c);
       }
     }
-    // Step 2: Thai trunk prefix 0 -> country code 66.
-    String normalized =
-        digits.length() > 0 && digits.charAt(0) == '0'
-            ? "66" + digits.substring(1)
-            : digits.toString();
+    // Step 2: Thai trunk prefix 0 -> country code 66. A number written with both (+66 0...)
+    // collapses 660 to 66.
+    String raw = digits.toString();
+    String normalized;
+    if (raw.startsWith("660")) {
+      normalized = "66" + raw.substring(3);
+    } else if (raw.startsWith("0")) {
+      normalized = "66" + raw.substring(1);
+    } else {
+      normalized = raw;
+    }
     if (normalized.length() < MIN_PHONE_DIGITS || normalized.length() > MAX_PHONE_DIGITS) {
       throw new IllegalArgumentException("phone must have 8 to 15 digits after normalization");
     }
     return normalized;
   }
 
-  private static byte[] aad(UUID tenantId, UUID orderId, PiiColumn column) {
+  private static byte[] header(byte[] kid) {
+    return ByteBuffer.allocate(2 + kid.length).put(VERSION).put((byte) kid.length).put(kid).array();
+  }
+
+  private static byte[] aad(byte[] header, UUID tenantId, UUID orderId, PiiColumn column) {
     if (tenantId == null || orderId == null || column == null) {
       throw new IllegalArgumentException("tenantId, orderId, and column are required for PII AAD");
     }
     byte[] name = column.columnName().getBytes(StandardCharsets.UTF_8);
-    return ByteBuffer.allocate(32 + name.length)
+    return ByteBuffer.allocate(header.length + 32 + name.length)
+        .put(header)
         .putLong(tenantId.getMostSignificantBits())
         .putLong(tenantId.getLeastSignificantBits())
         .putLong(orderId.getMostSignificantBits())
