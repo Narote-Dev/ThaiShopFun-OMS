@@ -19,6 +19,7 @@ Versions are taken in merge order as the next free number. One migration per PR.
 | V2 | T03 JIT provision |
 | V3 | T11 inbox dedup `(tenant_id, source, event_id)`, `aggregate_version`, `payload_sha256` |
 | V4 | T06 catalog, warehouse, stock (FORCE RLS) |
+| V6 | T08 expired-reservation tenant claim function |
 
 ## สรุปจำนวน
 | Phase | Cursor | Codex | รวม |
