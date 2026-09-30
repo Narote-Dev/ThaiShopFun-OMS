@@ -34,6 +34,10 @@ import org.springframework.stereotype.Service;
  * lock (reserve, transfer target, and owner-targeted release/consume/unpack), then inventory rows
  * in ascending {@code inventory.id}, then reservation rows. Status is re-checked after the
  * reservation rows are locked, because another transaction or the expiry job may have moved them.
+ * Stock document post and void ({@link StockMovements}) extend it: the key row, then the {@code
+ * stock_document} row {@code FOR UPDATE}, then inventory in id order, and no reservation rows. No
+ * other engine write locks {@code stock_document}, and line writers take only the document {@code
+ * FOR SHARE} without inventory locks, so the extra step cannot form a cycle.
  *
  * <p>Every call runs at READ COMMITTED inside the {@link TenantContext} tenant. With no transaction
  * open, the engine opens its own and retries it whole on deadlock or serialization failure. Inside

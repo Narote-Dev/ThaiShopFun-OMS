@@ -1,5 +1,6 @@
 package com.thaishopfun.oms.stock;
 
+import com.thaishopfun.oms.auth.UuidV7;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -8,8 +9,10 @@ import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -26,6 +29,8 @@ import org.springframework.stereotype.Repository;
 class StockRepository {
 
   static final String REF_TYPE = "stock_reservation";
+  static final String REF_DOCUMENT_LINE = "stock_document_line";
+  static final String REF_RETURN_LINE = "return_line";
 
   record SkuWarehouse(UUID skuId, UUID warehouseId) {}
 
@@ -314,7 +319,107 @@ class StockRepository {
         });
   }
 
+  /**
+   * {@code on_hand += delta} per row, only where the result stays at or above {@code reserved} (and
+   * so at or above 0). Stock documents, voids, and return restocks. Returns the rows updated.
+   */
+  int adjustOnHand(Map<UUID, Integer> deltaByInventoryId) {
+    return applyInventory(
+        """
+        UPDATE inventory AS i
+        SET on_hand = i.on_hand + d.qty,
+            stock_version = i.stock_version + 1,
+            updated_at = now()
+        FROM unnest(?::uuid[], ?::int[]) AS d (id, qty)
+        WHERE i.id = d.id
+          AND i.on_hand + d.qty >= i.reserved
+          AND i.on_hand + d.qty >= 0
+        """,
+        deltaByInventoryId);
+  }
+
+  /**
+   * Creates the missing {@code (sku, warehouse)} rows with {@code on_hand = reserved = 0}, in (sku,
+   * warehouse) order so two creators of overlapping sets cannot deadlock. Meant for its own short
+   * transaction before a post: the post then only locks rows that already exist.
+   */
+  void ensureInventory(UUID tenantId, Collection<SkuWarehouse> keys) {
+    if (keys.isEmpty()) {
+      return;
+    }
+    List<SkuWarehouse> sorted = new ArrayList<>(new LinkedHashSet<>(keys));
+    sorted.sort(
+        Comparator.comparing((SkuWarehouse key) -> key.skuId().toString())
+            .thenComparing(key -> key.warehouseId().toString()));
+    List<UUID> ids = new ArrayList<>();
+    List<UUID> skus = new ArrayList<>();
+    List<UUID> warehouses = new ArrayList<>();
+    for (SkuWarehouse key : sorted) {
+      ids.add(UuidV7.generate());
+      skus.add(key.skuId());
+      warehouses.add(key.warehouseId());
+    }
+    jdbc.update(
+        """
+        INSERT INTO inventory (id, tenant_id, sku_id, warehouse_id, on_hand, reserved)
+        SELECT k.id, ?, k.sku_id, k.warehouse_id, 0, 0
+        FROM unnest(?::uuid[], ?::uuid[], ?::uuid[]) WITH ORDINALITY
+          AS k (id, sku_id, warehouse_id, n)
+        ORDER BY k.n
+        ON CONFLICT (tenant_id, sku_id, warehouse_id) DO NOTHING
+        """,
+        ps -> {
+          ps.setObject(1, tenantId);
+          uuidArray(ps, 2, ids);
+          uuidArray(ps, 3, skus);
+          uuidArray(ps, 4, warehouses);
+        });
+  }
+
+  /** The (sku, warehouse) pairs among {@code keys} that already have any ledger entry. */
+  Set<SkuWarehouse> withLedger(Collection<SkuWarehouse> keys) {
+    Set<SkuWarehouse> found = new HashSet<>();
+    if (keys.isEmpty()) {
+      return found;
+    }
+    List<UUID> skus = new ArrayList<>();
+    List<UUID> warehouses = new ArrayList<>();
+    for (SkuWarehouse key : keys) {
+      skus.add(key.skuId());
+      warehouses.add(key.warehouseId());
+    }
+    jdbc.query(
+        """
+        SELECT k.sku_id, k.warehouse_id
+        FROM unnest(?::uuid[], ?::uuid[]) AS k (sku_id, warehouse_id)
+        WHERE EXISTS (
+          SELECT 1 FROM inventory_ledger AS l
+          WHERE l.sku_id = k.sku_id AND l.warehouse_id = k.warehouse_id
+        )
+        """,
+        ps -> {
+          uuidArray(ps, 1, skus);
+          uuidArray(ps, 2, warehouses);
+        },
+        (ResultSet rs) -> {
+          found.add(
+              new SkuWarehouse(
+                  rs.getObject("sku_id", UUID.class), rs.getObject("warehouse_id", UUID.class)));
+        });
+    return found;
+  }
+
+  /** Reservation entries: {@code ref_type = stock_reservation}. */
   void insertLedger(UUID tenantId, String reason, String actor, Collection<LedgerEntry> entries) {
+    insertLedger(tenantId, reason, REF_TYPE, actor, entries);
+  }
+
+  /**
+   * {@code refType} names what {@link LedgerEntry#refId()} points at: {@value #REF_TYPE}, {@value
+   * #REF_DOCUMENT_LINE}, or {@value #REF_RETURN_LINE}.
+   */
+  void insertLedger(
+      UUID tenantId, String reason, String refType, String actor, Collection<LedgerEntry> entries) {
     if (entries.isEmpty()) {
       return;
     }
@@ -344,7 +449,7 @@ class StockRepository {
         ps -> {
           ps.setObject(1, tenantId);
           ps.setString(2, reason);
-          ps.setString(3, REF_TYPE);
+          ps.setString(3, refType);
           ps.setString(4, actor);
           uuidArray(ps, 5, ids);
           uuidArray(ps, 6, skus);

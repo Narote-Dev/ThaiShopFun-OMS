@@ -27,6 +27,12 @@ import org.springframework.transaction.support.TransactionTemplate;
  * engine cannot retry a transaction it does not own, so the caller must retry its whole transaction
  * on {@code 40P01} (deadlock_detected) and {@code 40001} (serialization_failure), and should take
  * no stock row locks before calling the engine.
+ *
+ * <p>Stock document post and void ({@link StockMovements}) never join: {@link #writeOwned} asserts
+ * the caller's isolation (so REPEATABLE READ still fails with {@code READ_COMMITTED_REQUIRED}) and
+ * then refuses. Their lock order is the key row, then the {@code stock_document} row {@code FOR
+ * UPDATE}, then inventory rows in id order, and nothing else locks {@code stock_document} while
+ * holding inventory.
  */
 @Component
 class StockTransactions {
@@ -85,6 +91,24 @@ class StockTransactions {
                   prepare(tenantId, true);
                   return work.get();
                 }));
+  }
+
+  /**
+   * A write that must own its transaction (stock document post and void). Inside a caller's
+   * transaction it checks isolation and tenant first, then throws {@link IllegalStateException}.
+   */
+  <T> T writeOwned(String operation, Supplier<T> work) {
+    // Step 1: Tenant first, as for every write.
+    UUID tenantId = TenantContext.requireTenantId();
+    if (TransactionSynchronizationManager.isActualTransactionActive()) {
+      // Step 2: A snapshot-isolation caller gets the usual READ_COMMITTED_REQUIRED. Any other
+      // caller is refused: the post locks the document before inventory and retries itself.
+      prepare(tenantId, false);
+      throw new IllegalStateException(
+          "stock " + operation + " owns its transaction; call it outside any transaction");
+    }
+    // Step 3: Same owned path as write: READ COMMITTED, lock_timeout, whole-transaction retry.
+    return write(operation, work);
   }
 
   /** A read. Takes no row locks, so there is nothing to retry. */
