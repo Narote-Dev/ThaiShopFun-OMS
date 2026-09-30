@@ -92,13 +92,13 @@ class FlywayV1RlsTest {
           ResultSet history =
               statement.executeQuery(
                   "SELECT version, success FROM flyway_schema_history ORDER BY installed_rank")) {
-        // Change: V2 (JIT) and V3 (inbox dedup) are applied with V1.
+        // Change: V2 (JIT), V3 (inbox dedup), and V4 (catalog/stock) are applied with V1.
         java.util.List<String> versions = new java.util.ArrayList<>();
         while (history.next()) {
           assertThat(history.getBoolean("success")).isTrue();
           versions.add(history.getString("version"));
         }
-        assertThat(versions).containsExactly("1", "2", "3");
+        assertThat(versions).containsExactly("1", "2", "3", "4");
       }
 
       // Step 2: Every foundation table exists.
@@ -217,8 +217,12 @@ class FlywayV1RlsTest {
     UUID tenantB = UUID.randomUUID();
     try (Connection admin = openAdmin()) {
       // Step 1: Catalog says FORCE RLS, owner oms_migrator, and both policy clauses.
+      // Change: V4 adds catalog/stock policies. FlywayV4CatalogStockTest checks every
+      // tenant_id table, so this set must be exactly V1 plus V4.
       Map<String, TablePolicy> policies = loadPolicies(admin);
-      assertThat(policies.keySet()).containsExactlyInAnyOrderElementsOf(TENANT_TABLES);
+      Set<String> expected = new HashSet<>(TENANT_TABLES);
+      expected.addAll(FlywayV4CatalogStockTest.V4_TABLES);
+      assertThat(policies.keySet()).containsExactlyInAnyOrderElementsOf(expected);
       for (String table : TENANT_TABLES) {
         TablePolicy policy = policies.get(table);
         assertThat(policy.owner()).as(table).isEqualTo("oms_migrator");
