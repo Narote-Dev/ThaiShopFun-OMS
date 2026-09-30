@@ -60,14 +60,14 @@ A SKU has `id, product_id, product_name, sku_code, name, barcode, weight_g, is_b
 
 | Method and path | Body | Result |
 |---|---|---|
-| `GET /warehouses` | | `{items}`, default first. The first call of a shop creates `MAIN` as the default |
+| `GET /warehouses` | | `{items}`, default first. The first call by a writer (OWNER/ADMIN, not GRACE) creates `MAIN` as the default. For STAFF or a GRACE shop it only reads and may be empty |
 | `POST /warehouses` | `{code, name, address?}` (`address` is a JSON object) | `201` warehouse, not default |
 | `GET /warehouses/{id}` | | warehouse (`id, code, name, address, is_default, created_at, updated_at`) |
 | `PUT /warehouses/{id}` | `{code, name, address?}` | warehouse |
 | `POST /warehouses/{id}/default` | | warehouse. Unsets the old default and sets this one in one transaction |
 | `DELETE /warehouses/{id}` | | `204`. Not the default (`409 WAREHOUSE_IS_DEFAULT`), not referenced (`409 WAREHOUSE_IN_USE`) |
 
-The default warehouse is created idempotently (insert `ON CONFLICT DO NOTHING` against `warehouse_one_default_per_tenant_idx`), so concurrent first calls create exactly one. It is created from the warehouse list, warehouse create, and a successful CSV import, not from JIT provisioning.
+The default warehouse is created idempotently (insert `ON CONFLICT DO NOTHING` against `warehouse_one_default_per_tenant_idx`), so concurrent first calls create exactly one. It is created from the warehouse list (writers only), warehouse create, and a successful CSV import, not from JIT provisioning. A GET by STAFF or in GRACE never writes a warehouse or an audit row.
 
 ## CSV import
 
@@ -75,8 +75,20 @@ The default warehouse is created idempotently (insert `ON CONFLICT DO NOTHING` a
 
 Columns (any order; the first three are required): `product_name, sku_code, sku_name, barcode, weight_g, is_bundle, components`. `is_bundle` is `true/false`, `1/0`, `yes/no`, or empty (false). `components` is `CODE:qty|CODE:qty` and may name SKUs earlier or later in the same file, or existing SKUs.
 
+Absent column versus empty cell, for the optional columns (`barcode`, `weight_g`, `is_bundle`, `components`):
+
+- **Column absent from the header:** an existing SKU keeps its stored value (barcode, weight, bundle flag, component list). A file with only `product_name, sku_code, sku_name` changes only SKU names and product assignment. A new SKU gets the defaults: no barcode, no weight, not a bundle, no components.
+- **Column present, cell empty:** the value is cleared (no barcode, no weight, `is_bundle` false, no components).
+- Without an `is_bundle` column, `components` uses the stored flag (false for a new SKU), so components on a non-bundle are still `BUNDLE_REQUIRED`. Clearing `is_bundle` while the `components` column is absent is rejected, because the stored list would be kept; add an empty `components` column to clear it.
+
+Products are matched by `product_name`, exactly as written:
+
+- An existing SKU stays on its product while the file's `product_name` equals that product's name.
+- A different `product_name` moves the SKU to the product with that name (the oldest if several share it), creating the product when none exists. The old product is not renamed or removed.
+- Renaming a product through the import is not supported yet. Rename it with `PUT /products/{id}` (or the Products page), then import with the new name.
+
 - Every row is validated before anything is written: first each row on its own, then against the database under row locks. If any row fails, the answer is `422 IMPORT_INVALID` with `errors: [{row, column, error}]` for every bad cell, and nothing is written (not even the default warehouse or an audit row). `row` is the 1-based file line where the record starts (the header is line 1). A duplicate `sku_code` in the file is an error on the later row.
-- Otherwise everything is written in one READ COMMITTED transaction with JDBC batches. Rows are upserted by `sku_code`: a new code is inserted, an existing one is updated, an unchanged one is not touched. A product is matched by exact name (the oldest if several), or created. A bundle's component list is replaced only when it differs.
+- Otherwise everything is written in one READ COMMITTED transaction with JDBC batches. Rows are upserted by `sku_code`: a new code is inserted, an existing one is updated, an unchanged one is not touched. A product is matched by `product_name` as described above. A bundle's component list is replaced only when the `components` column is present and the list differs.
 - Re-importing the same file is a no-op apart from one `CATALOG_IMPORTED` audit row.
 - Answer: `{rows, products_created, skus_created, skus_updated, skus_unchanged, bundles_replaced, elapsed_ms}`. The time is also logged. 1,000 rows take well under a second locally; CI asserts under 10 seconds.
 
