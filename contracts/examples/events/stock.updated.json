@@ -1,0 +1,25 @@
+{
+  "event_id": "01J9Z3K7Q8stockupdated",
+  "event_type": "stock.updated",
+  "schema_version": 1,
+  "occurred_at": "2026-09-29T08:15:02Z",
+  "tsf_shop_id": "shop_45021",
+  "aggregate_id": "stock_shop_45021",
+  "aggregate_version": 1043,
+  "data": {
+    "items": [
+      {
+        "listing_sku_id": "tsf_sku_7781",
+        "seller_sku": "TSHIRT-BLK-M",
+        "available": 18,
+        "stock_version": 1042
+      },
+      {
+        "listing_sku_id": "tsf_sku_5000",
+        "seller_sku": "SET-TSHIRT-2",
+        "available": 9,
+        "stock_version": 1043
+      }
+    ]
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "access_token": "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJvd25lci1hY3RpdmUifQ.signature",
+  "token_type": "Bearer",
+  "expires_in": 600,
+  "refresh_token": "refresh-token-example-value"
+}

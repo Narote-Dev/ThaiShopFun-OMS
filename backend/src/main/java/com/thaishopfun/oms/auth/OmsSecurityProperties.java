@@ -29,6 +29,12 @@ public class OmsSecurityProperties {
   private List<String> internalClientIds = new ArrayList<>();
 
   /**
+   * Access-token {@code typ} values. A blank entry accepts a missing {@code typ}. {@code id_token}
+   * is still rejected because its audience is not {@code oms}.
+   */
+  private List<String> acceptedTokenTypes = new ArrayList<>(List.of("at+jwt", "JWT", ""));
+
+  /**
    * When false, startup fails if {@code current_user} is superuser or has {@code BYPASSRLS}.
    * Default false. Do not enable it for local Docker or tests.
    */
@@ -72,6 +78,14 @@ public class OmsSecurityProperties {
 
   public void setInternalClientIds(List<String> internalClientIds) {
     this.internalClientIds = internalClientIds == null ? new ArrayList<>() : internalClientIds;
+  }
+
+  public List<String> getAcceptedTokenTypes() {
+    return acceptedTokenTypes;
+  }
+
+  public void setAcceptedTokenTypes(List<String> acceptedTokenTypes) {
+    this.acceptedTokenTypes = acceptedTokenTypes == null ? new ArrayList<>() : acceptedTokenTypes;
   }
 
   public boolean isAllowRlsBypass() {

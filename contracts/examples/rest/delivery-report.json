@@ -1,0 +1,9 @@
+{
+  "sent": [
+    {
+      "event_id": "evt-1",
+      "http_status": 202,
+      "body": "{\"status\":\"accepted\"}"
+    }
+  ]
+}

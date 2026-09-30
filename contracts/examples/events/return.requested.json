@@ -1,0 +1,21 @@
+{
+  "event_id": "01J9Z3K7Q8returnreques",
+  "event_type": "return.requested",
+  "schema_version": 1,
+  "occurred_at": "2026-09-29T08:15:02Z",
+  "tsf_shop_id": "shop_45021",
+  "aggregate_id": "tsf_ret_311",
+  "aggregate_version": 7,
+  "data": {
+    "order_id": "TSF-240929-000123",
+    "return_id": "tsf_ret_311",
+    "type": "RETURN",
+    "reason": "SIZE_WRONG",
+    "lines": [
+      {
+        "line_id": "L1",
+        "qty": 1
+      }
+    ]
+  }
+}

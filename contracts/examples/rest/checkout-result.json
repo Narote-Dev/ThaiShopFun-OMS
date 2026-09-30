@@ -1,0 +1,5 @@
+{
+  "oms_status": 404,
+  "oms_body": "{\"error\":\"NOT_FOUND\",\"message\":\"missing\",\"trace_id\":\"abc12345\"}",
+  "response_schema_valid": true
+}

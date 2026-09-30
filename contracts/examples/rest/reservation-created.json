@@ -1,0 +1,17 @@
+{
+  "reservation_id": "rsv_01J9Z4A1B2C3",
+  "expires_at": "2026-09-29T08:30:00Z",
+  "enforced": true,
+  "items": [
+    {
+      "listing_sku_id": "tsf_sku_7781",
+      "qty": 2,
+      "enforced": true
+    },
+    {
+      "listing_sku_id": "tsf_sku_9001",
+      "qty": 1,
+      "enforced": true
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "iss": "http://localhost:8090/tsf-idp",
+  "aud": "oms",
+  "sub": "tsf_user_8812",
+  "iat": 1790665200,
+  "exp": 1790665800,
+  "jti": "c1f0example",
+  "email": "owner@shop.example",
+  "tsf_shop_id": "shop_45021",
+  "shop_role": "OWNER",
+  "shop_name": "ร้านตัวอย่าง",
+  "membership": {
+    "tier": "PRO",
+    "status": "ACTIVE",
+    "expires_at": "2026-12-31T16:59:59Z"
+  },
+  "entitlements": ["oms"],
+  "ent_ver": 7
+}

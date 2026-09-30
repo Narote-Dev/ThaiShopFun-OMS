@@ -1,5 +1,6 @@
 package com.thaishopfun.oms.auth;
 
+import java.util.ArrayList;
 import java.util.List;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -8,13 +9,14 @@ import org.springframework.core.annotation.Order;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
-import org.springframework.security.oauth2.core.DelegatingOAuth2TokenValidator;
 import org.springframework.security.oauth2.core.OAuth2Error;
 import org.springframework.security.oauth2.core.OAuth2TokenValidator;
 import org.springframework.security.oauth2.core.OAuth2TokenValidatorResult;
 import org.springframework.security.oauth2.jose.jws.SignatureAlgorithm;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
+import org.springframework.security.oauth2.jwt.JwtIssuerValidator;
+import org.springframework.security.oauth2.jwt.JwtTypeValidator;
 import org.springframework.security.oauth2.jwt.JwtValidators;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.oauth2.server.resource.web.authentication.BearerTokenAuthenticationFilter;
@@ -37,11 +39,15 @@ public class SecurityConfig {
         NimbusJwtDecoder.withJwkSetUri(properties.getJwksUri())
             .jwsAlgorithm(SignatureAlgorithm.RS256)
             .build();
-    OAuth2TokenValidator<Jwt> validator =
-        new DelegatingOAuth2TokenValidator<>(
-            JwtValidators.createDefaultWithIssuer(properties.getIssuer()),
-            new AudienceValidator(properties.getAudience(), properties.getInternalAudience()));
-    decoder.setJwtValidator(validator);
+    // Step 1: Pass typ ourselves. createDefaultWithIssuer inserts JwtTypeValidator.jwt(), which
+    // accepts only JWT and would ignore oms.security.accepted-token-types.
+    decoder.setJwtValidator(
+        JwtValidators.createDefaultWithValidators(
+            List.of(
+                new JwtIssuerValidator(properties.getIssuer()),
+                tokenTypes(properties.getAcceptedTokenTypes()),
+                new AudienceValidator(
+                    properties.getAudience(), properties.getInternalAudience()))));
     return decoder;
   }
 
@@ -111,6 +117,32 @@ public class SecurityConfig {
                 .authenticationEntryPoint(errors::unauthorized)
                 .accessDeniedHandler(errors::forbidden)
                 .jwt(jwt -> jwt.decoder(jwtDecoder)));
+  }
+
+  /**
+   * Named entries are allowed {@code typ} values. A blank entry allows a missing {@code typ}.
+   * Audience still rejects an {@code id_token}.
+   */
+  private static JwtTypeValidator tokenTypes(List<String> configured) {
+    if (configured == null || configured.isEmpty()) {
+      throw new IllegalStateException("oms.security.accepted-token-types must not be empty");
+    }
+    boolean allowMissing = false;
+    List<String> types = new ArrayList<>();
+    for (String value : configured) {
+      if (value == null || value.isBlank()) {
+        allowMissing = true;
+      } else if (!types.contains(value)) {
+        types.add(value);
+      }
+    }
+    if (types.isEmpty()) {
+      throw new IllegalStateException(
+          "oms.security.accepted-token-types must name at least one typ");
+    }
+    JwtTypeValidator validator = new JwtTypeValidator(types);
+    validator.setAllowEmpty(allowMissing);
+    return validator;
   }
 
   /** Accepts either the user audience or the internal audience. The chain then narrows it. */

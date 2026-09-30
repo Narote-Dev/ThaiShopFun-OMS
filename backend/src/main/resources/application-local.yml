@@ -1,4 +1,16 @@
-# Dev-only inbox HMAC. Active with the `local` profile. Not a production secret.
+# Dev-only values for the local profile. Not production secrets.
+# mock-tsf (docker compose) publishes the IdP and the webhook receiver on port 8090.
 oms:
+  security:
+    issuer: http://localhost:8090/tsf-idp
+    jwks-uri: http://localhost:8090/tsf-idp/.well-known/jwks.json
+    internal-client-ids:
+      - tsf
+    # The mock mints typ=at+jwt. A real TSF may send JWT or no typ; that stays on the default list.
+    accepted-token-types:
+      - at+jwt
   inbox:
     hmac-secrets: dev-inbox-hmac-secret
+  outbox:
+    destination-url: http://localhost:8090/internal/v1/oms-events
+    webhook-secret: dev-outbox-webhook-secret-local-only

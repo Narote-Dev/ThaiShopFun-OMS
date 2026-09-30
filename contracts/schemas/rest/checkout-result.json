@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "oms_status",
+    "oms_body",
+    "response_schema_valid"
+  ],
+  "properties": {
+    "oms_status": {
+      "type": "integer"
+    },
+    "oms_body": {
+      "type": "string"
+    },
+    "response_schema_valid": {
+      "type": "boolean"
+    }
+  }
+}

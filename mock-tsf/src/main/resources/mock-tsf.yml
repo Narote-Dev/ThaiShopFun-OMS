@@ -1,0 +1,40 @@
+# Dev-only mock. Secrets here match OMS application-local.yml. Not for any shared environment.
+# Named mock-tsf.yml (not application.yml) so this jar can sit on the OMS test classpath
+# without replacing OMS settings.
+server:
+  port: ${PORT:8090}
+
+spring:
+  application:
+    name: mock-tsf
+  jackson:
+    default-property-inclusion: always
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+mock:
+  issuer: ${MOCK_TSF_ISSUER:http://localhost:8090/tsf-idp}
+  oms-base-url: ${MOCK_OMS_BASE_URL:http://localhost:8080}
+  # TSF → OMS. Must match oms.inbox.hmac-secrets in the OMS local profile.
+  inbox-hmac-secret: ${MOCK_INBOX_HMAC_SECRET:dev-inbox-hmac-secret}
+  # OMS → TSF. Must match oms.outbox.webhook-secret. At least 32 bytes.
+  outbox-hmac-secret: ${MOCK_OUTBOX_HMAC_SECRET:dev-outbox-webhook-secret-local-only}
+  # OIDC public client. id_token aud is this value. The API access token aud stays oms.
+  public-client-id: oms-web
+  # Browser origins allowed to call /tsf-idp directly. Comma-separated.
+  cors-allowed-origins: ${MOCK_CORS_ORIGINS:http://localhost:5173,http://127.0.0.1:5173}
+  # Service client TSF uses when it calls OMS (/internal/**, aud=oms-internal).
+  tsf-client-id: tsf
+  tsf-client-secret: ${MOCK_TSF_CLIENT_SECRET:dev-tsf-client-secret}
+  # Service client OMS uses when it calls this mock (aud=tsf-internal).
+  oms-service-client-id: oms-service
+  oms-service-client-secret: ${MOCK_OMS_SERVICE_CLIENT_SECRET:dev-oms-service-secret}
+  access-token-seconds: 600

@@ -16,10 +16,57 @@ jobs:
           distribution: temurin
           java-version: "17"
           cache: maven
-          cache-dependency-path: backend/pom.xml
-      - name: Verify (tests and Spotless)
+          cache-dependency-path: |
+            backend/pom.xml
+            mock-tsf/pom.xml
+      - name: Package backend without mock-tsf
+        run: |
+          rm -rf ~/.m2/repository/com/thaishopfun/mock-tsf
+          cd backend && ./mvnw -B -DskipTests package
+      - name: Install mock-tsf from this commit
+        working-directory: mock-tsf
+        run: ./mvnw -B -DskipTests -Dspotless.skip=true install
+      - name: Verify (tests, Spotless, mock acceptance)
         working-directory: backend
+        run: ./mvnw -B -Pmock-acceptance verify
+
+  mock-tsf:
+    name: Mock TSF
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+          cache-dependency-path: mock-tsf/pom.xml
+      - name: Verify (tests and Spotless)
+        working-directory: mock-tsf
         run: ./mvnw -B verify
+
+  contracts:
+    name: Contract examples
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+          cache-dependency-path: mock-tsf/pom.xml
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: contracts/package-lock.json
+      - name: Lint OpenAPI
+        working-directory: contracts
+        run: npm ci && npm run lint
+      - name: Validate examples against JSON Schema
+        working-directory: mock-tsf
+        run: ./mvnw -B -Dtest=ContractExamplesTest,EnvelopeSchemaTest test
 
   frontend:
     name: Frontend

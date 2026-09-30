@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "order_id",
+    "fulfillment_status"
+  ],
+  "properties": {
+    "order_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "fulfillment_status": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

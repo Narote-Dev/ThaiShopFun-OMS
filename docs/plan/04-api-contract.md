@@ -24,14 +24,17 @@
   "email": "owner@shop.example",
   "tsf_shop_id": "shop_45021",
   "shop_role": "OWNER",
+  "shop_name": "ร้านตัวอย่าง",
   "membership": { "tier": "PRO", "status": "ACTIVE", "expires_at": "2026-12-31T16:59:59Z" },
   "entitlements": ["oms"],
   "ent_ver": 7
 }
 ```
 - `tsf_shop_id` → `tenant`, `sub` → `app_user`, `shop_role` → role
+- `shop_name` (optional) → `tenant.name`; ถ้าไม่มีให้ใช้ `tsf_shop_id`
 - 1 token = 1 ร้าน เปลี่ยนร้าน = ขอ token ใหม่
 - `ent_ver` ใน token ต่ำกว่าใน DB → `401 ENTITLEMENT_STALE` และไม่เขียนแถว ให้ refresh
+- OMS accepts `typ` `at+jwt` (preferred) or `JWT`, and a missing `typ`. `id_token`s are rejected by audience (`aud` is not `oms`). Default `oms.security.accepted-token-types` is that set. The `local` and `test` profiles accept only `at+jwt`.
 
 **Entitlement gate:** ลายเซ็น/`aud`/`iss`/อายุผิด = `401` (message เดียวกัน ไม่บอก claim) · token ที่มีทั้ง `aud=oms` และ `aud=oms-internal` = `401` · `ent_ver` ต่ำกว่า DB = `401 ENTITLEMENT_STALE` · `oms ∈ entitlements` + `ACTIVE` และยังไม่หมดอายุ = เต็ม · `GRACE` ที่ยังไม่หมดอายุ = read-only (`403 ENTITLEMENT_GRACE` เมื่อเขียน) · `SUSPENDED`, `expires_at` ผ่านแล้ว (รวม `GRACE`), หรือไม่มี `oms` = `403 ENTITLEMENT_INACTIVE` · `tenant_membership.status = REVOKED` = `403 MEMBERSHIP_REVOKED` และไม่ถูกเปิดเป็น `ACTIVE` ใหม่
 

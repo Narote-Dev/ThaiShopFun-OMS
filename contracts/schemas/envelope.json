@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "event_id",
+    "event_type",
+    "schema_version",
+    "occurred_at",
+    "tsf_shop_id",
+    "aggregate_id",
+    "data"
+  ],
+  "properties": {
+    "event_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "event_type": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._]+$"
+    },
+    "schema_version": {
+      "const": 1
+    },
+    "occurred_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "tsf_shop_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "aggregate_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "aggregate_version": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9223372036854775807
+    },
+    "data": {
+      "type": "object"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "membership.changed"
+          }
+        },
+        "required": ["event_type"]
+      },
+      "then": {},
+      "else": {
+        "required": ["aggregate_version"]
+      }
+    }
+  ]
+}

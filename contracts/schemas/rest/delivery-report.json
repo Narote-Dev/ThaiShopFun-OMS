@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "sent"
+  ],
+  "properties": {
+    "sent": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "event_id",
+          "http_status",
+          "body"
+        ],
+        "properties": {
+          "event_id": {
+            "type": "string"
+          },
+          "http_status": {
+            "type": "integer"
+          },
+          "body": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}
