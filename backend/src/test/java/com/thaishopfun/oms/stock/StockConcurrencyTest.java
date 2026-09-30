@@ -140,6 +140,104 @@ class StockConcurrencyTest extends StockTestBase {
     fixture.assertInvariants(shop);
   }
 
+  @Test
+  @Timeout(value = 2, unit = TimeUnit.MINUTES)
+  void sameOwnerWithTwentyKeysReservesOnce() throws Exception {
+    Shop shop = fixture.shop("ACTIVE");
+    UUID a = fixture.sku(shop, 1_000);
+    UUID b = fixture.sku(shop, 1_000);
+    StockOwner owner = StockOwner.checkout("chk-" + UUID.randomUUID());
+    double busyBefore = busyTotal();
+    List<Callable<Object>> calls = new ArrayList<>();
+    for (int i = 0; i < 20; i++) {
+      // Step 1: Disjoint SKU sets too, so only the owner lock (not inventory) serializes them.
+      UUID sku = i % 2 == 0 ? a : b;
+      calls.add(
+          () -> {
+            try {
+              return as(
+                  shop,
+                  () ->
+                      engine.reserve(
+                          owner, List.of(ReserveItem.of(sku, 1)), "key-" + UUID.randomUUID()));
+            } catch (StockOperationException ex) {
+              return ex.error();
+            }
+          });
+    }
+
+    List<Object> results = runTogether(calls, 20);
+
+    // Step 2: One winner, 19 OWNER_ALREADY_RESERVED, nothing busy, one ACTIVE row.
+    assertThat(results.stream().filter(ReserveResult.class::isInstance)).hasSize(1);
+    assertThat(results.stream().filter(StockError.OWNER_ALREADY_RESERVED::equals)).hasSize(19);
+    assertThat(busyTotal() - busyBefore).isZero();
+    assertThat(fixture.reservations(shop, "ACTIVE")).isEqualTo(1);
+    assertThat(fixture.reserved(shop, a) + fixture.reserved(shop, b)).isEqualTo(1);
+    fixture.assertInvariants(shop);
+  }
+
+  @Test
+  @Timeout(value = 3, unit = TimeUnit.MINUTES)
+  void transferRacingExpiryHasExactlyOneOutcome() throws Exception {
+    Shop shop = fixture.shop("ACTIVE");
+    UUID sku = fixture.sku(shop, 1_000);
+    int transferred = 0;
+    int expired = 0;
+    for (int round = 0; round < 30; round++) {
+      // Step 1: A 1 minute hold. The job runs at +2 min; the transfer sees the engine clock,
+      // where the hold is still live. Whichever locks the inventory row first decides.
+      ReserveResult held =
+          as(
+              shop,
+              () ->
+                  engine.reserve(
+                      StockOwner.checkout("chk-" + UUID.randomUUID()),
+                      List.of(ReserveItem.of(sku, 1)),
+                      "key-" + UUID.randomUUID(),
+                      java.time.Duration.ofMinutes(1)));
+      java.time.Instant jobNow = clock.instant().plus(java.time.Duration.ofMinutes(2));
+      String orderRef = "ord-" + UUID.randomUUID();
+      List<Callable<Object>> race =
+          List.of(
+              () -> {
+                try {
+                  return as(
+                      shop,
+                      () ->
+                          engine.transferOwner(
+                              held.reservationGroupId(), orderRef, "key-" + UUID.randomUUID()));
+                } catch (StockOperationException ex) {
+                  return ex.error();
+                }
+              },
+              () -> expiryJob.runOnce(jobNow));
+      List<Object> results = runTogether(race, 2);
+
+      // Step 2: Exactly one outcome for the group.
+      Map<String, Object> row = fixture.groupRows(shop, held.reservationGroupId()).get(0);
+      if (results.get(0) instanceof TransferResult) {
+        transferred++;
+        assertThat(row.get("status")).as("round %s", round).isEqualTo("ACTIVE");
+        assertThat(row.get("owner_type")).isEqualTo("ORDER");
+        assertThat(row.get("expires_at")).isNull();
+      } else {
+        expired++;
+        assertThat(results.get(0))
+            .as("round %s", round)
+            .isEqualTo(StockError.RESERVATION_NOT_ACTIVE);
+        assertThat(row.get("status")).isEqualTo("EXPIRED");
+        assertThat(row.get("owner_type")).isEqualTo("CHECKOUT");
+      }
+    }
+    log.info("transfer vs expiry: {} transferred, {} expired", transferred, expired);
+    // Step 3: One RELEASE per expired group, ORDER holds still reserved, books balance.
+    assertThat(transferred + expired).isEqualTo(30);
+    assertThat(fixture.ledger(shop, "RELEASE")).isEqualTo(expired);
+    assertThat(fixture.reserved(shop, sku)).isEqualTo(transferred);
+    fixture.assertInvariants(shop);
+  }
+
   private double busyTotal() {
     double total = 0;
     for (StockRetry.Cause cause : StockRetry.Cause.values()) {
