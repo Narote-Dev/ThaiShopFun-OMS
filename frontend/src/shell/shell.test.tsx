@@ -6,6 +6,7 @@ import GraceBanner from './GraceBanner'
 import LoginPage from './LoginPage'
 import Paywall from './Paywall'
 import RequireSession from './RequireSession'
+import SettingUp from './SettingUp'
 
 const me: Me = {
   tenant: {
@@ -74,6 +75,15 @@ describe('paywall and grace', () => {
   it('renders a grace expiry on its own', () => {
     render(<GraceBanner expiresAt="2026-10-30T00:00:00Z" />)
     expect(screen.getByRole('status')).toHaveTextContent('2026-10-30')
+  })
+})
+
+describe('setting up', () => {
+  it('shows the setup message once and a Retry button after retries stop', () => {
+    render(<SettingUp message="Shop is not registered yet" onRetry={() => undefined} />)
+    expect(screen.getAllByText('Shop is not registered yet')).toHaveLength(1)
+    expect(screen.queryByText(/Retrying/)).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument()
   })
 })
 

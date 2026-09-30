@@ -20,6 +20,7 @@ type Handlers = {
   onPaywall: (code: PaywallCode) => void
   onReadOnly: () => void
   onSettingUp: (active: boolean) => void
+  onSetupFailed: (message: string) => void
   onLoginRequired: () => void
 }
 
@@ -27,6 +28,7 @@ const noopHandlers: Handlers = {
   onPaywall: () => undefined,
   onReadOnly: () => undefined,
   onSettingUp: () => undefined,
+  onSetupFailed: () => undefined,
   onLoginRequired: () => undefined,
 }
 
@@ -82,8 +84,9 @@ async function request<T>(path: string, init: RequestInit, attempt: Attempt): Pr
     deps.onLoginRequired()
     throw new ApiError(401, 'UNAUTHORIZED', 'Sign in required', null)
   }
+  const sentToken = token
   const headers = new Headers(init.headers)
-  headers.set('Authorization', `Bearer ${token}`)
+  headers.set('Authorization', `Bearer ${sentToken}`)
   headers.set('Accept', 'application/json')
   if (init.body && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json')
@@ -95,15 +98,21 @@ async function request<T>(path: string, init: RequestInit, attempt: Attempt): Pr
     return (await response.json()) as T
   }
   const error = await readError(response)
-  // Step 2: One refresh, then one retry. A second 401 ends the session.
-  if (response.status === 401 && !attempt.refreshed && shouldRefresh(error)) {
-    try {
-      await deps.refreshAccessToken()
-    } catch {
-      deps.onLoginRequired()
-      throw error
+  // Step 2: Another request may already have rotated the access token. Reuse it. Do not spend the refresh token twice.
+  if (response.status === 401 && shouldRefresh(error)) {
+    const latest = deps.getAccessToken()
+    if (latest && latest !== sentToken) {
+      return request<T>(path, init, attempt)
     }
-    return request<T>(path, init, { ...attempt, refreshed: true })
+    if (!attempt.refreshed) {
+      try {
+        await deps.refreshAccessToken()
+      } catch {
+        deps.onLoginRequired()
+        throw error
+      }
+      return request<T>(path, init, { ...attempt, refreshed: true })
+    }
   }
   if (response.status === 401) {
     deps.onLoginRequired()
@@ -118,20 +127,20 @@ async function request<T>(path: string, init: RequestInit, attempt: Attempt): Pr
     deps.onReadOnly()
     throw error
   }
-  // Step 4: Unknown shop. Honor Retry-After and stop after a few tries.
+  // Step 4: Unknown shop. Honor Retry-After, then stop so the screen can offer Retry.
   if (response.status === 503 && error.code === 'TENANT_NOT_READY' && attempt.setupAttempts + 1 < MAX_SETUP_ATTEMPTS) {
     deps.onSettingUp(true)
     await deps.sleep(retryAfterMs(response.headers.get('Retry-After')))
     return request<T>(path, init, { ...attempt, setupAttempts: attempt.setupAttempts + 1 })
   }
   if (response.status === 503 && error.code === 'TENANT_NOT_READY') {
-    deps.onSettingUp(true)
+    deps.onSetupFailed(error.message)
   }
   throw error
 }
 
 function shouldRefresh(error: ApiError): boolean {
-  return error.code === 'ENTITLEMENT_STALE' || error.message === 'Invalid or expired token'
+  return error.code === 'UNAUTHORIZED' || error.code === 'ENTITLEMENT_STALE'
 }
 
 function isPaywall(code: string): code is PaywallCode {

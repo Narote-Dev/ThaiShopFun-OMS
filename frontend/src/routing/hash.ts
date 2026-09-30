@@ -15,6 +15,8 @@ export function stripAuthQuery(hash: string): void {
   url.searchParams.delete('state')
   url.searchParams.delete('session_state')
   url.searchParams.delete('iss')
+  url.searchParams.delete('error')
+  url.searchParams.delete('error_description')
   const search = url.searchParams.toString()
   window.history.replaceState(null, '', `${url.pathname}${search ? `?${search}` : ''}${hash}`)
   // replaceState does not emit hashchange. The shell is already mounted during the callback.

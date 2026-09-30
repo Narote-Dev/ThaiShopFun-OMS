@@ -133,6 +133,41 @@ describe('apiRequest', () => {
     expect(readOnly).toHaveBeenCalledTimes(1)
   })
 
+  it('retries with a token another request already rotated', async () => {
+    let token = 'old'
+    const refreshAccessToken = vi.fn(async () => 'should-not-run')
+    const fetchImpl = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const authorization = new Headers(init?.headers).get('Authorization')
+      if (authorization === 'Bearer old') {
+        token = 'new'
+        return json(401, { error: 'UNAUTHORIZED', message: 'Invalid or expired token' })
+      }
+      return json(200, { ok: true })
+    })
+    configureApi({
+      getAccessToken: () => token,
+      refreshAccessToken,
+      fetchImpl,
+    })
+    await expect(apiRequest('/api/v1/me')).resolves.toEqual({ ok: true })
+    expect(refreshAccessToken).not.toHaveBeenCalled()
+    expect(fetchImpl).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not refresh a 401 whose code is neither UNAUTHORIZED nor ENTITLEMENT_STALE', async () => {
+    const refreshAccessToken = vi.fn(async () => 'new')
+    const login = vi.fn()
+    configureApi({
+      getAccessToken: () => 'token',
+      refreshAccessToken,
+      onLoginRequired: login,
+      fetchImpl: async () => json(401, { error: 'OTHER', message: 'Invalid or expired token' }),
+    })
+    await expect(apiRequest('/api/v1/me')).rejects.toMatchObject({ code: 'OTHER' })
+    expect(refreshAccessToken).not.toHaveBeenCalled()
+    expect(login).toHaveBeenCalledTimes(1)
+  })
+
   it('retries TENANT_NOT_READY a bounded number of times', async () => {
     const sleeps: number[] = []
     const settingUp = vi.fn()
@@ -162,6 +197,7 @@ describe('apiRequest', () => {
   })
 
   it('stops retrying TENANT_NOT_READY after the bound', async () => {
+    const setupFailed = vi.fn()
     const fetchImpl = vi.fn(async () =>
       json(503, { error: 'TENANT_NOT_READY', message: 'Shop is not registered yet' }, {
         'Retry-After': '1',
@@ -169,11 +205,14 @@ describe('apiRequest', () => {
     )
     configureApi({
       getAccessToken: () => 'token',
+      onSetupFailed: setupFailed,
       fetchImpl,
       sleep: async () => undefined,
     })
     await expect(apiRequest('/api/v1/me')).rejects.toMatchObject({ code: 'TENANT_NOT_READY' })
     expect(fetchImpl).toHaveBeenCalledTimes(3)
+    expect(setupFailed).toHaveBeenCalledTimes(1)
+    expect(setupFailed).toHaveBeenCalledWith('Shop is not registered yet')
   })
 
   it('calls fetch without using it as a method', async () => {

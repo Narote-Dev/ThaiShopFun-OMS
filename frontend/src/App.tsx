@@ -39,7 +39,12 @@ function Shell() {
   if (auth.gate === 'paywall') {
     body = <Paywall onLogout={auth.signOut} />
   } else if (auth.gate === 'setting-up' && !auth.me) {
-    body = <SettingUp message={auth.setupMessage ?? 'Your shop is being set up. Retrying…'} />
+    body = (
+      <SettingUp
+        message={auth.setupMessage ?? 'Your shop is being set up.'}
+        onRetry={auth.setupFailed ? auth.retrySetup : null}
+      />
+    )
   } else if (auth.profileError) {
     body = (
       <main>

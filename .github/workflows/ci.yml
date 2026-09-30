@@ -114,3 +114,13 @@ jobs:
       - name: Playwright SSO
         working-directory: frontend
         run: npm run test:e2e
+      - name: Upload e2e failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-e2e
+          if-no-files-found: ignore
+          path: |
+            frontend/playwright-report/
+            frontend/test-results/
+            backend/target/e2e-backend.log

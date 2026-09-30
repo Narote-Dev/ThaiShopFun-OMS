@@ -24,7 +24,6 @@ function watchTokens(page: Page): Tokens {
 async function signIn(page: Page, shop: RegExp): Promise<Tokens> {
   const tokens = watchTokens(page)
   await page.goto('/')
-  await page.getByRole('button', { name: 'Sign in' }).click()
   await page.getByRole('link', { name: shop }).click()
   return tokens
 }
@@ -63,7 +62,6 @@ test('active shop sees its name on the dashboard', async ({ page }) => {
 
 test('returns to the outbox page after sign-in', async ({ page }) => {
   await page.goto('/#/admin/outbox')
-  await page.getByRole('button', { name: 'Sign in' }).click()
   await page.getByRole('link', { name: /^Active Shop/ }).click()
   await expect(page.getByRole('heading', { name: 'Dead outbox' })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Active Shop' })).toHaveCount(0)
@@ -89,6 +87,17 @@ test('grace membership shows the read-only banner', async ({ page }) => {
   await signIn(page, /^Grace Shop/)
   await expect(page.getByRole('heading', { name: 'Grace Shop' })).toBeVisible()
   await expect(page.getByRole('status')).toContainText(/read-only/i)
+})
+
+test('reload signs in again through authorize', async ({ page }) => {
+  const tokens = await signIn(page, /^Active Shop/)
+  await expect(page.getByRole('heading', { name: 'Active Shop' })).toBeVisible()
+  const authorize = page.waitForRequest((request) => request.url().includes('/tsf-idp/authorize'))
+  await page.reload()
+  await authorize
+  await page.getByRole('link', { name: /^Active Shop/ }).click()
+  await expect(page.getByRole('heading', { name: 'Active Shop' })).toBeVisible()
+  await expectNoStoredTokens(page, tokens)
 })
 
 test('log out returns to the signed-out screen', async ({ page }) => {

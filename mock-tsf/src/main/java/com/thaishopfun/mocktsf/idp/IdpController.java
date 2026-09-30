@@ -24,6 +24,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.util.UriComponentsBuilder;
+import org.springframework.web.util.UriUtils;
 
 /** OIDC discovery, JWKS, authorization code + PKCE, and client credentials. */
 @RestController
@@ -274,23 +275,23 @@ public class IdpController {
         "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>Mock TSF</title></head>");
     html.append("<body><h1>Mock ThaiShopFun</h1><p>Choose a shop.</p><ul>");
     for (SeedData.ShopUser user : shops.users()) {
+      // Step 1: Encode every query value. build(true) treats the query as already encoded.
       UriComponentsBuilder link =
           UriComponentsBuilder.fromPath("/tsf-idp/authorize")
-              .queryParam("response_type", "code")
-              .queryParam("client_id", clientId)
-              .queryParam("redirect_uri", redirectUri)
-              .queryParam("code_challenge", challenge)
-              .queryParam("code_challenge_method", method)
-              .queryParam("login_hint", user.userId());
+              .queryParam("response_type", query("code"))
+              .queryParam("client_id", query(clientId))
+              .queryParam("redirect_uri", query(redirectUri))
+              .queryParam("code_challenge", query(challenge))
+              .queryParam("code_challenge_method", query(method))
+              .queryParam("login_hint", query(user.userId()));
       if (state != null) {
-        link.queryParam("state", state);
+        link.queryParam("state", query(state));
       }
       if (scope != null) {
-        // build(true) treats this query as already encoded. A raw space is illegal.
-        link.queryParam("scope", scope.replace(" ", "%20"));
+        link.queryParam("scope", query(scope));
       }
       if (nonce != null) {
-        link.queryParam("nonce", nonce);
+        link.queryParam("nonce", query(nonce));
       }
       html.append("<li><a href=\"")
           .append(esc(link.build(true).toUriString()))
@@ -304,6 +305,10 @@ public class IdpController {
     }
     html.append("</ul></body></html>");
     return html.toString();
+  }
+
+  private static String query(String value) {
+    return UriUtils.encodeQueryParam(value, StandardCharsets.UTF_8);
   }
 
   private static String esc(String value) {

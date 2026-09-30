@@ -22,11 +22,13 @@ export type AuthContextValue = {
   me: Me | null
   gate: Gate
   setupMessage: string | null
+  setupFailed: boolean
   readOnlyNotice: string | null
   signInError: string | null
   profileError: string | null
   signIn: () => void
   signOut: () => void
+  retrySetup: () => void
 }
 
 export const AuthContext = createContext<AuthContextValue | null>(null)
