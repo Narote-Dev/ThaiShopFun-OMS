@@ -2,6 +2,11 @@ import { useEffect, useState } from 'react'
 import AuthProvider from './auth/AuthProvider'
 import { useAuth } from './auth/useAuth'
 import { normalizeHash } from './routing/hash'
+import { canWriteCatalog } from './catalog/access'
+import ImportPage from './catalog/ImportPage'
+import ProductsPage from './catalog/ProductsPage'
+import SkuFormPage from './catalog/SkuFormPage'
+import SkuListPage from './catalog/SkuListPage'
 import OutboxAdminPage from './outbox/OutboxAdminPage'
 import AppLayout from './shell/AppLayout'
 import DashboardPage from './shell/DashboardPage'
@@ -9,6 +14,30 @@ import LoginPage from './shell/LoginPage'
 import Paywall from './shell/Paywall'
 import RequireSession from './shell/RequireSession'
 import SettingUp from './shell/SettingUp'
+import WarehousesPage from './warehouse/WarehousesPage'
+import type { ReactNode } from 'react'
+
+const SKU_ROUTE = /^#\/catalog\/skus\/([0-9a-f-]{36}|new)$/
+
+// Change: T07 catalog and warehouse pages. Writes need OWNER/ADMIN and a non-GRACE shop.
+function page(route: string, canWrite: boolean, readOnly: boolean, name: string): ReactNode {
+  if (route === '#/admin/outbox') return <OutboxAdminPage readOnly={readOnly} />
+  if (route === '#/') return <DashboardPage name={name} />
+  if (route === '#/catalog/skus') return <SkuListPage canWrite={canWrite} />
+  if (route === '#/catalog/products') return <ProductsPage canWrite={canWrite} />
+  if (route === '#/catalog/import') return <ImportPage canWrite={canWrite} />
+  if (route === '#/warehouses') return <WarehousesPage canWrite={canWrite} />
+  const sku = SKU_ROUTE.exec(route)
+  if (sku) {
+    const id = sku[1] === 'new' ? null : sku[1]
+    return <SkuFormPage key={sku[1]} id={id} canWrite={canWrite} />
+  }
+  return (
+    <main>
+      <h1>Not found</h1>
+    </main>
+  )
+}
 
 function useRoute(): string {
   const [route, setRoute] = useState(() => normalizeHash(window.location.hash))
@@ -55,17 +84,11 @@ function Shell() {
       </main>
     )
   } else if (auth.me) {
+    const readOnly = auth.me.entitlement.status === 'GRACE'
+    const canWrite = canWriteCatalog(auth.me)
     body = (
       <AppLayout me={auth.me} readOnlyNotice={auth.readOnlyNotice} onLogout={auth.signOut}>
-        {route === '#/admin/outbox' ? (
-          <OutboxAdminPage readOnly={auth.me.entitlement.status === 'GRACE'} />
-        ) : route === '#/' ? (
-          <DashboardPage name={auth.me.tenant.name} />
-        ) : (
-          <main>
-            <h1>Not found</h1>
-          </main>
-        )}
+        {page(route, canWrite, readOnly, auth.me.tenant.name)}
       </AppLayout>
     )
   }

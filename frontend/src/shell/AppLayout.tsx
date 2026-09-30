@@ -29,6 +29,10 @@ export default function AppLayout({ me, readOnlyNotice, onLogout, children }: Pr
         </div>
         <nav>
           <a href="#/">Dashboard</a>
+          <a href="#/catalog/skus">SKUs</a>
+          <a href="#/catalog/products">Products</a>
+          <a href="#/catalog/import">Import</a>
+          <a href="#/warehouses">Warehouses</a>
           <a href="#/admin/outbox">Dead outbox</a>
         </nav>
       </header>

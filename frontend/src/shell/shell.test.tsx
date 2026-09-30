@@ -7,6 +7,7 @@ import LoginPage from './LoginPage'
 import Paywall from './Paywall'
 import RequireSession from './RequireSession'
 import SettingUp from './SettingUp'
+import { canWriteCatalog } from '../catalog/access'
 
 const me: Me = {
   tenant: {
@@ -93,5 +94,31 @@ describe('login', () => {
     render(<LoginPage error={null} onSignIn={onSignIn} />)
     screen.getByRole('button', { name: 'Sign in' }).click()
     expect(onSignIn).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('catalog navigation and write access', () => {
+  it('links the catalog and warehouse pages from the shell', () => {
+    render(
+      <AppLayout me={me} readOnlyNotice={null} onLogout={() => undefined}>
+        <p>page</p>
+      </AppLayout>,
+    )
+    for (const [name, href] of [
+      ['SKUs', '#/catalog/skus'],
+      ['Products', '#/catalog/products'],
+      ['Import', '#/catalog/import'],
+      ['Warehouses', '#/warehouses'],
+    ]) {
+      expect(screen.getByRole('link', { name })).toHaveAttribute('href', href)
+    }
+  })
+
+  it('allows writes for OWNER and ADMIN only, never in GRACE', () => {
+    const active = { ...me, entitlement: { ...me.entitlement, status: 'ACTIVE' } }
+    expect(canWriteCatalog({ ...active, role: 'OWNER' })).toBe(true)
+    expect(canWriteCatalog({ ...active, role: 'ADMIN' })).toBe(true)
+    expect(canWriteCatalog({ ...active, role: 'STAFF' })).toBe(false)
+    expect(canWriteCatalog(me)).toBe(false)
   })
 })

@@ -4,13 +4,16 @@ export class ApiError extends Error {
   readonly status: number
   readonly code: string
   readonly traceId: string | null
+  // Change: extra body data, e.g. the per-row `errors` list of 422 IMPORT_INVALID.
+  readonly details: unknown
 
-  constructor(status: number, code: string, message: string, traceId: string | null) {
+  constructor(status: number, code: string, message: string, traceId: string | null, details: unknown = null) {
     super(message)
     this.name = 'ApiError'
     this.status = status
     this.code = code
     this.traceId = traceId
+    this.details = details
   }
 }
 
@@ -88,7 +91,8 @@ async function request<T>(path: string, init: RequestInit, attempt: Attempt): Pr
   const headers = new Headers(init.headers)
   headers.set('Authorization', `Bearer ${sentToken}`)
   headers.set('Accept', 'application/json')
-  if (init.body && !headers.has('Content-Type')) {
+  // Change: FormData (CSV import) needs the browser to set the multipart boundary itself.
+  if (init.body && !(init.body instanceof FormData) && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json')
   }
   const response = await deps.fetchImpl(path, { ...init, headers })
@@ -151,15 +155,22 @@ async function readError(response: Response): Promise<ApiError> {
   let code = 'UNKNOWN'
   let message = response.statusText || 'Request failed'
   let traceId: string | null = null
+  let details: unknown = null
   try {
-    const body = (await response.json()) as { error?: unknown; message?: unknown; trace_id?: unknown }
+    const body = (await response.json()) as {
+      error?: unknown
+      message?: unknown
+      trace_id?: unknown
+      errors?: unknown
+    }
     if (typeof body.error === 'string') code = body.error
     if (typeof body.message === 'string') message = body.message
     if (typeof body.trace_id === 'string') traceId = body.trace_id
+    if (Array.isArray(body.errors)) details = body.errors
   } catch {
     // Non-JSON bodies still become a typed error.
   }
-  return new ApiError(response.status, code, message, traceId)
+  return new ApiError(response.status, code, message, traceId, details)
 }
 
 function retryAfterMs(header: string | null): number {
