@@ -68,7 +68,7 @@ The backend waits up to 60 seconds for Postgres to accept connections. Flyway V1
 | `contracts/` | OpenAPI 3.1 and JSON Schema for sections 4.3–4.7. Stand-in for `tsf-oms-contracts` until that repo exists. |
 | `docker-compose.yml` | Postgres 16 and mock-tsf for local development. |
 | `docs/plan/` | Plan v2 (process map, scope, data model, API contract, task list, NFR). |
-| `.github/workflows/ci.yml` | Backend `./mvnw verify`, frontend `npm ci && npm run lint && npm run build && npm test`, Playwright SSO e2e, mock-tsf `./mvnw verify`, and contract example validation. |
+| `.github/workflows/ci.yml` | Backend `./mvnw verify`, frontend `npm ci && npm run lint && npm run build && npm test`, Playwright SSO e2e, mock-tsf `./mvnw verify`, the delivery chaos suite, and contract example validation. |
 | `.railway/railway.ts` | Staging infrastructure. Dockerfiles are in each service directory. |
 
 Flyway V1 is `backend/src/main/resources/db/migration/V1__foundation_rls.sql`. It creates `tenant`, `app_user`, `tenant_membership`, `audit_log`, `idempotency_key`, `inbox_event`, and `outbox_event`, plus `oms_migrator`, `oms_app` (`NOBYPASSRLS`), and `oms_maint`. Tenant tables use `ENABLE` and `FORCE ROW LEVEL SECURITY`. V2 is `V2__jit_provision.sql`: `SECURITY DEFINER` functions `upsert_app_user`, `provision_tenant`, `provision_membership`, and read-only `lookup_login`, owned by `oms_maint`, executable only by `oms_app`. V3 is `V3__inbox_tenant_dedup.sql`: inbox dedup is `UNIQUE (tenant_id, source, event_id)`, with `aggregate_version` and `payload_sha256`. Versions are taken in merge order as the next free number. One migration per PR. Do not edit a version that has already been merged.
@@ -99,7 +99,9 @@ GitHub Actions runs on pull requests and on `main`.
   ```bash
   cd frontend && npm ci && npx playwright install --with-deps chromium && npm run test:e2e
   ```
+- Delivery chaos locally (Java 17, Docker): `cd mock-tsf && ./mvnw -DskipTests -Dspotless.skip=true install`, then `cd backend && ./mvnw -Pmock-acceptance,chaos test`. `DeliveryChaosTest` sends 1,000 `order.created` events through the mock into `POST /internal/v1/events` (duplicates, reordering, bad and stale signatures, handler rollbacks, killed and restarted workers), then publishes 1,000 `stock.updated` events through a localhost fault proxy to the mock receiver (killed publishers before ack and after ack, 500, 503, 429 and 503 with `Retry-After`, resets, timeouts). Faults come from a fixed seed, printed at the start; rerun a failure with `-Dchaos.seed=<seed>`. It takes well under a minute. In `backend/target/chaos-report.json`, each direction has `events_sent`, `unique_delivered`, `total_deliveries`, `duplicate_rate` (`total / unique − 1`), `retries_by_cause`, and `wall_time_ms`. The test passes on correctness (nothing lost, one effect per event, all `SENT`); the duplicate rate is reported, not asserted.
 - Mock TSF: `./mvnw verify` in `mock-tsf/`.
+- Delivery chaos (T14B): its own job, so the backend job does not run it (JUnit tag `chaos` is excluded by default). It installs `mock-tsf`, runs `./mvnw -Pmock-acceptance,chaos test` in `backend/`, and uploads `backend/target/chaos-report.json` as the `chaos-report` artifact.
 - Contracts: Spectral lints `contracts/openapi/*.yaml` (resolving `$ref`s). `ContractExamplesTest` validates every file in `contracts/examples/` against its schema and checks that each event example filename matches `event_type`.
 
 ## Staging on Railway

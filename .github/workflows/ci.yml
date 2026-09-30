@@ -30,6 +30,36 @@ jobs:
         working-directory: backend
         run: ./mvnw -B -Pmock-acceptance verify
 
+  chaos:
+    name: Delivery chaos
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+          cache-dependency-path: |
+            backend/pom.xml
+            mock-tsf/pom.xml
+      - name: Install mock-tsf from this commit
+        working-directory: mock-tsf
+        run: ./mvnw -B -DskipTests -Dspotless.skip=true install
+      - name: Chaos suite (1,000 events each way)
+        working-directory: backend
+        run: ./mvnw -B -Pmock-acceptance,chaos test
+      - name: Upload chaos report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: chaos-report
+          if-no-files-found: warn
+          path: |
+            backend/target/chaos-report.json
+            backend/target/surefire-reports/
+
   mock-tsf:
     name: Mock TSF
     runs-on: ubuntu-latest
