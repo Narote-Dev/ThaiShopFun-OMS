@@ -27,6 +27,13 @@
 --                        document line for a bundle SKU, or is_bundle set on a SKU that
 --                        already has any of those rows.
 -- * STOCK_DOCUMENT_IMMUTABLE (constraint stock_document_immutable): edits after POST.
+-- * READ_COMMITTED_REQUIRED (constraints sku_bundle_isolation, stock_document_isolation):
+--                        an is_bundle flip or a document post under a snapshot isolation
+--                        level, where the trigger could miss a concurrent commit.
+--
+-- Lock order: the sku FOR SHARE locks below are taken on catalog and stock document
+-- writes only, never on the reservation path. T07 and T08 should still lock SKUs in id
+-- order and retry a transaction that fails with 40P01 (deadlock_detected).
 
 -- Step 1: Channel accounts. UNIQUE (channel, external_shop_id) is global on purpose:
 -- one external shop maps to exactly one tenant. credentials_ref names a secret held
@@ -156,7 +163,8 @@ CREATE TABLE warehouse (
 
 -- Step 4: Stock. Non-bundle SKUs only (trigger, Step 8). The app changes on_hand and
 -- reserved with a conditional UPDATE. The CHECK is the last line of defence.
--- UNIQUE (tenant_id, sku_id, warehouse_id) is the target of the ledger foreign key.
+-- UNIQUE (tenant_id, sku_id, warehouse_id) is the target of the ledger and reservation
+-- foreign keys. sku ids are globally unique, so it also means one row per (sku, warehouse).
 CREATE TABLE inventory (
   id uuid PRIMARY KEY,
   tenant_id uuid NOT NULL REFERENCES tenant (id),
@@ -168,7 +176,6 @@ CREATE TABLE inventory (
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT inventory_tenant_id_id_key UNIQUE (tenant_id, id),
-  CONSTRAINT inventory_sku_warehouse_key UNIQUE (sku_id, warehouse_id),
   CONSTRAINT inventory_tenant_sku_warehouse_key UNIQUE (tenant_id, sku_id, warehouse_id),
   CONSTRAINT inventory_sku_fkey FOREIGN KEY (tenant_id, sku_id)
     REFERENCES sku (tenant_id, id) ON DELETE RESTRICT,
@@ -220,6 +227,10 @@ CREATE TABLE inventory_ledger (
 -- One row per component SKU. Bundle quantities are exploded and summed by the app.
 -- owner_ref is text because a CHECKOUT owner is the TSF checkout id.
 -- reservation_group_id is the reservation_id returned to TSF. expires_at null = no expiry.
+-- The foreign key to inventory requires a stock row, so a bundle SKU (which never has
+-- one) cannot be reserved. This is the hot path, so there is no trigger and no sku row
+-- lock here: the FK takes FOR KEY SHARE on the inventory row, which the reserving
+-- UPDATE of inventory.reserved already holds more strongly, and never touches sku.
 CREATE TABLE stock_reservation (
   id uuid PRIMARY KEY,
   tenant_id uuid NOT NULL REFERENCES tenant (id),
@@ -234,10 +245,8 @@ CREATE TABLE stock_reservation (
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT stock_reservation_tenant_id_id_key UNIQUE (tenant_id, id),
-  CONSTRAINT stock_reservation_sku_fkey FOREIGN KEY (tenant_id, sku_id)
-    REFERENCES sku (tenant_id, id) ON DELETE RESTRICT,
-  CONSTRAINT stock_reservation_warehouse_fkey FOREIGN KEY (tenant_id, warehouse_id)
-    REFERENCES warehouse (tenant_id, id) ON DELETE RESTRICT,
+  CONSTRAINT stock_reservation_inventory_fkey FOREIGN KEY (tenant_id, sku_id, warehouse_id)
+    REFERENCES inventory (tenant_id, sku_id, warehouse_id) ON DELETE RESTRICT,
   CONSTRAINT stock_reservation_owner_type_check CHECK (owner_type IN ('CHECKOUT', 'ORDER')),
   CONSTRAINT stock_reservation_owner_ref_check CHECK (btrim(owner_ref) <> ''),
   CONSTRAINT stock_reservation_status_check CHECK (
@@ -342,6 +351,9 @@ CREATE INDEX stock_reservation_tenant_sku_idx
 CREATE INDEX stock_reservation_group_idx
   ON stock_reservation (tenant_id, reservation_group_id);
 
+CREATE INDEX stock_document_tenant_status_created_idx
+  ON stock_document (tenant_id, status, created_at DESC);
+
 CREATE INDEX stock_document_line_document_idx
   ON stock_document_line (tenant_id, document_id);
 
@@ -397,10 +409,12 @@ TO oms_app, oms_maint;
 -- The ledger is append-only at the grant layer too, like audit_log in V1.
 GRANT SELECT, INSERT ON inventory_ledger TO oms_app, oms_maint;
 
--- Step 8: Bundle rules. Every check locks the referenced sku rows FOR SHARE. A foreign
--- key check only takes FOR KEY SHARE, which does not block an UPDATE of is_bundle.
--- FOR SHARE does, so an is_bundle flip and a new reference cannot both pass their checks
--- concurrently: whoever runs second waits, then sees the committed row.
+-- Step 8: Bundle rules. The component, inventory, and document line checks lock the
+-- referenced sku rows FOR SHARE. A foreign key check only takes FOR KEY SHARE, which does
+-- not block an UPDATE of is_bundle. FOR SHARE does, so an is_bundle flip and a new
+-- reference cannot both pass their checks concurrently: whoever runs second waits, then
+-- sees the committed row (READ COMMITTED) or fails with 40001 (snapshot isolation).
+-- stock_reservation has no sku check: its inventory foreign key covers it (Step 4).
 -- A sku that is not visible (another tenant under RLS) is skipped here on purpose. Such
 -- a statement is rejected by RLS WITH CHECK or by the composite foreign key instead.
 CREATE FUNCTION sku_bundle_component_check()
@@ -444,7 +458,7 @@ BEGIN
 END
 $fn$;
 
--- Shared by inventory, stock_reservation, and stock_document_line.
+-- Shared by inventory and stock_document_line.
 CREATE FUNCTION sku_require_stockable()
 RETURNS trigger
 LANGUAGE plpgsql
@@ -475,12 +489,27 @@ $fn$;
 
 -- The other direction: is_bundle changes on a sku that is already referenced.
 -- The UPDATE holds the row lock on the sku, so writers of new references wait on it.
+-- The EXISTS checks must see rows committed after this transaction started, which only
+-- READ COMMITTED gives (a fresh snapshot per statement). Under REPEATABLE READ or
+-- SERIALIZABLE a component insert that commits after our snapshot would be invisible
+-- here and both would pass, so the flip is refused outright at those levels.
 CREATE FUNCTION sku_is_bundle_change_check()
 RETURNS trigger
 LANGUAGE plpgsql
 SET search_path = pg_catalog, public
 AS $fn$
+DECLARE
+  v_isolation text := pg_catalog.current_setting('transaction_isolation');
 BEGIN
+  -- Step 0: Only READ COMMITTED sees concurrent commits in the checks below.
+  IF v_isolation <> 'read committed' THEN
+    RAISE EXCEPTION USING
+      ERRCODE = 'check_violation',
+      CONSTRAINT = 'sku_bundle_isolation',
+      MESSAGE = 'READ_COMMITTED_REQUIRED: is_bundle can only change under READ COMMITTED '
+        || '(current: ' || v_isolation || ')';
+  END IF;
+
   IF NEW.is_bundle THEN
     -- Step 1: Becoming a bundle. It must not be a component anywhere.
     IF EXISTS (
@@ -492,10 +521,16 @@ BEGIN
         MESSAGE = 'NESTED_BUNDLE: sku ' || NEW.id || ' is a component of another bundle';
     END IF;
 
-    -- Step 2: It must not hold stock of its own.
-    IF EXISTS (SELECT 1 FROM public.inventory AS i WHERE i.sku_id = NEW.id)
-      OR EXISTS (SELECT 1 FROM public.stock_reservation AS r WHERE r.sku_id = NEW.id)
-      OR EXISTS (SELECT 1 FROM public.stock_document_line AS l WHERE l.sku_id = NEW.id)
+    -- Step 2: It must not hold stock of its own. A reservation or ledger row always has
+    -- an inventory row (foreign key), so checking inventory covers both.
+    IF EXISTS (
+        SELECT 1 FROM public.inventory AS i
+        WHERE i.tenant_id = NEW.tenant_id AND i.sku_id = NEW.id
+      )
+      OR EXISTS (
+        SELECT 1 FROM public.stock_document_line AS l
+        WHERE l.tenant_id = NEW.tenant_id AND l.sku_id = NEW.id
+      )
     THEN
       RAISE EXCEPTION USING
         ERRCODE = 'check_violation',
@@ -535,11 +570,6 @@ CREATE TRIGGER inventory_sku_stockable
   FOR EACH ROW
   EXECUTE FUNCTION sku_require_stockable();
 
-CREATE TRIGGER stock_reservation_sku_stockable
-  BEFORE INSERT OR UPDATE OF sku_id ON stock_reservation
-  FOR EACH ROW
-  EXECUTE FUNCTION sku_require_stockable();
-
 CREATE TRIGGER stock_document_line_sku_stockable
   BEFORE INSERT OR UPDATE OF sku_id ON stock_document_line
   FOR EACH ROW
@@ -569,6 +599,9 @@ CREATE TRIGGER inventory_ledger_append_only_truncate
 -- Step 10: Stock document immutability. Allowed status moves: DRAFT -> POSTED and
 -- POSTED -> VOID. A POSTED header may only change status (and updated_at). A VOID
 -- header is frozen. Only DRAFT documents may be deleted.
+-- Posting is READ COMMITTED only. A line writer holds the document FOR SHARE but does not
+-- modify it, so under a snapshot level the post would succeed without seeing a line that
+-- committed after its snapshot. T08A should lock the document FOR UPDATE, then read lines.
 CREATE FUNCTION stock_document_guard()
 RETURNS trigger
 LANGUAGE plpgsql
@@ -598,7 +631,18 @@ BEGIN
         || ' is not allowed';
   END IF;
 
-  -- Step 3: Past DRAFT, nothing but status and updated_at may change. Comparing the
+  -- Step 3: A post must see every committed line, which needs a fresh snapshot.
+  IF OLD.status = 'DRAFT' AND NEW.status = 'POSTED'
+    AND pg_catalog.current_setting('transaction_isolation') <> 'read committed'
+  THEN
+    RAISE EXCEPTION USING
+      ERRCODE = 'check_violation',
+      CONSTRAINT = 'stock_document_isolation',
+      MESSAGE = 'READ_COMMITTED_REQUIRED: a stock document can only be posted under READ '
+        || 'COMMITTED (current: ' || pg_catalog.current_setting('transaction_isolation') || ')';
+  END IF;
+
+  -- Step 4: Past DRAFT, nothing but status and updated_at may change. Comparing the
   -- whole row as jsonb also covers columns added by later migrations.
   IF OLD.status <> 'DRAFT'
     AND (pg_catalog.to_jsonb(NEW) - 'status' - 'updated_at')
@@ -694,6 +738,6 @@ COMMENT ON TABLE inventory IS
 COMMENT ON TABLE inventory_ledger IS
   'Append-only. UPDATE, DELETE, and TRUNCATE are rejected by trigger.';
 COMMENT ON TABLE stock_reservation IS
-  'One row per component SKU. At most one ACTIVE row per (tenant, owner_type, owner_ref, sku).';
+  'One row per component SKU. At most one ACTIVE row per (tenant, owner_type, owner_ref, sku). Requires an inventory row (FK), so bundles cannot be reserved.';
 COMMENT ON TABLE stock_document IS
   'DRAFT -> POSTED -> VOID. Immutable after DRAFT except the status move (trigger).';

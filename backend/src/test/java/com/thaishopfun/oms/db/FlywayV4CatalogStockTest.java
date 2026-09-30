@@ -471,7 +471,7 @@ class FlywayV4CatalogStockTest {
       assertSqlState(
           app,
           "23505",
-          "inventory_sku_warehouse_key",
+          "inventory_tenant_sku_warehouse_key",
           () -> insertInventory(app, UUID.randomUUID(), a.tenant(), a.sku(), a.warehouse()));
 
       // Step 3: A ledger reason outside the 11 values is rejected.
@@ -544,10 +544,11 @@ class FlywayV4CatalogStockTest {
           "BUNDLE_NOT_STOCKABLE",
           "sku_bundle_stock",
           () -> insertInventory(app, UUID.randomUUID(), a.tenant(), a.bundle(), a.warehouse()));
-      assertBundleError(
+      // Change: a reservation needs an inventory row (FK). Bundles never have one.
+      assertSqlState(
           app,
-          "BUNDLE_NOT_STOCKABLE",
-          "sku_bundle_stock",
+          "23503",
+          "stock_reservation_inventory_fkey",
           () ->
               insertReservation(
                   app, UUID.randomUUID(), a.tenant(), "order-x", a.bundle(), a.warehouse()));
@@ -666,6 +667,8 @@ class FlywayV4CatalogStockTest {
                   app, UUID.randomUUID(), a.tenant(), "checkout-1", a.sku(), a.warehouse()));
 
       // Step 2: Another SKU for the same owner is fine. So is a new row once the first is RELEASED.
+      // Change: the other SKU needs its own inventory row first.
+      insertInventory(app, UUID.randomUUID(), a.tenant(), a.spareSku(), a.warehouse());
       insertReservation(
           app, UUID.randomUUID(), a.tenant(), "checkout-1", a.spareSku(), a.warehouse());
       assertThat(
@@ -834,6 +837,121 @@ class FlywayV4CatalogStockTest {
       assertThat(update(app, "DELETE FROM stock_document_line WHERE id = ?", draftLine))
           .isEqualTo(1);
       assertThat(update(app, "DELETE FROM stock_document WHERE id = ?", draft)).isEqualTo(1);
+      app.rollback();
+    }
+  }
+
+  @Test
+  void reservationRequiresInventoryAndDoesNotLockSku() throws SQLException {
+    Graph a;
+    UUID other = UUID.randomUUID();
+    try (Connection admin = openAdmin()) {
+      a = seed(admin);
+      insertSku(admin, other, a.tenant(), a.product(), false);
+      insertInventory(admin, UUID.randomUUID(), a.tenant(), other, a.warehouse());
+    }
+
+    try (Connection left = openApp();
+        Connection right = openApp()) {
+      left.setAutoCommit(false);
+      right.setAutoCommit(false);
+
+      // Step 1: A reservation without an inventory row fails the foreign key.
+      setTenant(left, a.tenant());
+      assertSqlState(
+          left,
+          "23503",
+          "stock_reservation_inventory_fkey",
+          () ->
+              insertReservation(
+                  left, UUID.randomUUID(), a.tenant(), "order-y", a.spareSku(), a.warehouse()));
+
+      // Step 2: Open reservations on two SKUs (low id first) do not hold sku row locks.
+      // A catalog rename in the opposite order runs without waiting, so the two cannot
+      // deadlock. lock_timeout turns any wait into 55P03.
+      List<UUID> skus = new ArrayList<>(List.of(a.sku(), other));
+      skus.sort(null);
+      for (UUID sku : skus) {
+        insertReservation(left, UUID.randomUUID(), a.tenant(), "order-z", sku, a.warehouse());
+      }
+      setTenant(right, a.tenant());
+      lockTimeout(right);
+      for (UUID sku : List.of(skus.get(1), skus.get(0))) {
+        assertThat(update(right, "UPDATE sku SET name = 'Renamed' WHERE id = ?", sku)).isEqualTo(1);
+      }
+      right.commit();
+      left.commit();
+    }
+
+    // Step 3: A SKU with a reservation (and so an inventory row) still cannot become a bundle.
+    try (Connection app = openApp()) {
+      app.setAutoCommit(false);
+      setTenant(app, a.tenant());
+      assertBundleError(
+          app,
+          "BUNDLE_NOT_STOCKABLE",
+          "sku_bundle_stock",
+          () -> update(app, "UPDATE sku SET is_bundle = true WHERE id = ?", other));
+      app.rollback();
+    }
+  }
+
+  @Test
+  void bundleFlipAndPostRequireReadCommitted() throws SQLException {
+    Graph a;
+    UUID plain = UUID.randomUUID();
+    try (Connection admin = openAdmin()) {
+      a = seed(admin);
+      insertSku(admin, plain, a.tenant(), a.product(), false);
+    }
+
+    try (Connection app = openApp()) {
+      app.setAutoCommit(false);
+      for (int level :
+          List.of(Connection.TRANSACTION_REPEATABLE_READ, Connection.TRANSACTION_SERIALIZABLE)) {
+        // Step 1: At a snapshot level the flip is refused, even for an unreferenced SKU.
+        app.setTransactionIsolation(level);
+        setTenant(app, a.tenant());
+        PSQLException flip =
+            assertSqlState(
+                app,
+                "23514",
+                "READ_COMMITTED_REQUIRED",
+                () -> update(app, "UPDATE sku SET is_bundle = true WHERE id = ?", plain),
+                "flip");
+        assertThat(flip.getServerErrorMessage().getConstraint()).isEqualTo("sku_bundle_isolation");
+
+        // Step 2: Posting is refused too. Other edits are unaffected by the level.
+        PSQLException post =
+            assertSqlState(
+                app,
+                "23514",
+                "READ_COMMITTED_REQUIRED",
+                () ->
+                    update(
+                        app,
+                        "UPDATE stock_document SET status = 'POSTED', posted_at = now() "
+                            + "WHERE id = ?",
+                        a.document()),
+                "post");
+        assertThat(post.getServerErrorMessage().getConstraint())
+            .isEqualTo("stock_document_isolation");
+        assertThat(update(app, "UPDATE sku SET name = 'Renamed' WHERE id = ?", plain)).isEqualTo(1);
+        assertThat(update(app, "UPDATE stock_document SET note = 'n' WHERE id = ?", a.document()))
+            .isEqualTo(1);
+        app.rollback();
+      }
+
+      // Step 3: Back at READ COMMITTED both work.
+      app.setTransactionIsolation(Connection.TRANSACTION_READ_COMMITTED);
+      setTenant(app, a.tenant());
+      assertThat(update(app, "UPDATE sku SET is_bundle = true WHERE id = ?", plain)).isEqualTo(1);
+      assertThat(
+              update(
+                  app,
+                  "UPDATE stock_document SET status = 'POSTED', posted_at = now() WHERE id = ?",
+                  a.document()))
+          .isEqualTo(1);
       app.rollback();
     }
   }
