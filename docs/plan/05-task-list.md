@@ -18,6 +18,7 @@ Versions are taken in merge order as the next free number. One migration per PR.
 | V1 | T02 foundation + FORCE RLS |
 | V2 | T03 JIT provision |
 | V3 | T11 inbox dedup `(tenant_id, source, event_id)`, `aggregate_version`, `payload_sha256` |
+| V4 | T06 catalog, warehouse, stock (FORCE RLS) |
 
 ## สรุปจำนวน
 | Phase | Cursor | Codex | รวม |
@@ -140,7 +141,7 @@ flowchart LR
 - AC: 0 event หาย · duplicate delivery > 0 ได้ แต่ผลลัพธ์ปลายทางเหมือนส่งครั้งเดียว · รายงาน duplicate rate
 
 ## Phase 1: Catalog + Inventory (สัปดาห์ 4–6)
-**T06 · Codex · deps: T02** Flyway V3
+**T06 · Codex · deps: T02** Flyway (next free version)
 - `channel_account` (มี `mode`, `stock_sync_paused`), `product`, `sku`, `sku_bundle_component` (+ trigger ห้าม nested/circular), `channel_listing` (`stock_control`, `safety_buffer`), `warehouse`, `inventory`, `inventory_ledger`, `stock_reservation` (owner_type/owner_ref/status/expires_at), `stock_document`, `stock_document_line` + FORCE RLS + index
 - AC: CHECK `reserved <= on_hand` ทำงาน · ใส่ bundle เป็น component → error · UNIQUE reservation ACTIVE ต่อ owner+SKU · RLS test ทุกตารางใหม่
 
@@ -168,7 +169,7 @@ flowchart LR
   - 10,000 operation สุ่ม → InvariantChecker ผ่านทุกครั้ง
 
 ## Phase 2: TSF Order Integration (สัปดาห์ 7–10)
-**T10 · Codex · deps: T06** Flyway V4
+**T10 · Codex · deps: T06** Flyway (next free version)
 - `sales_order` (order/payment/fulfillment status + hold_reason), `order_recipient` (column เข้ารหัส), `order_line`, `order_status_history` (dimension), `shipment`, `return_request`, `return_line`, `refund`, `payment_status_snapshot`, `sync_cursor`, `shadow_diff`, `reconciliation_issue`
 - AC: UNIQUE `(channel_account_id, external_order_id)` · CHECK ค่า enum ทุก status · ผลรวม return qty ต่อ line ≤ qty (trigger) · FORCE RLS ครบ
 
