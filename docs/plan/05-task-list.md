@@ -21,6 +21,7 @@ Versions are taken in merge order as the next free number. One migration per PR.
 | V4 | T06 catalog, warehouse, stock (FORCE RLS) |
 | V5 | unused: reserved for T07, which shipped without a migration; never add V5 (Flyway outOfOrder is off) |
 | V6 | T08 expired-reservation tenant claim function |
+| V7 | T10 order-side schema |
 
 ## สรุปจำนวน
 | Phase | Cursor | Codex | รวม |
