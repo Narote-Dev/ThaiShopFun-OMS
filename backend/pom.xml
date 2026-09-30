@@ -42,10 +42,11 @@
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-security-oauth2-resource-server</artifactId>
     </dependency>
+    <!-- Change: compile scope so T07 can map errors by SQLSTATE and constraint name
+         (PSQLException.getServerErrorMessage), never by message text. -->
     <dependency>
       <groupId>org.postgresql</groupId>
       <artifactId>postgresql</artifactId>
-      <scope>runtime</scope>
     </dependency>
     <!-- Change: Flyway V1 runs on startup. The PostgreSQL module is separate in Flyway 10+. -->
     <dependency>
