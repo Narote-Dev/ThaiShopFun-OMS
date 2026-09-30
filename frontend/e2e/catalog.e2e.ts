@@ -15,7 +15,7 @@ test('owner creates a SKU, finds it by search, and sees a CSV row error', async 
   await page.getByRole('link', { name: 'New SKU' }).click()
 
   // Step 2: Create the SKU with a new product in the same call.
-  await page.getByLabel('Product').selectOption({ label: 'New product…' })
+  await page.getByRole('combobox').selectOption({ label: 'New product…' })
   await page.getByLabel('New product name').fill('E2E Product')
   await page.getByLabel('SKU code').fill(code)
   await page.getByLabel('Name', { exact: true }).fill('E2E red mug')
