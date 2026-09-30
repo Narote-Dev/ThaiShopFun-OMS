@@ -477,6 +477,47 @@ class ReservationEngineTest extends StockTestBase {
     assertThat(as(shop, () -> availability.channelExposed(bigBuffer))).isZero();
     assertThat(as(shop, () -> availability.channelExposed(bundleListing))).isEqualTo(2);
     assertThat(as(shop, () -> availability.channelExposed(unmapped))).isZero();
+    assertError(
+        () -> as(shop, () -> availability.channelExposed(UUID.randomUUID())),
+        StockError.UNKNOWN_LISTING);
+  }
+
+  @Test
+  void joinedCallerGetsOneEngineWritePerTransaction() {
+    Shop shop = fixture.shop("ACTIVE");
+    UUID a = fixture.sku(shop, 10);
+    TransactionTemplate caller = new TransactionTemplate(transactions);
+    TenantContext.set(shop.tenant(), null);
+    try {
+      // Step 1: The first write joins; the second in the same transaction is refused.
+      assertThatThrownBy(
+              () ->
+                  caller.executeWithoutResult(
+                      status -> {
+                        assertThat(
+                                engine
+                                    .reserve(checkout(), List.of(ReserveItem.of(a, 1)), key())
+                                    .reserved())
+                            .isTrue();
+                        engine.reserve(checkout(), List.of(ReserveItem.of(a, 1)), key());
+                      }))
+          .isInstanceOf(IllegalStateException.class)
+          .hasMessageContaining("only one engine write per caller transaction");
+
+      // Step 2: The refusal rolled the caller back. A new caller transaction gets its own write,
+      // and reads do not count against it.
+      caller.executeWithoutResult(
+          status -> {
+            assertThat(availability.available(a, null)).isEqualTo(10);
+            assertThat(engine.reserve(checkout(), List.of(ReserveItem.of(a, 2)), key()).reserved())
+                .isTrue();
+          });
+    } finally {
+      TenantContext.clear();
+    }
+    assertThat(fixture.reserved(shop, a)).isEqualTo(2);
+    assertThat(fixture.reservations(shop, "ACTIVE")).isEqualTo(1);
+    fixture.assertInvariants(shop);
   }
 
   private List<List<Integer>> ledgerDeltas(Shop shop, String reason) {

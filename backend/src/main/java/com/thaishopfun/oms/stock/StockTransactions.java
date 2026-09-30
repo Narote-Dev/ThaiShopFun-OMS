@@ -3,10 +3,12 @@ package com.thaishopfun.oms.stock;
 import com.thaishopfun.oms.tenant.TenantContext;
 import java.util.UUID;
 import java.util.function.Supplier;
+import javax.sql.DataSource;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -19,6 +21,12 @@ import org.springframework.transaction.support.TransactionTemplate;
  * caller can re-run its own transaction. Either way the first statement asserts READ COMMITTED and
  * that {@code app.tenant_id} is the current {@link TenantContext} tenant, and fails fast otherwise.
  * The conditional-UPDATE design needs a fresh snapshot per statement.
+ *
+ * <p>Joined callers: at most one engine write per caller transaction. A second write in the same
+ * transaction would lock inventory again after locks it already holds, outside the id order. The
+ * engine cannot retry a transaction it does not own, so the caller must retry its whole transaction
+ * on {@code 40P01} (deadlock_detected) and {@code 40001} (serialization_failure), and should take
+ * no stock row locks before calling the engine.
  */
 @Component
 class StockTransactions {
@@ -28,6 +36,7 @@ class StockTransactions {
   private static final int TRANSACTION_TIMEOUT_SECONDS = 10;
 
   private final JdbcTemplate jdbc;
+  private final DataSource dataSource;
   private final StockRetry retry;
   private final StockProperties properties;
   private final TransactionTemplate writeTx;
@@ -39,6 +48,7 @@ class StockTransactions {
       StockRetry retry,
       StockProperties properties) {
     this.jdbc = jdbc;
+    this.dataSource = jdbc.getDataSource();
     this.retry = retry;
     this.properties = properties;
     this.writeTx = new TransactionTemplate(transactions);
@@ -50,12 +60,19 @@ class StockTransactions {
     this.readTx.setTimeout(TRANSACTION_TIMEOUT_SECONDS);
   }
 
-  /** A write. Retried whole on deadlock or serialization failure when the engine owns the tx. */
+  /**
+   * A write. Retried whole on deadlock or serialization failure when the engine owns the tx. Inside
+   * a caller's transaction it runs once, without retry: the caller must retry its whole transaction
+   * on {@code 40P01} and {@code 40001}. A second write in the same caller transaction throws {@link
+   * IllegalStateException}.
+   */
   <T> T write(String operation, Supplier<T> work) {
     // Step 1: Tenant first. No context means no transaction at all.
     UUID tenantId = TenantContext.requireTenantId();
     if (TransactionSynchronizationManager.isActualTransactionActive()) {
-      // Step 2: Join the caller. Its isolation and tenant are checked, its settings untouched.
+      // Step 2: Join the caller, once. Its isolation and tenant are checked, settings untouched.
+      // Change: one engine write per caller transaction, so the lock order cannot be broken.
+      claimJoinedWrite(operation);
       prepare(tenantId, false);
       return work.get();
     }
@@ -82,6 +99,52 @@ class StockTransactions {
           prepare(tenantId, false);
           return work.get();
         });
+  }
+
+  /**
+   * Marks the caller's transaction as having used its one engine write. The flag is keyed by the
+   * transaction's connection holder, so a REQUIRES_NEW transaction inside it gets its own, and it
+   * is unbound when the transaction completes.
+   */
+  private void claimJoinedWrite(String operation) {
+    // Step 1: A joined write needs synchronization to clear the flag at completion.
+    if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+      throw new IllegalStateException(
+          "stock " + operation + " joined a transaction without synchronization");
+    }
+    Object holder = TransactionSynchronizationManager.getResource(dataSource);
+    JoinedWriteKey key = new JoinedWriteKey(holder == null ? dataSource : holder);
+    // Step 2: The second write in the same caller transaction is refused.
+    if (TransactionSynchronizationManager.hasResource(key)) {
+      throw new IllegalStateException(
+          "stock "
+              + operation
+              + ": only one engine write per caller transaction (already used by "
+              + TransactionSynchronizationManager.getResource(key)
+              + ")");
+    }
+    TransactionSynchronizationManager.bindResource(key, operation);
+    TransactionSynchronizationManager.registerSynchronization(
+        new TransactionSynchronization() {
+          @Override
+          public void afterCompletion(int status) {
+            TransactionSynchronizationManager.unbindResourceIfPossible(key);
+          }
+        });
+  }
+
+  /** Identity of the caller transaction's resource holder. Records compare by component. */
+  private record JoinedWriteKey(Object holder) {
+
+    @Override
+    public boolean equals(Object other) {
+      return other instanceof JoinedWriteKey that && that.holder == holder;
+    }
+
+    @Override
+    public int hashCode() {
+      return System.identityHashCode(holder);
+    }
   }
 
   private void prepare(UUID tenantId, boolean owned) {

@@ -59,8 +59,9 @@ public class StockAvailability {
           // Step 1: Unknown or unmapped listing exposes nothing.
           ListingRow listing = repository.listing(listingId);
           if (listing == null) {
+            // Change: a listing is not a SKU, so it gets its own code.
             throw new StockOperationException(
-                StockError.UNKNOWN_SKU, "listing " + listingId + " does not exist");
+                StockError.UNKNOWN_LISTING, "listing " + listingId + " does not exist");
           }
           if (listing.skuId() == null) {
             return 0;
