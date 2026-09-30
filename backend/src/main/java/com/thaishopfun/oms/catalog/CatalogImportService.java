@@ -435,6 +435,11 @@ public class CatalogImportService {
     // Step 7: Component lists. Replace only the ones listed in the file that differ from the
     // database. An absent components column keeps the stored list.
     List<UUID> clearBundles = new ArrayList<>();
+    List<UUID> touchBundles = new ArrayList<>();
+    Set<UUID> updatedIds = new HashSet<>();
+    for (SkuWrite write : updates) {
+      updatedIds.add(write.id());
+    }
     List<Object[]> componentRows = new ArrayList<>();
     int replaced = 0;
     for (Row row : parsed.rows()) {
@@ -451,6 +456,10 @@ public class CatalogImportService {
       replaced++;
       if (!current.isEmpty()) {
         clearBundles.add(bundleId);
+      }
+      // Change: a component-only change still bumps the bundle's updated_at, as the REST path does.
+      if (db.containsKey(row.code()) && !updatedIds.contains(bundleId)) {
+        touchBundles.add(bundleId);
       }
       wanted.forEach(
           (componentId, qty) ->
@@ -502,6 +511,13 @@ public class CatalogImportService {
           "INSERT INTO sku_bundle_component (tenant_id, bundle_sku_id, component_sku_id, qty) "
               + "VALUES (?, ?, ?, ?)",
           componentRows);
+    }
+    if (!touchBundles.isEmpty()) {
+      touchBundles.sort(null);
+      UUID[] array = touchBundles.toArray(UUID[]::new);
+      jdbc.update(
+          "UPDATE sku SET updated_at = now() WHERE id = ANY (?)",
+          ps -> ps.setArray(1, ps.getConnection().createArrayOf("uuid", array)));
     }
 
     // Step 9: Per-entity audit rows plus one summary row, all in this transaction.

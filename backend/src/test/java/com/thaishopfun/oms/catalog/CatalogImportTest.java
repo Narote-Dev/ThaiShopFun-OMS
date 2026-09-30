@@ -130,6 +130,13 @@ class CatalogImportTest extends CatalogIntegrationTest {
             "product_name,sku_code,sku_name,components\nBundles,BND-0000,Bundle 0,SKU-0001:3\n");
     assertThat(relinked.status()).as(relinked.raw()).isEqualTo(200);
     assertThat(relinked.body().path("bundles_replaced").asInt()).isEqualTo(1);
+    assertThat(relinked.body().path("skus_updated").asInt()).isZero();
+    assertThat(
+            count(
+                "SELECT count(*) FROM sku WHERE tenant_id = ? AND sku_code = 'BND-0000' "
+                    + "AND updated_at > created_at",
+                shop.tenantId()))
+        .isEqualTo(1);
     CatalogHttp.Result notBundle =
         http.upload(
             "/api/v1/catalog/import",
