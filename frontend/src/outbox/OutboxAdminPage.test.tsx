@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { configureApi, resetApiForTests } from '../api/client'
 import OutboxAdminPage from './OutboxAdminPage'
 
 const event = {
@@ -13,51 +14,100 @@ const event = {
 
 describe('OutboxAdminPage', () => {
   beforeEach(() => {
-    vi.restoreAllMocks()
+    resetApiForTests()
+    configureApi({ getAccessToken: () => 'memory-token' })
   })
 
   afterEach(() => {
     cleanup()
+    resetApiForTests()
+    vi.restoreAllMocks()
   })
 
   it('loads DEAD events and retries one', async () => {
-    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+    const fetchImpl = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const headers = new Headers(init?.headers)
+      expect(headers.get('Authorization')).toBe('Bearer memory-token')
       if (init?.method === 'POST') {
         return new Response(JSON.stringify({ id: event.id, status: 'PENDING', attempts: 0 }), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         })
       }
-      const calls = fetchMock.mock.calls.filter((call) => call[1]?.method !== 'POST')
+      const calls = fetchImpl.mock.calls.filter((call) => call[1]?.method !== 'POST')
       const body = calls.length > 1 ? { events: [] } : { events: [event] }
       return new Response(JSON.stringify(body), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       })
     })
-    vi.stubGlobal('fetch', fetchMock)
+    configureApi({ getAccessToken: () => 'memory-token', fetchImpl })
 
     render(<OutboxAdminPage />)
-    expect(screen.getByRole('button', { name: 'Load' })).toBeDisabled()
-    fireEvent.change(screen.getByLabelText('Access token'), { target: { value: 'memory-token' } })
     fireEvent.click(screen.getByRole('button', { name: 'Load' }))
     expect(await screen.findByText(/stock.updated/)).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
     expect(await screen.findByText('No DEAD events.')).toBeInTheDocument()
-    expect(fetchMock).toHaveBeenCalledWith(
+    expect(fetchImpl).toHaveBeenCalledWith(
       '/api/v1/outbox/11111111-1111-7111-8111-111111111111/retry',
       expect.objectContaining({ method: 'POST' }),
     )
   })
 
   it('shows the load error', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => new Response('no', { status: 401 })),
-    )
+    configureApi({
+      getAccessToken: () => 'bad',
+      refreshAccessToken: async () => {
+        throw new Error('refresh failed')
+      },
+      fetchImpl: vi.fn(async () =>
+        new Response(JSON.stringify({ error: 'UNAUTHORIZED', message: 'Invalid or expired token' }), {
+          status: 401,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      ),
+    })
     render(<OutboxAdminPage />)
-    fireEvent.change(screen.getByLabelText('Access token'), { target: { value: 'bad' } })
     fireEvent.click(screen.getByRole('button', { name: 'Load' }))
-    expect(await screen.findByRole('alert')).toHaveTextContent('Load failed (401)')
+    expect(await screen.findByRole('alert')).toHaveTextContent('Invalid or expired token')
+  })
+
+  it('disables retry while the shop is in grace', async () => {
+    configureApi({
+      getAccessToken: () => 'memory-token',
+      fetchImpl: vi.fn(async () =>
+        new Response(JSON.stringify({ events: [event] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      ),
+    })
+    render(<OutboxAdminPage readOnly />)
+    fireEvent.click(screen.getByRole('button', { name: 'Load' }))
+    expect(await screen.findByRole('button', { name: 'Retry' })).toBeDisabled()
+  })
+
+  it('shows a read-only message when a write is rejected with ENTITLEMENT_GRACE', async () => {
+    configureApi({
+      getAccessToken: () => 'memory-token',
+      fetchImpl: vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.method === 'POST') {
+          return new Response(
+            JSON.stringify({ error: 'ENTITLEMENT_GRACE', message: 'Membership is in a grace period' }),
+            { status: 403, headers: { 'Content-Type': 'application/json' } },
+          )
+        }
+        return new Response(JSON.stringify({ events: [event] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }),
+    })
+    render(<OutboxAdminPage />)
+    fireEvent.click(screen.getByRole('button', { name: 'Load' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Retry' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'This shop is read-only until membership is renewed.',
+    )
   })
 })

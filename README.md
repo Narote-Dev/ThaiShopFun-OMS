@@ -19,7 +19,7 @@ cd frontend && npm ci && npm run dev
 - Flyway's login defaults to `FLYWAY_USER` / `FLYWAY_PASSWORD` (`oms` / `oms`). A `postgresql://` `DATABASE_URL` (Railway) keeps Flyway on that URL's user.
 - API: <http://localhost:8080> — `GET /actuator/health` returns `{"status":"UP"}` with no token. `GET /api/v1/me` needs a user JWT (`aud=oms`). `GET /internal/v1/health` needs a service JWT (`aud=oms-internal`).
 - Mock TSF: <http://localhost:8090> — IdP, section 4.7 REST, the OMS webhook receiver, and the control API. `GET /actuator/health` needs no token. The `local` profile points OMS at this process (`issuer`, JWKS, inbox HMAC, outbox URL and secret).
-- UI: <http://localhost:5173>
+- UI: <http://localhost:5173> — sign in with ThaiShopFun (the mock picker). The public client is `oms-web` at `http://localhost:8090/tsf-idp` (`VITE_OIDC_AUTHORITY`, `VITE_OIDC_CLIENT_ID`, `VITE_OIDC_REDIRECT_URI` in `frontend/.env.example`). Tokens stay in memory. A reload sends the browser through `/authorize` again. The mock has no `revocation_endpoint` or `end_session_endpoint`, so log out clears memory and returns to the signed-out screen. Do not use the Vite `/tsf-idp` proxy as the OIDC authority.
 
 Restarting `mock-tsf` generates a new RSA key. OMS caches that JWKS for about five minutes, so a token from the new process can 401 until OMS is restarted.
 
@@ -39,7 +39,7 @@ curl -s -X POST http://localhost:8090/control/user-token \
 
 `GET /tsf-idp/authorize` with `login_hint` redirects with a PKCE code. Without `login_hint` it returns the user picker. The public client id is `oms-web` (no secret). `POST /tsf-idp/token` accepts `authorization_code`, `refresh_token`, and `client_credentials`. An authorization-code or refresh response includes a minimal `id_token` (`aud=oms-web`, `typ=JWT`) and an API access token (`aud=oms`, header `typ=at+jwt`). OMS accepts access-token `typ` `at+jwt` (preferred), `JWT`, or a missing `typ` (`oms.security.accepted-token-types`). The `local` and `test` profiles accept only `at+jwt`. An `id_token` used as a bearer is rejected because its audience is `oms-web`, not `oms`. `POST /control/user-token` accepts optional `ent_ver`, `status` (`ACTIVE`, `GRACE`, or `SUSPENDED`), and `expires_at` for that token only. A `membership.changed` event OMS accepts with 202 updates the seed's `ent_ver`, status, and `expires_at`. A 200 duplicate does not.
 
-T04 should call the IdP at `http://localhost:8090/tsf-idp` with `client_id=oms-web`. The mock allows CORS preflight from `http://localhost:5173` and `http://127.0.0.1:5173` on `/tsf-idp/**` (`MOCK_CORS_ORIGINS` overrides that list). Vite also proxies `/tsf-idp` to the mock for same-origin debugging. Do not use that proxy as the OIDC authority: discovery `issuer` is `http://localhost:8090/tsf-idp`, and oidc-client-ts rejects a mismatch.
+The web app calls the IdP at `http://localhost:8090/tsf-idp` with `client_id=oms-web`. The mock allows CORS preflight from `http://localhost:5173` and `http://127.0.0.1:5173` on `/tsf-idp/**` (`MOCK_CORS_ORIGINS` overrides that list). Vite also proxies `/tsf-idp` to the mock for same-origin debugging. Do not use that proxy as the OIDC authority: discovery `issuer` is `http://localhost:8090/tsf-idp`, and oidc-client-ts rejects a mismatch. Discovery does not advertise `revocation_endpoint` or `end_session_endpoint`.
 
 | Call | Body |
 |---|---|
@@ -63,19 +63,19 @@ The backend waits up to 60 seconds for Postgres to accept connections. Flyway V1
 | Path | What it is |
 |---|---|
 | `backend/` | Spring Boot 4.1, Java 17, Maven wrapper. Actuator health. JWT resource server. Flyway V1, V2, and V3. Spotless on `verify`. |
-| `frontend/` | Vite, React, TypeScript. Vitest and ESLint. |
+| `frontend/` | Vite, React, TypeScript. Vitest, Playwright, and ESLint. |
 | `mock-tsf/` | Local ThaiShopFun. Spring Boot 4.1, Java 17. IdP, section 4.7, checkout client, event sender, OMS webhook receiver. |
 | `contracts/` | OpenAPI 3.1 and JSON Schema for sections 4.3–4.7. Stand-in for `tsf-oms-contracts` until that repo exists. |
 | `docker-compose.yml` | Postgres 16 and mock-tsf for local development. |
 | `docs/plan/` | Plan v2 (process map, scope, data model, API contract, task list, NFR). |
-| `.github/workflows/ci.yml` | Backend `./mvnw verify`, frontend `npm ci && npm run lint && npm run build && npm test`, mock-tsf `./mvnw verify`, and contract example validation. |
+| `.github/workflows/ci.yml` | Backend `./mvnw verify`, frontend `npm ci && npm run lint && npm run build && npm test`, Playwright SSO e2e, mock-tsf `./mvnw verify`, and contract example validation. |
 | `.railway/railway.ts` | Staging infrastructure. Dockerfiles are in each service directory. |
 
 Flyway V1 is `backend/src/main/resources/db/migration/V1__foundation_rls.sql`. It creates `tenant`, `app_user`, `tenant_membership`, `audit_log`, `idempotency_key`, `inbox_event`, and `outbox_event`, plus `oms_migrator`, `oms_app` (`NOBYPASSRLS`), and `oms_maint`. Tenant tables use `ENABLE` and `FORCE ROW LEVEL SECURITY`. V2 is `V2__jit_provision.sql`: `SECURITY DEFINER` functions `upsert_app_user`, `provision_tenant`, `provision_membership`, and read-only `lookup_login`, owned by `oms_maint`, executable only by `oms_app`. V3 is `V3__inbox_tenant_dedup.sql`: inbox dedup is `UNIQUE (tenant_id, source, event_id)`, with `aggregate_version` and `payload_sha256`. Versions are taken in merge order as the next free number. One migration per PR. Do not edit a version that has already been merged.
 
 `POST /internal/v1/events` needs a service JWT and `X-Signature` (`t=<unix>,v1=<hex hmac-sha256>` over `t + "." + raw body`, skew at most 300 seconds). `OMS_INBOX_HMAC_SECRETS` is comma-separated, current key first, and has no default. The dev value is only in the `local` profile (`application-local.yml`). The poller runs unless `OMS_INBOX_WORKER_ENABLED=false`. An unknown shop returns `503` with `Retry-After: 60`. An active `membership.changed` for that shop creates the tenant.
 
-The outbox publisher polls `outbox_event` with `claim_outbox_batch` (at-least-once, lease, backoff). It stays idle until both `TSF_OMS_EVENTS_URL` (absolute `http` or `https`) and `OMS_OUTBOX_WEBHOOK_SECRET` (at least 32 bytes) are set. OWNER and ADMIN retry a DEAD row with `GET /api/v1/outbox` (`limit` default 50, max 100, plus `offset`) and `POST /api/v1/outbox/{id}/retry`. The screen is `#/admin/outbox` (token stays in memory). This project is localhost-only: that page reaches the API through the Vite dev proxy (`/api` → `127.0.0.1:8080`). No nginx change is required.
+The outbox publisher polls `outbox_event` with `claim_outbox_batch` (at-least-once, lease, backoff). It stays idle until both `TSF_OMS_EVENTS_URL` (absolute `http` or `https`) and `OMS_OUTBOX_WEBHOOK_SECRET` (at least 32 bytes) are set. OWNER and ADMIN retry a DEAD row with `GET /api/v1/outbox` (`limit` default 50, max 100, plus `offset`) and `POST /api/v1/outbox/{id}/retry`. The screen is `#/admin/outbox`, behind the SSO guard. The access token stays in memory and is sent by the shared API client. This project is localhost-only: that page reaches the API through the Vite dev proxy (`/api` → `127.0.0.1:8080`). No nginx change is required.
 
 The process refuses to start if the runtime role is superuser or has `BYPASSRLS`, unless `oms.security.allow-rls-bypass=true` is set explicitly. That flag is off by default and is not set for local Docker. If `DATABASE_USERNAME` / `DATABASE_PASSWORD` are set, they win over the user embedded in a `postgresql://` URL. Flyway still uses that URL user.
 
@@ -94,6 +94,11 @@ GitHub Actions runs on pull requests and on `main`.
 
 - Backend: Java 17. The job first runs `./mvnw -DskipTests package` with no `mock-tsf` artifact installed, then installs `mock-tsf` from the same commit (`-Dspotless.skip=true`; Spotless for that module is the mock-tsf job), then `./mvnw -Pmock-acceptance verify`. Spotless (`google-java-format` 1.28.0) is bound to backend `verify`. The acceptance tests live in `src/mock-acceptance` and are not on the default classpath, so the image build and `spring-boot:run` do not need the mock jar.
 - Frontend: `npm ci && npm run lint && npm run build && npm test`. `npm run lint` is ESLint with `--max-warnings 0`, so a lint violation fails the job. `npm test` is Vitest.
+- Frontend e2e: `npm run test:e2e` in `frontend/`. Playwright starts `docker compose up` (Postgres and mock-tsf), the backend `local` profile, and Vite, then signs in through the mock IdP. Browsers are cached in CI. Run it locally with Java 17, Node 22, and Docker:
+
+  ```bash
+  cd frontend && npm ci && npx playwright install --with-deps chromium && npm run test:e2e
+  ```
 - Mock TSF: `./mvnw verify` in `mock-tsf/`.
 - Contracts: Spectral lints `contracts/openapi/*.yaml` (resolving `$ref`s). `ContractExamplesTest` validates every file in `contracts/examples/` against its schema and checks that each event example filename matches `event_type`.
 
