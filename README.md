@@ -77,6 +77,8 @@ Flyway V1 is `backend/src/main/resources/db/migration/V1__foundation_rls.sql`. I
 
 The outbox publisher polls `outbox_event` with `claim_outbox_batch` (at-least-once, lease, backoff). It stays idle until both `TSF_OMS_EVENTS_URL` (absolute `http` or `https`) and `OMS_OUTBOX_WEBHOOK_SECRET` (at least 32 bytes) are set. OWNER and ADMIN retry a DEAD row with `GET /api/v1/outbox` (`limit` default 50, max 100, plus `offset`) and `POST /api/v1/outbox/{id}/retry`. The screen is `#/admin/outbox`, behind the SSO guard. The access token stays in memory and is sent by the shared API client. This project is localhost-only: that page reaches the API through the Vite dev proxy (`/api` → `127.0.0.1:8080`). No nginx change is required.
 
+Catalog and warehouses (T07): products, SKUs, bundle components, warehouses, and CSV import under `/api/v1`, with the pages `#/catalog/skus`, `#/catalog/products`, `#/catalog/import`, and `#/warehouses`. Endpoints, error codes, the CSV format, and the audit actions are in [`docs/api/catalog.md`](docs/api/catalog.md). No migration: T07 runs on the V4 tables.
+
 The process refuses to start if the runtime role is superuser or has `BYPASSRLS`, unless `oms.security.allow-rls-bypass=true` is set explicitly. That flag is off by default and is not set for local Docker. If `DATABASE_USERNAME` / `DATABASE_PASSWORD` are set, they win over the user embedded in a `postgresql://` URL. Flyway still uses that URL user.
 
 ## Working rules
