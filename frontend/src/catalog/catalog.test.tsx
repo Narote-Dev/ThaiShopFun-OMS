@@ -5,6 +5,7 @@ import BundleEditor from './BundleEditor'
 import ImportPage from './ImportPage'
 import SkuFormPage from './SkuFormPage'
 import SkuListPage, { PAGE_SIZE } from './SkuListPage'
+import { catalogApi } from './api'
 import { stubFetch, sku } from './testFetch'
 
 const products = { items: [{ id: 'p-1', name: 'Mug', status: 'ACTIVE', sku_count: 1 }], total: 1, limit: 200, offset: 0 }
@@ -184,5 +185,24 @@ describe('ImportPage', () => {
   it('has no upload form without write access', () => {
     render(<ImportPage canWrite={false} />)
     expect(screen.queryByLabelText('CSV file')).toBeNull()
+  })
+})
+
+describe('catalogApi.listProducts', () => {
+  it('follows every page past the 200 limit', async () => {
+    const all = Array.from({ length: 250 }, (_, i) => ({ id: `p-${i}`, name: `P ${i}`, status: 'ACTIVE', sku_count: 0 }))
+    const { fetchImpl, calls } = stubFetch(({ url }) => {
+      const params = new URL(url, 'http://x').searchParams
+      const offset = Number(params.get('offset'))
+      return { body: { items: all.slice(offset, offset + 200), total: all.length, limit: 200, offset } }
+    })
+    configureApi({ getAccessToken: () => 't', fetchImpl })
+    const page = await catalogApi.listProducts()
+    expect(page.items).toHaveLength(250)
+    expect(page.items.at(-1)?.id).toBe('p-249')
+    expect(calls.map((c) => c.url)).toEqual([
+      '/api/v1/products?limit=200&offset=0',
+      '/api/v1/products?limit=200&offset=200',
+    ])
   })
 })

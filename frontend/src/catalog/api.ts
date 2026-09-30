@@ -84,7 +84,18 @@ export const catalogApi = {
   deleteSku: (id: string) => apiRequest<void>(`/api/v1/skus/${id}`, { method: 'DELETE' }),
   replaceComponents: (id: string, components: ComponentInput[]) =>
     apiRequest<Sku>(`/api/v1/skus/${id}/components`, { method: 'PUT', ...json(components) }),
-  listProducts: () => apiRequest<Page<Product>>('/api/v1/products?limit=200'),
+  // Change: follow every page (the API caps limit at 200), so no product is left out.
+  listProducts: async (): Promise<Page<Product>> => {
+    const items: Product[] = []
+    let total = 0
+    do {
+      const page = await apiRequest<Page<Product>>(`/api/v1/products?limit=200&offset=${items.length}`)
+      items.push(...page.items)
+      total = page.total
+      if (page.items.length === 0) break
+    } while (items.length < total)
+    return { items, total, limit: items.length, offset: 0 }
+  },
   createProduct: (name: string) =>
     apiRequest<Product>('/api/v1/products', { method: 'POST', ...json({ name }) }),
   updateProduct: (id: string, name: string, status: Product['status']) =>
