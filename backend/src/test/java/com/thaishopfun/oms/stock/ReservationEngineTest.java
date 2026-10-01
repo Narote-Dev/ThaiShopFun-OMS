@@ -245,7 +245,7 @@ class ReservationEngineTest extends StockTestBase {
     clock.advance(Duration.ZERO);
     as(shop, () -> engine.reserve(owner, List.of(ReserveItem.of(sku, 10)), key()));
     clock.advance(Duration.ofMinutes(20));
-    var result =
+    ReserveResult result =
         as(shop, () -> engine.reserve(owner, List.of(ReserveItem.of(sku, 5)), key() + "-new"));
     assertThat(result.reserved()).isTrue();
     assertThat(fixture.reservations(shop, "EXPIRED")).isEqualTo(1);

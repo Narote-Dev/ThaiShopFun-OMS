@@ -70,8 +70,9 @@ class FlywayV9Test {
             admin.prepareStatement(
                 """
                 SELECT pg_get_userbyid(p.proowner) AS owner,
-                       has_function_privilege('PUBLIC', 'public.resolve_reservation_tenant(uuid)', 'EXECUTE') AS public_exec,
-                       has_function_privilege('oms_app', 'public.resolve_reservation_tenant(uuid)', 'EXECUTE') AS app_exec
+                       has_function_privilege('oms_app', p.oid, 'EXECUTE') AS app_exec,
+                       EXISTS (SELECT 1 FROM aclexplode(p.proacl) AS a WHERE a.grantee = 0)
+                         OR p.proacl IS NULL AS public_exec
                 FROM pg_proc AS p
                 JOIN pg_namespace AS n ON n.oid = p.pronamespace
                 WHERE n.nspname = 'public' AND p.proname = 'resolve_reservation_tenant'

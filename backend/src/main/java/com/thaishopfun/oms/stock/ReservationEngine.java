@@ -268,7 +268,7 @@ public class ReservationEngine {
     Set<UUID> needSkuIds = new LinkedHashSet<>();
     needs.keySet().forEach(sw -> needSkuIds.add(sw.skuId()));
     List<ReservationRow> inlineCandidates = new ArrayList<>();
-    inlineCandidates.addAll(repository.activeByOwner(owner));
+    inlineCandidates.addAll(repository.expiredActiveCheckoutByOwner(owner, now));
     inlineCandidates.addAll(
         repository.expiredActiveCheckoutForSkus(owner, needSkuIds, now, MAX_INLINE_EXPIRE));
     Set<SkuWarehouse> inventoryKeys = new LinkedHashSet<>(needs.keySet());
@@ -278,17 +278,15 @@ public class ReservationEngine {
     if (!inlineCandidates.isEmpty()) {
       List<UUID> inlineIds = ids(inlineCandidates);
       List<ReservationRow> lockedInline = repository.lockReservations(inlineIds);
-      List<ReservationRow> toExpire =
-          lockedInline.stream()
-              .filter(ReservationRow::active)
-              .filter(row -> row.expiredAt(now))
-              .toList();
+      // Step 5b: Candidates were chosen with expires_at <= now in SQL; re-check ACTIVE only.
+      List<ReservationRow> toExpire = lockedInline.stream().filter(ReservationRow::active).toList();
       if (!toExpire.isEmpty()) {
         settle(tenantId, toExpire, inventory, Settle.EXPIRE, EXPIRY_ACTOR);
         inlineExpired.increment(toExpire.size());
+        repository.reloadLockedInventory(inventory);
       }
     }
-    if (repository.ownerHasActive(owner)) {
+    if (repository.ownerHasActiveUnexpired(owner, now)) {
       return fail(
           tenantId,
           SCOPE_RESERVE,
