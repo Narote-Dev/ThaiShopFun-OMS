@@ -234,21 +234,6 @@ public abstract class BaseChannelAdapter implements ChannelAdapter {
     throw new ChannelUnavailableException("Channel call failed after retries", last);
   }
 
-  private void sleepRetryAfter(
-      ChannelProperties.TsfChannelSettings settings, ChannelRateLimitedException ex)
-      throws InterruptedException {
-    Duration wait = Duration.ZERO;
-    if (ex.retryAfterSeconds() != null && ex.retryAfterSeconds() > 0) {
-      wait = Duration.ofSeconds(ex.retryAfterSeconds());
-    }
-    if (!wait.isZero() && wait.compareTo(settings.getMaxRetryAfter()) > 0) {
-      throw ex;
-    }
-    if (!wait.isZero()) {
-      sleeper.sleep(wait);
-    }
-  }
-
   private void sleepBackoff(
       ChannelProperties.TsfChannelSettings settings, int attempt, Duration floor)
       throws InterruptedException {
