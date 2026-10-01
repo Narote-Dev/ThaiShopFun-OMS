@@ -133,8 +133,7 @@ class OrderIntakeAcceptanceTest {
     fixture.channelListing(shop, account, "L-cod", sku, true);
 
     // Step 1: Checkout hand-off reservation for the mapped line.
-    HttpResponse<String> checkout =
-        checkoutPost("chk-cod", shopId, "L-cod", 2, "cod-reserve-" + UUID.randomUUID());
+    HttpResponse<String> checkout = checkoutPost("chk-cod", shopId, "L-cod", 2);
     assertThat(checkout.statusCode()).isEqualTo(201);
     String reservationId = JSON.readTree(checkout.body()).path("reservation_id").asString();
 
@@ -193,8 +192,7 @@ class OrderIntakeAcceptanceTest {
     fixture.channelListing(shop, account, "L-handoff", sku, true);
 
     // Step 1: Reserve at checkout under CHECKOUT owner.
-    HttpResponse<String> checkout =
-        checkoutPost("chk-handoff", shopId, "L-handoff", 3, "handoff-" + UUID.randomUUID());
+    HttpResponse<String> checkout = checkoutPost("chk-handoff", shopId, "L-handoff", 3);
     String reservationId = JSON.readTree(checkout.body()).path("reservation_id").asString();
     assertThat(
             fixture.inTenant(
@@ -242,8 +240,7 @@ class OrderIntakeAcceptanceTest {
     UUID sku = fixture.sku(shop, 4);
     fixture.channelListing(shop, account, "L-atom", sku, true);
 
-    HttpResponse<String> checkout =
-        checkoutPost("chk-atom", shopId, "L-atom", 2, "atom-" + UUID.randomUUID());
+    HttpResponse<String> checkout = checkoutPost("chk-atom", shopId, "L-atom", 2);
     String reservationId = JSON.readTree(checkout.body()).path("reservation_id").asString();
     String externalOrderId = "TSF-AT-" + UUID.randomUUID();
     ObjectNode created =
@@ -289,11 +286,10 @@ class OrderIntakeAcceptanceTest {
     assertThat(count("SELECT attempts FROM inbox_event WHERE event_id = ?", paidEventId)).isZero();
 
     // Step 2: Created provisions the order; paid applies on the next pass.
-    HttpResponse<String> checkout =
-        checkoutPost("chk-paid", shopId, "L-paid", 1, "paid-ho-" + UUID.randomUUID());
+    HttpResponse<String> checkout = checkoutPost("chk-paid", shopId, "L-paid", 1);
     String reservationId = JSON.readTree(checkout.body()).path("reservation_id").asString();
     ObjectNode created =
-        orderCreated(externalOrderId, shopId, reservationId, "PREPAID", "L-paid", 1, 3);
+        orderCreated(externalOrderId, shopId, reservationId, "PREPAID", "L-paid", 1, 1);
     ingest(created);
     assertThat(worker.processAvailable(10)).isEqualTo(1);
     assertThat(countSalesOrders(externalOrderId)).isEqualTo(1);
@@ -321,8 +317,7 @@ class OrderIntakeAcceptanceTest {
     UUID sku = fixture.sku(shop, 5);
     fixture.channelListing(shop, account, "L-cancel", sku, true);
 
-    HttpResponse<String> checkout =
-        checkoutPost("chk-cancel", shopId, "L-cancel", 2, "cancel-" + UUID.randomUUID());
+    HttpResponse<String> checkout = checkoutPost("chk-cancel", shopId, "L-cancel", 2);
     String reservationId = JSON.readTree(checkout.body()).path("reservation_id").asString();
     String externalOrderId = "TSF-CN-" + UUID.randomUUID();
     ingest(orderCreated(externalOrderId, shopId, reservationId, "COD", "L-cancel", 2, 1));
@@ -430,7 +425,7 @@ class OrderIntakeAcceptanceTest {
   }
 
   private HttpResponse<String> checkoutPost(
-      String checkoutId, String shopId, String listingSku, int qty, String idempotencyKey)
+      String checkoutId, String shopId, String listingSku, int qty)
       throws Exception {
     ObjectNode body = JSON.createObjectNode();
     body.put("checkout_id", checkoutId);
@@ -445,7 +440,7 @@ class OrderIntakeAcceptanceTest {
         HttpRequest.newBuilder(
                 URI.create("http://127.0.0.1:" + port + "/internal/v1/inventory/reservations"))
             .header("Content-Type", "application/json")
-            .header("Idempotency-Key", idempotencyKey)
+            .header("Idempotency-Key", checkoutId)
             .header("Authorization", "Bearer " + checkoutToken())
             .POST(HttpRequest.BodyPublishers.ofString(JSON.writeValueAsString(body)))
             .build();

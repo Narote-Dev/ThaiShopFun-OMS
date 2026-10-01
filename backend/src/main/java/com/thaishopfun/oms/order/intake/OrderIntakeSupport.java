@@ -12,6 +12,7 @@ import com.thaishopfun.oms.order.OrderLineRepository;
 import com.thaishopfun.oms.order.OrderProperties;
 import com.thaishopfun.oms.order.OrderRecipientRepository;
 import com.thaishopfun.oms.order.OrderReservationCoverage;
+import com.thaishopfun.oms.order.OrderStateException;
 import com.thaishopfun.oms.order.OrderStateMachine;
 import com.thaishopfun.oms.order.OrderStateMachine.GuardContext;
 import com.thaishopfun.oms.order.OrderStateMachine.TransitionResult;
@@ -272,7 +273,7 @@ public class OrderIntakeSupport {
         emitStatusChanged(result.order());
         hooks.afterOutbox();
       }
-    } catch (RuntimeException ignored) {
+    } catch (OrderStateException ignored) {
       // Guards block READY_TO_PICK until payment/hold/reservation allow it.
     }
   }
