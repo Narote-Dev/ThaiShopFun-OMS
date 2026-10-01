@@ -29,8 +29,9 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.BooleanSupplier;
 
 /**
- * Decorator order: capability check → bulkhead → retry loop (rate limiter → circuit breaker → HTTP
- * with timeout per attempt).
+ * Decorator order: capability check → retry loop (bulkhead per attempt → rate limiter → circuit
+ * breaker → HTTP). Backoff and Retry-After sleeps run outside the bulkhead. Total wall time including
+ * sleeps is capped by {@link ChannelProperties.TsfChannelSettings#getHttpTimeout()}.
  */
 public abstract class BaseChannelAdapter implements ChannelAdapter {
 
@@ -85,6 +86,7 @@ public abstract class BaseChannelAdapter implements ChannelAdapter {
       String idempotencyKey,
       ShipmentRequest request) {
     requireCapability("createShipment", capabilities()::supportsLabel);
+    requireIdempotencyKey(idempotencyKey);
     if (request.partial() && !capabilities().supportsPartialShipment()) {
       throw new UnsupportedCapabilityException(channel(), "createShipment(partial)");
     }
@@ -107,6 +109,7 @@ public abstract class BaseChannelAdapter implements ChannelAdapter {
       String idempotencyKey,
       CancelRequest request) {
     requireCapability("requestCancel", capabilities()::supportsCancelRequest);
+    requireIdempotencyKey(idempotencyKey);
     return invoke(
         account,
         "requestCancel",
@@ -147,14 +150,18 @@ public abstract class BaseChannelAdapter implements ChannelAdapter {
     }
   }
 
+  private static void requireIdempotencyKey(String idempotencyKey) {
+    if (idempotencyKey == null || idempotencyKey.isBlank()) {
+      throw new ChannelClientException(400, "IDEMPOTENCY_KEY_REQUIRED", "Idempotency-Key is required");
+    }
+  }
+
   private <T> T invoke(ChannelAccountRef account, String operation, Callable<T> httpCall) {
-    Bulkhead bulkhead = resilience.bulkhead(channel());
     Timer.Sample sample = metrics.startTimer();
     String outcome = "success";
+    Instant deadline = clock.instant().plus(settings().getHttpTimeout());
     try {
-      return Bulkhead.decorateCallable(
-              bulkhead, () -> invokeWithRetry(account, operation, httpCall))
-          .call();
+      return invokeWithRetry(account, operation, httpCall, deadline);
     } catch (BulkheadFullException ex) {
       outcome = "bulkhead_rejected";
       throw new ChannelUnavailableException("Channel bulkhead is full for " + channel(), ex);
@@ -184,29 +191,37 @@ public abstract class BaseChannelAdapter implements ChannelAdapter {
     }
   }
 
-  private <T> T invokeWithRetry(ChannelAccountRef account, String operation, Callable<T> httpCall)
+  private <T> T invokeWithRetry(
+      ChannelAccountRef account, String operation, Callable<T> httpCall, Instant deadline)
       throws Exception {
     ChannelProperties.TsfChannelSettings settings = settings();
     int maxAttempts = Math.max(1, settings.getRetryMaxAttempts());
-    Exception last = null;
     CircuitBreaker circuitBreaker =
         resilience.circuitBreaker(channel(), account.channelAccountId());
+    Exception last = null;
     for (int attempt = 1; attempt <= maxAttempts; attempt++) {
-      RateLimiter rateLimiter = resilience.rateLimiter(channel(), account.channelAccountId());
+      ensureBudget(deadline, Duration.ZERO, null);
+      Bulkhead bulkhead = resilience.bulkhead(channel());
+      metrics.enterBulkheadWait(channel());
       try {
-        return RateLimiter.decorateCallable(
-                rateLimiter,
-                () -> CircuitBreaker.decorateCallable(circuitBreaker, httpCall::call).call())
-            .call();
-      } catch (RequestNotPermitted ex) {
-        last = ex;
-        metrics.recordRetry(channel(), operation, "rate_limiter_timeout");
-        if (attempt >= maxAttempts) {
+        bulkhead.acquirePermission();
+      } finally {
+        metrics.leaveBulkheadWait(channel());
+      }
+      try {
+        RateLimiter rateLimiter = resilience.rateLimiter(channel(), account.channelAccountId());
+        try {
+          return RateLimiter.decorateCallable(
+                  rateLimiter,
+                  () ->
+                      CircuitBreaker.decorateCallable(circuitBreaker, httpCall::call).call())
+              .call();
+        } catch (RequestNotPermitted ex) {
           throw new ChannelRateLimitedException("Rate limit wait exceeded for " + operation, null);
         }
-        sleepBackoff(settings, attempt, null);
+      } catch (ChannelClientException | ChannelIdempotencyConflictException | UnsupportedCapabilityException ex) {
+        throw ex;
       } catch (ChannelRateLimitedException ex) {
-        last = ex;
         metrics.recordRetry(channel(), operation, "retry_after");
         if (attempt >= maxAttempts) {
           throw ex;
@@ -218,14 +233,26 @@ public abstract class BaseChannelAdapter implements ChannelAdapter {
         if (!retryAfter.isZero() && retryAfter.compareTo(settings.getMaxRetryAfter()) > 0) {
           throw ex;
         }
-        sleepBackoff(settings, attempt, retryAfter.isZero() ? null : retryAfter);
+        Duration sleep = backoffDelay(settings, attempt, retryAfter.isZero() ? null : retryAfter);
+        sleepBeforeRetry(deadline, sleep, ex);
+      } catch (CallNotPermittedException ex) {
+        throw new ChannelUnavailableException("Channel circuit is open for " + channel(), ex);
+      } catch (BulkheadFullException ex) {
+        throw new ChannelUnavailableException("Channel bulkhead is full for " + channel(), ex);
       } catch (ChannelUnavailableException ex) {
         last = ex;
         metrics.recordRetry(channel(), operation, "unavailable");
         if (attempt >= maxAttempts) {
           throw ex;
         }
-        sleepBackoff(settings, attempt, null);
+        Duration sleep = backoffDelay(settings, attempt, null);
+        sleepBeforeRetry(deadline, sleep, null);
+      } catch (RuntimeException ex) {
+        throw ex;
+      } catch (Exception ex) {
+        throw new ChannelUnavailableException("Channel call failed for " + operation, ex);
+      } finally {
+        bulkhead.releasePermission();
       }
     }
     if (last instanceof RuntimeException runtime) {
@@ -234,20 +261,43 @@ public abstract class BaseChannelAdapter implements ChannelAdapter {
     throw new ChannelUnavailableException("Channel call failed after retries", last);
   }
 
-  private void sleepBackoff(
-      ChannelProperties.TsfChannelSettings settings, int attempt, Duration floor)
+  private void sleepBeforeRetry(Instant deadline, Duration sleep, ChannelRateLimitedException rate)
       throws InterruptedException {
+    if (sleep.isZero()) {
+      return;
+    }
+    ensureBudget(deadline, sleep, rate);
+    sleeper.sleep(sleep);
+  }
+
+  private void ensureBudget(Instant deadline, Duration nextSleep, ChannelRateLimitedException rate) {
+    Instant now = clock.instant();
+    if (!now.isBefore(deadline)) {
+      if (rate != null) {
+        throw rate;
+      }
+      throw new ChannelUnavailableException("Channel call budget exceeded");
+    }
+    if (!nextSleep.isZero() && now.plus(nextSleep).compareTo(deadline) > 0) {
+      if (rate != null) {
+        throw rate;
+      }
+      throw new ChannelUnavailableException("Channel call budget exceeded");
+    }
+  }
+
+  private Duration backoffDelay(
+      ChannelProperties.TsfChannelSettings settings, int attempt, Duration floor) {
     long baseMs = settings.getRetryWaitBase().toMillis();
     long maxMs = settings.getRetryWaitMax().toMillis();
     long exp = baseMs * (1L << Math.min(attempt - 1, 10));
-    long capped = Math.min(exp, maxMs);
-    double jitter = 0.5 + ThreadLocalRandom.current().nextDouble();
-    long delayMs = Math.round(capped * jitter);
-    Duration delay = Duration.ofMillis(delayMs);
+    long cap = Math.min(exp, maxMs);
+    long jitterMs = cap <= 0 ? 0 : ThreadLocalRandom.current().nextLong(cap + 1);
+    Duration delay = Duration.ofMillis(jitterMs);
     if (floor != null && floor.compareTo(delay) > 0) {
       delay = floor;
     }
-    sleeper.sleep(delay);
+    return delay;
   }
 
   protected Duration httpTimeout() {

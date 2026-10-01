@@ -1,6 +1,8 @@
 package com.thaishopfun.oms.channel.tsf;
 
 import com.thaishopfun.oms.channel.TsfProperties;
+import com.thaishopfun.oms.channel.exception.ChannelClientException;
+import com.thaishopfun.oms.channel.exception.ChannelUnavailableException;
 import jakarta.annotation.PostConstruct;
 import java.net.URI;
 import java.net.URLEncoder;
@@ -8,6 +10,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.concurrent.locks.ReentrantLock;
@@ -21,19 +24,20 @@ import tools.jackson.databind.json.JsonMapper;
 public class TsfTokenProvider {
 
   private static final Logger log = LoggerFactory.getLogger(TsfTokenProvider.class);
-  private static final Duration REFRESH_SKEW = Duration.ofSeconds(60);
   private static final Duration TOKEN_HTTP_TIMEOUT = Duration.ofSeconds(10);
 
   private final TsfProperties properties;
   private final JsonMapper json;
+  private final Clock clock;
   private final HttpClient client;
   private final ReentrantLock lock = new ReentrantLock();
 
   private volatile CachedToken cached;
 
-  public TsfTokenProvider(TsfProperties properties, JsonMapper json) {
+  public TsfTokenProvider(TsfProperties properties, JsonMapper json, Clock clock) {
     this.properties = properties;
     this.json = json;
+    this.clock = clock;
     this.client = HttpClient.newBuilder().connectTimeout(TOKEN_HTTP_TIMEOUT).build();
   }
 
@@ -48,14 +52,16 @@ public class TsfTokenProvider {
   }
 
   public String accessToken() {
+    Instant now = clock.instant();
     CachedToken current = cached;
-    if (current != null && current.validAt(Instant.now())) {
+    if (current != null && current.validAt(now)) {
       return current.token();
     }
     lock.lock();
     try {
+      now = clock.instant();
       current = cached;
-      if (current != null && current.validAt(Instant.now())) {
+      if (current != null && current.validAt(now)) {
         return current.token();
       }
       cached = fetchToken();
@@ -100,25 +106,35 @@ public class TsfTokenProvider {
     try {
       HttpResponse<String> response =
           client.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-      if (response.statusCode() != 200) {
-        log.warn("TSF token request failed status={}", response.statusCode());
-        throw new IllegalStateException(
-            "TSF token request failed with HTTP " + response.statusCode());
+      int status = response.statusCode();
+      if (status == 502 || status == 503 || status == 504) {
+        log.warn("TSF token request transient failure status={}", status);
+        throw new ChannelUnavailableException("TSF token request failed with HTTP " + status);
+      }
+      if (status >= 400 && status < 500) {
+        log.warn("TSF token request client failure status={}", status);
+        throw new ChannelClientException(
+            status, "TOKEN_REQUEST_FAILED", "TSF token request failed with HTTP " + status);
+      }
+      if (status != 200) {
+        log.warn("TSF token request failed status={}", status);
+        throw new ChannelClientException(
+            status, "TOKEN_REQUEST_FAILED", "TSF token request failed with HTTP " + status);
       }
       JsonNode body = json.readTree(response.body());
       JsonNode tokenNode = body.path("access_token");
       String token = tokenNode.isString() ? tokenNode.asString() : null;
       int expiresIn = body.path("expires_in").asInt(0);
       if (token == null || token.isBlank() || expiresIn < 1) {
-        throw new IllegalStateException("TSF token response is invalid");
+        throw new ChannelClientException(502, "TOKEN_RESPONSE_INVALID", "TSF token response is invalid");
       }
-      Instant expiresAt = Instant.now().plusSeconds(expiresIn);
-      return new CachedToken(token, expiresAt);
+      Instant expiresAt = clock.instant().plusSeconds(expiresIn);
+      return new CachedToken(token, expiresAt, expiresIn);
     } catch (InterruptedException ex) {
       Thread.currentThread().interrupt();
-      throw new IllegalStateException("TSF token request interrupted", ex);
+      throw new ChannelUnavailableException("TSF token request interrupted", ex);
     } catch (java.io.IOException ex) {
-      throw new IllegalStateException("TSF token request failed", ex);
+      throw new ChannelUnavailableException("TSF token request failed", ex);
     }
   }
 
@@ -126,9 +142,10 @@ public class TsfTokenProvider {
     return URLEncoder.encode(value, StandardCharsets.UTF_8);
   }
 
-  private record CachedToken(String token, Instant expiresAt) {
+  private record CachedToken(String token, Instant expiresAt, int expiresInSeconds) {
     boolean validAt(Instant now) {
-      return now.isBefore(expiresAt.minus(REFRESH_SKEW));
+      long skewSeconds = Math.min(60L, expiresInSeconds / 2L);
+      return now.isBefore(expiresAt.minusSeconds(skewSeconds));
     }
   }
 }

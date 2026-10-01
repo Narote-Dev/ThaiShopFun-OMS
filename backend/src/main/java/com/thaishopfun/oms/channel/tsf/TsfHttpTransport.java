@@ -11,6 +11,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZonedDateTime;
@@ -28,12 +29,15 @@ public class TsfHttpTransport {
   private final TsfProperties properties;
   private final TsfTokenProvider tokens;
   private final JsonMapper json;
+  private final Clock clock;
   private final HttpClient client;
 
-  public TsfHttpTransport(TsfProperties properties, TsfTokenProvider tokens, JsonMapper json) {
+  public TsfHttpTransport(
+      TsfProperties properties, TsfTokenProvider tokens, JsonMapper json, Clock clock) {
     this.properties = properties;
     this.tokens = tokens;
     this.json = json;
+    this.clock = clock;
     this.client =
         HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
@@ -104,11 +108,12 @@ public class TsfHttpTransport {
     if (status == 409) {
       throw new ChannelIdempotencyConflictException(errorMessage(body));
     }
-    if (status >= 500) {
+    if (status == 502 || status == 503 || status == 504) {
       throw new ChannelUnavailableException(errorMessage(body));
     }
     ParsedError parsed = parseError(body);
-    throw new ChannelClientException(status, parsed.error(), parsed.message());
+    throw new ChannelClientException(
+        status, parsed.error(), parsed.message() != null ? parsed.message() : errorMessage(body));
   }
 
   private String errorMessage(byte[] body) {
@@ -135,7 +140,7 @@ public class TsfHttpTransport {
     }
   }
 
-  private static Integer retryAfterSeconds(HttpResponse<?> response) {
+  private Integer retryAfterSeconds(HttpResponse<?> response) {
     String header = response.headers().firstValue("Retry-After").orElse(null);
     if (header == null || header.isBlank()) {
       return null;
@@ -148,7 +153,7 @@ public class TsfHttpTransport {
       try {
         ZonedDateTime when =
             ZonedDateTime.parse(value, DateTimeFormatter.RFC_1123_DATE_TIME.withLocale(Locale.US));
-        Duration delay = Duration.between(Instant.now(), when.toInstant());
+        Duration delay = Duration.between(clock.instant(), when.toInstant());
         if (delay.isZero() || delay.isNegative()) {
           return null;
         }

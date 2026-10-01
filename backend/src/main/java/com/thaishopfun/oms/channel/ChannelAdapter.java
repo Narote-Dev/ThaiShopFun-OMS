@@ -24,7 +24,7 @@ import java.time.Instant;
  *   <tr><td>{@link #listOrders}</td><td>{@code supportsOrderPull}</td></tr>
  *   <tr><td>{@link #getOrder}</td><td>{@code supportsOrderPull}</td></tr>
  *   <tr><td>{@link #getPaymentStatus}</td><td>{@code supportsOrderPull}</td></tr>
- *   <tr><td>{@link #listListings}</td><td>{@code supportsOrderPull}</td></tr>
+ *   <tr><td>{@link #listListings}</td><td>{@code supportsStockPush}</td></tr>
  *   <tr><td>{@link #createShipment}</td><td>{@code supportsLabel}</td></tr>
  *   <tr><td>{@link #getLabel}</td><td>{@code supportsLabel}</td></tr>
  *   <tr><td>{@link #requestCancel}</td><td>{@code supportsCancelRequest}</td></tr>

@@ -8,6 +8,9 @@ import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import java.util.EnumMap;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -21,39 +24,63 @@ public class ChannelMetrics {
 
   private final MeterRegistry registry;
   private final Map<Channel, Bulkhead> bulkheads = new EnumMap<>(Channel.class);
-  private final Map<Channel, CircuitBreaker> circuitSample = new EnumMap<>(Channel.class);
+  private final Map<Channel, AtomicInteger> bulkheadWaiting = new EnumMap<>(Channel.class);
+  private final Map<Channel, Set<CircuitBreaker>> circuitBreakers = new EnumMap<>(Channel.class);
+  private final Map<Channel, Boolean> gaugeRegistered = new EnumMap<>(Channel.class);
 
   public ChannelMetrics(MeterRegistry registry) {
     this.registry = registry;
+    for (Channel channel : Channel.values()) {
+      bulkheadWaiting.put(channel, new AtomicInteger());
+      circuitBreakers.put(channel, ConcurrentHashMap.newKeySet());
+    }
   }
 
   public void registerBulkhead(Channel channel, Bulkhead bulkhead) {
-    if (bulkheads.containsKey(channel)) {
-      return;
-    }
-    bulkheads.put(channel, bulkhead);
-    Gauge.builder(BULKHEAD_WAITING, bulkhead, ChannelMetrics::bulkheadInUse)
-        .tag("channel", channel.name())
-        .register(registry);
+    bulkheads.putIfAbsent(channel, bulkhead);
+    ensureGauges(channel);
   }
 
   public void registerCircuitBreaker(Channel channel, CircuitBreaker circuitBreaker) {
-    circuitSample.putIfAbsent(channel, circuitBreaker);
-    CircuitBreaker sample = circuitSample.get(channel);
-    if (sample != circuitBreaker) {
-      return;
-    }
-    if (registry.find(CIRCUIT_STATE).tag("channel", channel.name()).gauge() != null) {
-      return;
-    }
-    Gauge.builder(CIRCUIT_STATE, circuitBreaker, cb -> stateCode(cb.getState()))
-        .tag("channel", channel.name())
-        .register(registry);
+    circuitBreakers.get(channel).add(circuitBreaker);
+    ensureGauges(channel);
   }
 
-  private static double bulkheadInUse(Bulkhead bulkhead) {
-    var metrics = bulkhead.getMetrics();
-    return metrics.getMaxAllowedConcurrentCalls() - metrics.getAvailableConcurrentCalls();
+  public void enterBulkheadWait(Channel channel) {
+    bulkheadWaiting.get(channel).incrementAndGet();
+  }
+
+  public void leaveBulkheadWait(Channel channel) {
+    bulkheadWaiting.get(channel).decrementAndGet();
+  }
+
+  private void ensureGauges(Channel channel) {
+    if (Boolean.TRUE.equals(gaugeRegistered.get(channel))) {
+      return;
+    }
+    if (registry.find(BULKHEAD_WAITING).tag("channel", channel.name()).gauge() != null
+        && registry.find(CIRCUIT_STATE).tag("channel", channel.name()).gauge() != null) {
+      gaugeRegistered.put(channel, true);
+      return;
+    }
+    Gauge.builder(BULKHEAD_WAITING, () -> bulkheadWaiting.get(channel).get())
+        .tag("channel", channel.name())
+        .register(registry);
+    Gauge.builder(CIRCUIT_STATE, () -> worstCircuitState(circuitBreakers.get(channel)))
+        .tag("channel", channel.name())
+        .register(registry);
+    gaugeRegistered.put(channel, true);
+  }
+
+  private static double worstCircuitState(Set<CircuitBreaker> breakers) {
+    if (breakers == null || breakers.isEmpty()) {
+      return stateCode(CircuitBreaker.State.CLOSED);
+    }
+    int worst = 0;
+    for (CircuitBreaker breaker : breakers) {
+      worst = Math.max(worst, (int) stateCode(breaker.getState()));
+    }
+    return worst;
   }
 
   private static double stateCode(CircuitBreaker.State state) {

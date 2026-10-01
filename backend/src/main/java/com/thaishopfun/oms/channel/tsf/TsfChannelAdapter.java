@@ -64,14 +64,14 @@ public class TsfChannelAdapter extends BaseChannelAdapter {
     // Step 1: Page orders for the shop using externalShopId in the path.
     StringBuilder path =
         new StringBuilder("/shops/")
-            .append(urlEncode(account.externalShopId()))
+            .append(encodePathSegment(account.externalShopId()))
             .append("/orders?limit=")
             .append(limit);
     if (updatedSince != null) {
-      path.append("&updated_since=").append(urlEncode(updatedSince.toString()));
+      path.append("&updated_since=").append(encodeQueryParam(updatedSince.toString()));
     }
     if (cursor != null && !cursor.isBlank()) {
-      path.append("&cursor=").append(urlEncode(cursor));
+      path.append("&cursor=").append(encodeQueryParam(cursor));
     }
     TsfHttpTransport.HttpResult result = transport.get(path.toString(), httpTimeout());
     return json.readValue(result.body(), OrderPage.class);
@@ -80,14 +80,15 @@ public class TsfChannelAdapter extends BaseChannelAdapter {
   @Override
   protected OrderDetail doGetOrder(ChannelAccountRef account, String externalOrderId) {
     TsfHttpTransport.HttpResult result =
-        transport.get("/orders/" + urlEncode(externalOrderId), httpTimeout());
+        transport.get("/orders/" + encodePathSegment(externalOrderId), httpTimeout());
     return json.readValue(result.body(), OrderDetail.class);
   }
 
   @Override
   protected PaymentStatus doGetPaymentStatus(ChannelAccountRef account, String externalOrderId) {
     TsfHttpTransport.HttpResult result =
-        transport.get("/orders/" + urlEncode(externalOrderId) + "/payment-status", httpTimeout());
+        transport.get(
+            "/orders/" + encodePathSegment(externalOrderId) + "/payment-status", httpTimeout());
     return json.readValue(result.body(), PaymentStatus.class);
   }
 
@@ -95,10 +96,10 @@ public class TsfChannelAdapter extends BaseChannelAdapter {
   protected ListingPage doListListings(ChannelAccountRef account, String cursor) {
     StringBuilder path =
         new StringBuilder("/shops/")
-            .append(urlEncode(account.externalShopId()))
+            .append(encodePathSegment(account.externalShopId()))
             .append("/listings");
     if (cursor != null && !cursor.isBlank()) {
-      path.append("?cursor=").append(urlEncode(cursor));
+      path.append("?cursor=").append(encodeQueryParam(cursor));
     }
     TsfHttpTransport.HttpResult result = transport.get(path.toString(), httpTimeout());
     return json.readValue(result.body(), ListingPage.class);
@@ -115,7 +116,7 @@ public class TsfChannelAdapter extends BaseChannelAdapter {
     String jsonBody = json.writeValueAsString(body);
     TsfHttpTransport.HttpResult result =
         transport.post(
-            "/orders/" + urlEncode(externalOrderId) + "/shipments",
+            "/orders/" + encodePathSegment(externalOrderId) + "/shipments",
             httpTimeout(),
             jsonBody,
             Map.of("Idempotency-Key", idempotencyKey));
@@ -125,7 +126,7 @@ public class TsfChannelAdapter extends BaseChannelAdapter {
   @Override
   protected LabelContent doGetLabel(ChannelAccountRef account, String shipmentId) {
     TsfHttpTransport.HttpResult result =
-        transport.get("/shipments/" + urlEncode(shipmentId) + "/label", httpTimeout());
+        transport.get("/shipments/" + encodePathSegment(shipmentId) + "/label", httpTimeout());
     return new LabelContent(result.body());
   }
 
@@ -138,14 +139,18 @@ public class TsfChannelAdapter extends BaseChannelAdapter {
     String jsonBody = json.writeValueAsString(request);
     TsfHttpTransport.HttpResult result =
         transport.post(
-            "/orders/" + urlEncode(externalOrderId) + "/cancel-requests",
+            "/orders/" + encodePathSegment(externalOrderId) + "/cancel-requests",
             httpTimeout(),
             jsonBody,
             Map.of("Idempotency-Key", idempotencyKey));
     return json.readValue(result.body(), CancelResponse.class);
   }
 
-  private static String urlEncode(String value) {
+  private static String encodePathSegment(String value) {
+    return URLEncoder.encode(value, StandardCharsets.UTF_8).replace("+", "%20");
+  }
+
+  private static String encodeQueryParam(String value) {
     return URLEncoder.encode(value, StandardCharsets.UTF_8);
   }
 }

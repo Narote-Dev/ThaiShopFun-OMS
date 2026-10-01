@@ -17,6 +17,7 @@ SET search_path = pg_catalog, pg_temp
 AS $fn$
 DECLARE
   v_id uuid;
+  v_account_tenant uuid;
 BEGIN
   IF p_tsf_shop_id IS NULL OR btrim(p_tsf_shop_id) = '' THEN
     RAISE EXCEPTION 'tsf_shop_id is required';
@@ -102,6 +103,16 @@ BEGIN
   )
   ON CONFLICT (channel, external_shop_id) DO NOTHING;
 
+  SELECT c.tenant_id
+    INTO v_account_tenant
+  FROM public.channel_account AS c
+  WHERE c.channel = 'TSF'
+    AND c.external_shop_id = p_tsf_shop_id;
+
+  IF v_account_tenant IS DISTINCT FROM v_id THEN
+    RAISE EXCEPTION 'tsf_shop_id % is already bound to another tenant', p_tsf_shop_id;
+  END IF;
+
   RETURN v_id;
 END
 $fn$;
@@ -110,6 +121,7 @@ $fn$;
 DO $backfill$
 DECLARE
   r RECORD;
+  v_owner uuid;
 BEGIN
   FOR r IN
     SELECT t.id AS tenant_id, t.tsf_shop_id
@@ -121,6 +133,16 @@ BEGIN
         AND c.external_shop_id = t.tsf_shop_id
     )
   LOOP
+    SELECT c.tenant_id
+      INTO v_owner
+    FROM public.channel_account AS c
+    WHERE c.channel = 'TSF'
+      AND c.external_shop_id = r.tsf_shop_id;
+
+    IF v_owner IS NOT NULL AND v_owner <> r.tenant_id THEN
+      RAISE EXCEPTION 'tsf_shop_id % is already bound to another tenant', r.tsf_shop_id;
+    END IF;
+
     PERFORM set_config('app.tenant_id', r.tenant_id::text, true);
     INSERT INTO public.channel_account (
       id,
