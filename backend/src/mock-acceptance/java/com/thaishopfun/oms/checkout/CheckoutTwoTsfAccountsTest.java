@@ -98,6 +98,45 @@ class CheckoutTwoTsfAccountsTest {
   }
 
   @Test
+  void shadowThenActiveAccountsStayScoped() throws Exception {
+    StockFixture.Shop shop = fixture.shop("ACTIVE");
+    String activeShop = "tsf-active-rev-" + shop.tenant();
+    String shadowShop = "tsf-shadow-rev-" + shop.tenant();
+    UUID activeAccount = fixture.channelAccount(shop, activeShop, "ACTIVE", "CONNECTED");
+    UUID shadowAccount = fixture.channelAccount(shop, shadowShop, "SHADOW", "CONNECTED");
+    UUID skuActive = fixture.sku(shop, 10);
+    UUID skuShadow = fixture.sku(shop, 8);
+    fixture.channelListing(shop, shadowAccount, "L-shadow-rev", skuShadow, true);
+    fixture.channelListing(shop, activeAccount, "L-active-rev", skuActive, true);
+
+    // Step 1: Shadow checkout first, then active — account ids must not cross over.
+    HttpResponse<String> shadowResponse =
+        post("chk-shadow-rev", request(shadowShop, "chk-shadow-rev", "L-shadow-rev", 1));
+    assertThat(shadowResponse.statusCode()).isEqualTo(201);
+    assertThat(JSON.readTree(shadowResponse.body()).path("enforced").asBoolean()).isFalse();
+    assertThat(fixture.reserved(shop, skuShadow)).isZero();
+
+    HttpResponse<String> activeResponse =
+        post("chk-active-rev", request(activeShop, "chk-active-rev", "L-active-rev", 2));
+    assertThat(activeResponse.statusCode()).isEqualTo(201);
+    assertThat(JSON.readTree(activeResponse.body()).path("enforced").asBoolean()).isTrue();
+    assertThat(fixture.reserved(shop, skuActive)).isEqualTo(2);
+
+    UUID shadowDiffAccount =
+        fixture.inTenant(
+            shop.tenant(),
+            () ->
+                jdbc.queryForObject(
+                    "SELECT channel_account_id FROM shadow_diff WHERE ref = ?",
+                    UUID.class,
+                    "chk-shadow-rev"));
+    assertThat(shadowDiffAccount).isEqualTo(shadowAccount);
+    assertThat(shadowDiffAccount).isNotEqualTo(activeAccount);
+    assertThat(fixture.reserved(shop, skuShadow)).isZero();
+    assertThat(fixture.reserved(shop, skuActive)).isEqualTo(2);
+  }
+
+  @Test
   void observeModeDoesNotEnforceOrRecordShadowDiff() throws Exception {
     StockFixture.Shop shop = fixture.shop("ACTIVE");
     String observeShop = "tsf-observe-" + shop.tenant();

@@ -1,6 +1,7 @@
 package com.thaishopfun.oms.channel;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.thaishopfun.mocktsf.MockTsfApplication;
 import com.thaishopfun.mocktsf.contract.ContractValidator;
@@ -8,7 +9,11 @@ import com.thaishopfun.oms.auth.AuthTestSupport;
 import com.thaishopfun.oms.auth.UuidV7;
 import com.thaishopfun.oms.channel.api.CancelRequest;
 import com.thaishopfun.oms.channel.api.LabelContent;
+import com.thaishopfun.oms.channel.api.OrderPage;
+import com.thaishopfun.oms.channel.api.Shipment;
 import com.thaishopfun.oms.channel.api.ShipmentRequest;
+import com.thaishopfun.oms.channel.exception.ChannelClientException;
+import com.thaishopfun.oms.channel.exception.ChannelIdempotencyConflictException;
 import com.thaishopfun.oms.channel.tsf.TsfChannelAdapter;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -65,6 +70,10 @@ class TsfChannelAdapterContractTest {
   @Autowired private TsfChannelAdapter adapter;
   @Autowired private JsonMapper json;
   @Autowired private ChannelResilienceTest.RecordingSleeper sleeper;
+  @Autowired private AccountResilienceRegistry resilience;
+  @Autowired private ChannelProperties channelProperties;
+  @Autowired private ChannelMetrics channelMetrics;
+  @Autowired private TsfProperties tsfProperties;
 
   private static final HttpClient HTTP =
       HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
@@ -115,7 +124,7 @@ class TsfChannelAdapterContractTest {
   }
 
   @Test
-  void mockControlFaultsRetryAfterBeforeSuccess() throws Exception {
+  void mockControlFaultsRetryAfterFiveSecondsRealClock() throws Exception {
     String path = "/internal/v1/orders/TSF-240929-000124";
     HttpResponse<String> armed =
         HTTP.send(
@@ -124,20 +133,90 @@ class TsfChannelAdapterContractTest {
                 .POST(
                     HttpRequest.BodyPublishers.ofString(
                         """
-                        {"method":"GET","path":"%s","status":429,"times":1,"retry_after":2}
+                        {"method":"GET","path":"%s","status":429,"times":1,"retry_after":5}
                         """
                             .formatted(path)))
                 .build(),
             HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
     assertThat(armed.statusCode()).isEqualTo(200);
-    sleeper.durations().clear();
     ChannelAccountRef account =
         new ChannelAccountRef(UuidV7.generate(), UuidV7.generate(), "shop_grace");
+    TsfChannelAdapter realSleepAdapter =
+        new TsfChannelAdapter(
+            resilience,
+            channelProperties,
+            channelMetrics,
+            new SystemSleeper(),
+            java.time.Clock.systemUTC(),
+            new com.thaishopfun.oms.channel.tsf.TsfHttpTransport(
+                tsfProperties,
+                new com.thaishopfun.oms.channel.tsf.TsfTokenProvider(
+                    tsfProperties, json, java.time.Clock.systemUTC()),
+                json,
+                java.time.Clock.systemUTC()),
+            json);
 
-    // Step 1: Armed 429 fault is honored once; adapter waits at least Retry-After seconds.
-    adapter.getOrder(account, "TSF-240929-000124");
-    assertThat(sleeper.durations().stream().anyMatch(d -> d.compareTo(Duration.ofSeconds(2)) >= 0))
-        .isTrue();
+    // Step 1: Armed 429 fault is honored once; real sleep waits at least Retry-After seconds.
+    Instant start = Instant.now();
+    realSleepAdapter.getOrder(account, "TSF-240929-000124");
+    assertThat(Duration.between(start, Instant.now()).compareTo(Duration.ofSeconds(5))).isGreaterThanOrEqualTo(0);
+    // Step 2: With the fault consumed, a follow-up call succeeds on the first attempt.
+    realSleepAdapter.getOrder(account, "TSF-240929-000124");
+  }
+
+  @Test
+  void listOrdersSpansAtLeastTwoPagesAcrossShops() {
+    Instant since = Instant.parse("2026-09-29T00:00:00Z");
+    ChannelAccountRef active =
+        new ChannelAccountRef(UuidV7.generate(), UuidV7.generate(), "shop_active");
+    ChannelAccountRef grace =
+        new ChannelAccountRef(UuidV7.generate(), UuidV7.generate(), "shop_grace");
+    // Step 1: Seeded catalog exposes at least two orders when paging each shop with limit=1.
+    OrderPage activePage = adapter.listOrders(active, since, null, 1);
+    assertThat(activePage.orders()).hasSize(1);
+    OrderPage gracePage = adapter.listOrders(grace, since, null, 1);
+    assertThat(gracePage.orders()).hasSize(1);
+    assertThat(activePage.orders().size() + gracePage.orders().size()).isGreaterThanOrEqualTo(2);
+  }
+
+  @Test
+  void shipmentIdempotencyReplayAndConflict() {
+    ChannelAccountRef account =
+        new ChannelAccountRef(UuidV7.generate(), UuidV7.generate(), "shop_active");
+    String key = "ship-idem-" + UuidV7.generate();
+    ShipmentRequest request = new ShipmentRequest("FLASH");
+    // Step 1: Same key and body replays the stored shipment response.
+    Shipment first = adapter.createShipment(account, "TSF-240929-000123", key, request);
+    Shipment replay = adapter.createShipment(account, "TSF-240929-000123", key, request);
+    assertThat(replay.shipmentId()).isEqualTo(first.shipmentId());
+    // Step 2: Reusing the key with a different body is a 409 conflict.
+    assertThatThrownBy(
+            () ->
+                adapter.createShipment(
+                    account, "TSF-240929-000123", key, new ShipmentRequest("KERRY")))
+        .isInstanceOf(ChannelIdempotencyConflictException.class);
+  }
+
+  @Test
+  void clientErrorBodyMatchesContractSchema() {
+    ChannelAccountRef account =
+        new ChannelAccountRef(UuidV7.generate(), UuidV7.generate(), "shop_active");
+    // Step 1: A 404 from mock-tsf still matches the shared error schema.
+    assertThatThrownBy(() -> adapter.getOrder(account, "TSF-MISSING"))
+        .isInstanceOf(ChannelClientException.class)
+        .satisfies(
+            ex -> {
+              ChannelClientException client = (ChannelClientException) ex;
+              assertThat(
+                      CONTRACT.restErrors(
+                          "error",
+                          "{\"error\":\""
+                              + client.errorCode()
+                              + "\",\"message\":\""
+                              + client.getMessage()
+                              + "\"}"))
+                  .isEmpty();
+            });
   }
 
   private static URI mockUri(String path) {

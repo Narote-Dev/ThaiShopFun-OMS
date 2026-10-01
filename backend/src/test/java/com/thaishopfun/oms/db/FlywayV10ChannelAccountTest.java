@@ -1,6 +1,7 @@
 package com.thaishopfun.oms.db;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.thaishopfun.oms.auth.AuthTestSupport;
 import com.thaishopfun.oms.auth.UuidV7;
@@ -264,6 +265,257 @@ class FlywayV10ChannelAccountTest {
       try (ResultSet rs = statement.executeQuery()) {
         assertThat(rs.next()).isTrue();
         assertThat(rs.getObject(1, UUID.class)).isNull();
+      }
+    }
+  }
+
+  @Test
+  void provisionTenantRaisesWhenShopBoundToAnotherTenant() throws SQLException {
+    String shopId = "shop-cross-" + UuidV7.generate();
+    UUID owner = UUID.randomUUID();
+    UUID intruder = UUID.randomUUID();
+    try (Connection admin = AuthTestSupport.admin()) {
+      exec(
+          admin,
+          """
+          INSERT INTO tenant (id, name, tsf_shop_id, membership_tier, entitlement_status, ent_ver)
+          VALUES (?, 'Owner', ?, 'PRO', 'ACTIVE', 1)
+          """,
+          owner,
+          shopId);
+      exec(
+          admin,
+          """
+          INSERT INTO tenant (id, name, tsf_shop_id, membership_tier, entitlement_status, ent_ver)
+          VALUES (?, 'Other', ?, 'PRO', 'ACTIVE', 1)
+          """,
+          intruder,
+          "other-" + shopId);
+      exec(
+          admin,
+          """
+          INSERT INTO channel_account (id, tenant_id, channel, external_shop_id, mode, status)
+          VALUES (?, ?, 'TSF', ?, 'ACTIVE', 'CONNECTED')
+          """,
+          UUID.randomUUID(),
+          intruder,
+          shopId);
+    }
+    try (Connection app = AuthTestSupport.app();
+        PreparedStatement statement =
+            app.prepareStatement("SELECT provision_tenant(?, ?, ?, ?, ?, ?)")) {
+      // Step 1: TSF shop id is already tied to a different tenant via channel_account.
+      statement.setString(1, shopId);
+      statement.setString(2, "Attempt");
+      statement.setString(3, "PRO");
+      statement.setString(4, "ACTIVE");
+      statement.setObject(5, null);
+      statement.setLong(6, 2L);
+      assertThatThrownBy(statement::executeQuery)
+          .hasMessageContaining("already bound to another tenant");
+    }
+  }
+
+  @Test
+  void upgradeBackfillRaisesOnCrossTenantConflict() throws SQLException {
+    String database = "oms_v10_conflict_" + UUID.randomUUID().toString().replace("-", "");
+    UUID tenantA = UUID.randomUUID();
+    UUID tenantB = UUID.randomUUID();
+    String shopId = "shop-conflict-" + tenantA;
+    try (Connection admin = openUpgradeAdmin();
+        Statement statement = admin.createStatement()) {
+      statement.execute("CREATE DATABASE " + database);
+    }
+    String url = upgradeJdbcUrl(database);
+    try {
+      Flyway.configure()
+          .dataSource(url, upgradePostgres.getUsername(), upgradePostgres.getPassword())
+          .target("9")
+          .load()
+          .migrate();
+      try (Connection conn =
+          DriverManager.getConnection(
+              url, upgradePostgres.getUsername(), upgradePostgres.getPassword())) {
+        exec(
+            conn,
+            """
+            INSERT INTO tenant (id, name, tsf_shop_id, membership_tier, entitlement_status, ent_ver)
+            VALUES (?, 'Tenant A', ?, 'PRO', 'ACTIVE', 1)
+            """,
+            tenantA,
+            shopId);
+        exec(
+            conn,
+            """
+            INSERT INTO tenant (id, name, tsf_shop_id, membership_tier, entitlement_status, ent_ver)
+            VALUES (?, 'Tenant B', ?, 'PRO', 'ACTIVE', 1)
+            """,
+            tenantB,
+            "other-" + tenantB);
+        exec(
+            conn,
+            """
+            INSERT INTO channel_account (id, tenant_id, channel, external_shop_id, mode, status)
+            VALUES (?, ?, 'TSF', ?, 'OBSERVE', 'CONNECTED')
+            """,
+            UUID.randomUUID(),
+            tenantB,
+            shopId);
+      }
+      // Step 1: V10 backfill must not attach tenant A's shop to tenant B's account row.
+      assertThatThrownBy(
+              () ->
+                  Flyway.configure()
+                      .dataSource(
+                          url, upgradePostgres.getUsername(), upgradePostgres.getPassword())
+                      .load()
+                      .migrate())
+          .hasMessageContaining("already bound to another tenant");
+    } finally {
+      try (Connection admin = openUpgradeAdmin();
+          Statement statement = admin.createStatement()) {
+        statement.execute("DROP DATABASE IF EXISTS " + database + " WITH (FORCE)");
+      }
+    }
+  }
+
+  @Test
+  void upgradePreservesPreExistingChannelAccountModeAndStatus() throws SQLException {
+    String database = "oms_v10_preserve_" + UUID.randomUUID().toString().replace("-", "");
+    UUID tenant = UUID.randomUUID();
+    UUID accountId = UUID.randomUUID();
+    String shopId = "shop-preserve-" + tenant;
+    try (Connection admin = openUpgradeAdmin();
+        Statement statement = admin.createStatement()) {
+      statement.execute("CREATE DATABASE " + database);
+    }
+    String url = upgradeJdbcUrl(database);
+    try {
+      Flyway.configure()
+          .dataSource(url, upgradePostgres.getUsername(), upgradePostgres.getPassword())
+          .target("9")
+          .load()
+          .migrate();
+      try (Connection conn =
+          DriverManager.getConnection(
+              url, upgradePostgres.getUsername(), upgradePostgres.getPassword())) {
+        exec(
+            conn,
+            """
+            INSERT INTO tenant (id, name, tsf_shop_id, membership_tier, entitlement_status, ent_ver)
+            VALUES (?, 'Preserve', ?, 'PRO', 'ACTIVE', 1)
+            """,
+            tenant,
+            shopId);
+        exec(
+            conn,
+            """
+            INSERT INTO channel_account (id, tenant_id, channel, external_shop_id, mode, status)
+            VALUES (?, ?, 'TSF', ?, 'ACTIVE', 'DISCONNECTED')
+            """,
+            accountId,
+            tenant,
+            shopId);
+      }
+      Flyway.configure()
+          .dataSource(url, upgradePostgres.getUsername(), upgradePostgres.getPassword())
+          .load()
+          .migrate();
+      try (Connection conn =
+              DriverManager.getConnection(
+                  url, upgradePostgres.getUsername(), upgradePostgres.getPassword());
+          PreparedStatement statement =
+              conn.prepareStatement(
+                  """
+                  SELECT mode, status, tenant_id, id
+                  FROM channel_account
+                  WHERE channel = 'TSF' AND external_shop_id = ?
+                  """)) {
+        // Step 1: V10 must not insert a second row or reset mode/status on an existing account.
+        statement.setString(1, shopId);
+        try (ResultSet rs = statement.executeQuery()) {
+          assertThat(rs.next()).isTrue();
+          assertThat(rs.getString("mode")).isEqualTo("ACTIVE");
+          assertThat(rs.getString("status")).isEqualTo("DISCONNECTED");
+          assertThat(rs.getObject("tenant_id", UUID.class)).isEqualTo(tenant);
+          assertThat(rs.getObject("id", UUID.class)).isEqualTo(accountId);
+          assertThat(rs.next()).isFalse();
+        }
+      }
+    } finally {
+      try (Connection admin = openUpgradeAdmin();
+          Statement statement = admin.createStatement()) {
+        statement.execute("DROP DATABASE IF EXISTS " + database + " WITH (FORCE)");
+      }
+    }
+  }
+
+  @Test
+  void resolveTenantNonTsfUsesChannelAccountOnly() throws SQLException {
+    UUID tenant = UUID.randomUUID();
+    String shopOnlyOnTenant = "shopee-only-" + tenant;
+    try (Connection admin = AuthTestSupport.admin()) {
+      exec(
+          admin,
+          """
+          INSERT INTO tenant (id, name, tsf_shop_id, membership_tier, entitlement_status, ent_ver)
+          VALUES (?, 'Shopee', ?, 'PRO', 'ACTIVE', 1)
+          """,
+          tenant,
+          shopOnlyOnTenant);
+      exec(
+          admin,
+          """
+          INSERT INTO channel_account (id, tenant_id, channel, external_shop_id, mode, status)
+          VALUES (?, ?, 'SHOPEE', ?, 'OBSERVE', 'CONNECTED')
+          """,
+          UUID.randomUUID(),
+          tenant,
+          shopOnlyOnTenant);
+    }
+    try (Connection app = AuthTestSupport.app();
+        PreparedStatement statement = app.prepareStatement("SELECT resolve_tenant(?, ?)")) {
+      // Step 1: Non-TSF channels resolve only through channel_account.
+      statement.setString(1, "SHOPEE");
+      statement.setString(2, shopOnlyOnTenant);
+      try (ResultSet rs = statement.executeQuery()) {
+        assertThat(rs.next()).isTrue();
+        assertThat(rs.getObject(1, UUID.class)).isEqualTo(tenant);
+      }
+      try (Connection admin = AuthTestSupport.admin();
+          PreparedStatement delete =
+              admin.prepareStatement(
+                  "DELETE FROM channel_account WHERE channel = 'SHOPEE' AND external_shop_id = ?")) {
+        delete.setString(1, shopOnlyOnTenant);
+        delete.executeUpdate();
+      }
+      // Step 2: tenant.tsf_shop_id is not used as a fallback for SHOPEE.
+      statement.setString(1, "SHOPEE");
+      statement.setString(2, shopOnlyOnTenant);
+      try (ResultSet rs = statement.executeQuery()) {
+        assertThat(rs.next()).isTrue();
+        assertThat(rs.getObject(1, UUID.class)).isNull();
+      }
+    }
+  }
+
+  @Test
+  void channelAccountTableStillHasForceRls() throws SQLException {
+    try (Connection admin = AuthTestSupport.admin();
+        PreparedStatement statement =
+            admin.prepareStatement(
+                """
+                SELECT c.relrowsecurity, c.relforcerowsecurity
+                FROM pg_class AS c
+                JOIN pg_namespace AS n ON n.oid = c.relnamespace
+                WHERE n.nspname = 'public' AND c.relname = 'channel_account'
+                """)) {
+      // Step 1: V10 must not weaken tenant isolation on channel_account.
+      try (ResultSet rs = statement.executeQuery()) {
+        assertThat(rs.next()).isTrue();
+        assertThat(rs.getBoolean("relrowsecurity")).isTrue();
+        assertThat(rs.getBoolean("relforcerowsecurity")).isTrue();
+        assertThat(rs.next()).isFalse();
       }
     }
   }
