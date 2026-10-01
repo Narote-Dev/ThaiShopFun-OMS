@@ -1,4 +1,11 @@
 # Tests mint typ=at+jwt. The permissive default lives in application.yml.
+spring:
+  datasource:
+    hikari:
+      # Shared Testcontainers Postgres; many Spring contexts run in one JVM on CI.
+      maximum-pool-size: 5
+      minimum-idle: 1
+
 oms:
   security:
     accepted-token-types:
