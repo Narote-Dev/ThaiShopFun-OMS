@@ -3,6 +3,12 @@ oms:
   security:
     accepted-token-types:
       - at+jwt
+  # Change: T10 PII keys. TEST ONLY. Base64 of "test-only-pii-key-1-not-a-secret" and
+  # "test-only-pii-hmac-not-a-secret!". Not a secret, never used outside tests.
+  pii:
+    keys: test1:dGVzdC1vbmx5LXBpaS1rZXktMS1ub3QtYS1zZWNyZXQ=
+    active-key-id: test1
+    hash-key: dGVzdC1vbmx5LXBpaS1obWFjLW5vdC1hLXNlY3JldCE=
   # Change: tests run StockExpiryJob directly. A background tick would race their assertions.
   stock:
     expiry:

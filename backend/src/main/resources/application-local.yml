@@ -11,6 +11,12 @@ oms:
       - at+jwt
   inbox:
     hmac-secrets: dev-inbox-hmac-secret
+  # DEV ONLY. Base64 of "dev-only-local-pii-key-NOT-PROD!" and "dev-only-local-pii-hmac-NOT-PROD".
+  # Never reuse outside the local profile. Real keys come from OMS_PII_* env vars.
+  pii:
+    keys: dev1:ZGV2LW9ubHktbG9jYWwtcGlpLWtleS1OT1QtUFJPRCE=
+    active-key-id: dev1
+    hash-key: ZGV2LW9ubHktbG9jYWwtcGlpLWhtYWMtTk9ULVBST0Q=
   outbox:
     destination-url: http://localhost:8090/internal/v1/oms-events
     webhook-secret: dev-outbox-webhook-secret-local-only
