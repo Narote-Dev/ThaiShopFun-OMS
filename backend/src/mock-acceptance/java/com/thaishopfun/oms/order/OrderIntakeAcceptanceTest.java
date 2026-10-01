@@ -116,10 +116,12 @@ class OrderIntakeAcceptanceTest {
     IntakeTestConfig.afterOutboxCalls.set(0);
     try (Connection admin = AuthTestSupport.admin();
         var statement = admin.createStatement()) {
+      statement.execute("SET session_replication_role = replica");
       statement.execute(
           "TRUNCATE TABLE outbox_event, inbox_event, order_status_history, order_line, "
               + "order_recipient, sales_order, stock_reservation, inventory_ledger, inventory, "
               + "reconciliation_issue, shadow_diff CASCADE");
+      statement.execute("SET session_replication_role = DEFAULT");
     }
   }
 
