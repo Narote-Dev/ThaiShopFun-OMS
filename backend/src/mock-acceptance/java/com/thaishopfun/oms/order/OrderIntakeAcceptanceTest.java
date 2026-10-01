@@ -118,7 +118,8 @@ class OrderIntakeAcceptanceTest {
         var statement = admin.createStatement()) {
       statement.execute(
           "TRUNCATE TABLE outbox_event, inbox_event, order_status_history, order_line, "
-              + "order_recipient, sales_order, stock_reservation, stock_ledger, reconciliation_issue");
+              + "order_recipient, sales_order, stock_reservation, inventory_ledger, inventory, "
+              + "reconciliation_issue, shadow_diff CASCADE");
     }
   }
 
