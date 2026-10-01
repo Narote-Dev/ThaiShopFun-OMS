@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.thaishopfun.mocktsf.contract.ContractValidator;
 import com.thaishopfun.oms.auth.AuthTestSupport;
 import com.thaishopfun.oms.stock.ReservationEngine;
+import com.thaishopfun.oms.stock.StockExpiryJob;
 import com.thaishopfun.oms.stock.StockFixture;
 import com.thaishopfun.oms.stock.StockTestConfig;
 import com.thaishopfun.oms.stock.StockTestConfig.Fault;
@@ -18,8 +19,10 @@ import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
@@ -68,6 +71,7 @@ class CheckoutT12AAcceptanceTest {
   @Autowired PlatformTransactionManager transactions;
   @Autowired ReservationEngine engine;
   @Autowired FaultHooks faults;
+  @Autowired StockExpiryJob expiryJob;
 
   StockFixture fixture;
 
@@ -178,8 +182,8 @@ class CheckoutT12AAcceptanceTest {
     HttpResponse<String> graceResp =
         post("chk-grace", request(fixture.tsfShopId(grace), "chk-grace", "L-grace", 2));
     assertThat(graceResp.statusCode()).isEqualTo(201);
-    assertThat(JSON.readTree(graceResp.body()).path("enforced").asBoolean()).isTrue();
-    assertThat(fixture.reserved(grace, graceSku)).isEqualTo(2);
+    assertThat(JSON.readTree(graceResp.body()).path("enforced").asBoolean()).isFalse();
+    assertThat(fixture.reserved(grace, graceSku)).isZero();
 
     StockFixture.Shop paused = fixture.shop("ACTIVE");
     UUID pausedAcct = fixture.channelAccount(paused, "ACTIVE", "CONNECTED");
@@ -217,15 +221,17 @@ class CheckoutT12AAcceptanceTest {
     int threads = 20;
     ExecutorService pool = Executors.newFixedThreadPool(threads);
     try {
-      List<Callable<Integer>> tasks = new ArrayList<>();
+      List<Future<HttpResponse<String>>> futures = new ArrayList<>();
       for (int i = 0; i < threads; i++) {
-        tasks.add(() -> post("chk-20", body).statusCode());
+        futures.add(pool.submit(() -> post("chk-20", body)));
       }
-      List<Future<Integer>> futures = pool.invokeAll(tasks, 90, TimeUnit.SECONDS);
-      assertThat(futures).allMatch(Future::isDone);
-      for (Future<Integer> future : futures) {
-        assertThat(future.get(5, TimeUnit.SECONDS)).isEqualTo(201);
+      Set<String> bodies = new HashSet<>();
+      for (Future<HttpResponse<String>> future : futures) {
+        HttpResponse<String> response = future.get(90, TimeUnit.SECONDS);
+        assertThat(response.statusCode()).isEqualTo(201);
+        bodies.add(response.body());
       }
+      assertThat(bodies).hasSize(1);
     } finally {
       pool.shutdownNow();
     }
@@ -254,10 +260,23 @@ class CheckoutT12AAcceptanceTest {
     StockFixture.Shop shop = fixture.shop("ACTIVE");
     String shopId = fixture.tsfShopId(shop);
     UUID account = fixture.channelAccount(shop, "SHADOW", "CONNECTED");
-    UUID sku = fixture.sku(shop, 2);
-    fixture.channelListing(shop, account, "L-sh", sku, true);
-    ObjectNode body = request(shopId, "chk-sh-replay", "L-sh", 1);
-    post("chk-sh-replay", body);
+    UUID sku = fixture.sku(shop, 5);
+    fixture.channelListing(shop, account, "L-sh-a", sku, true);
+    fixture.channelListing(shop, account, "L-sh-b", sku, true);
+    ObjectNode body = request(shopId, "chk-sh-replay", List.of("L-sh-a", "L-sh-b"), List.of(4, 4));
+    HttpResponse<String> first = post("chk-sh-replay", body);
+    assertThat(first.statusCode()).isEqualTo(201);
+    JsonNode omsValue =
+        fixture.inTenant(
+            shop.tenant(),
+            () ->
+                JSON.readTree(
+                    jdbc.queryForObject(
+                        "SELECT oms_value::text FROM shadow_diff WHERE ref = ?",
+                        String.class,
+                        "chk-sh-replay")));
+    assertThat(omsValue.path("would_reserve").asBoolean()).isFalse();
+    assertThat(omsValue.path("items")).hasSize(2);
     post("chk-sh-replay", body);
     long diffs =
         fixture.inTenant(
@@ -310,6 +329,17 @@ class CheckoutT12AAcceptanceTest {
   void tenantIsolationOnDelete() throws Exception {
     StockFixture.Shop a = fixture.shop("ACTIVE");
     StockFixture.Shop b = fixture.shop("ACTIVE");
+    UUID skuB = fixture.sku(b, 3);
+    UUID groupB =
+        fixture.inTenant(
+            b.tenant(),
+            () ->
+                engine
+                    .reserve(
+                        com.thaishopfun.oms.stock.StockOwner.checkout("chk-b"),
+                        List.of(com.thaishopfun.oms.stock.ReserveItem.of(skuB, 1)),
+                        "k-b")
+                    .reservationGroupId());
     UUID skuA = fixture.sku(a, 3);
     UUID groupA =
         fixture.inTenant(
@@ -323,18 +353,9 @@ class CheckoutT12AAcceptanceTest {
                     .reservationGroupId());
     assertThat(delete(groupA.toString()).statusCode()).isEqualTo(204);
     assertThat(fixture.reserved(a, skuA)).isZero();
-    UUID skuB = fixture.sku(b, 3);
-    UUID groupB =
-        fixture.inTenant(
-            b.tenant(),
-            () ->
-                engine
-                    .reserve(
-                        com.thaishopfun.oms.stock.StockOwner.checkout("chk-b"),
-                        List.of(com.thaishopfun.oms.stock.ReserveItem.of(skuB, 1)),
-                        "k-b")
-                    .reservationGroupId());
     assertThat(fixture.reserved(b, skuB)).isEqualTo(1);
+    assertThat(delete(groupB.toString()).statusCode()).isEqualTo(204);
+    assertThat(fixture.reserved(b, skuB)).isZero();
     fixture.assertInvariants(a);
     fixture.assertInvariants(b);
   }
@@ -346,9 +367,11 @@ class CheckoutT12AAcceptanceTest {
     UUID account = fixture.channelAccount(shop, "ACTIVE", "CONNECTED");
     UUID sku = fixture.sku(shop, 10);
     fixture.channelListing(shop, account, "L-retry", sku, true);
+    int firedBefore = faults.fired();
     faults.failNext(Fault.DEADLOCK);
     HttpResponse<String> response = post("chk-retry", request(shopId, "chk-retry", "L-retry", 2));
     assertThat(response.statusCode()).isEqualTo(201);
+    assertThat(faults.fired()).isEqualTo(firedBefore + 1);
     assertThat(fixture.reserved(shop, sku)).isEqualTo(2);
     fixture.assertInvariants(shop);
   }
@@ -456,6 +479,132 @@ class CheckoutT12AAcceptanceTest {
     assertThat(response.statusCode()).isEqualTo(409);
     JsonNode items = JSON.readTree(response.body()).path("items");
     assertThat(items).hasSize(2);
+  }
+
+  @Test
+  void idempotencyHashCollisionReturns409() throws Exception {
+    StockFixture.Shop shop = fixture.shop("ACTIVE");
+    String shopId = fixture.tsfShopId(shop);
+    UUID account = fixture.channelAccount(shop, "ACTIVE", "CONNECTED");
+    UUID sku = fixture.sku(shop, 10);
+    fixture.channelListing(shop, account, "a:1|b", sku, true);
+    fixture.channelListing(shop, account, "a", sku, true);
+    fixture.channelListing(shop, account, "b", sku, true);
+    post("chk-hash", request(shopId, "chk-hash", "a:1|b", 2));
+    HttpResponse<String> conflict =
+        post("chk-hash", request(shopId, "chk-hash", List.of("a", "b"), List.of(1, 2)));
+    assertThat(conflict.statusCode()).isEqualTo(409);
+    assertThat(JSON.readTree(conflict.body()).path("error").asString())
+        .isEqualTo("IDEMPOTENCY_CONFLICT");
+  }
+
+  @Test
+  void checkoutIdLongerThan255Is400() throws Exception {
+    StockFixture.Shop shop = fixture.shop("ACTIVE");
+    String longId = "x".repeat(256);
+    ObjectNode body = request(fixture.tsfShopId(shop), longId, "L-1", 1);
+    HttpResponse<String> response = post(longId, body);
+    assertThat(response.statusCode()).isEqualTo(400);
+    assertThat(CONTRACT.restErrors("error-bad-request", response.body())).isEmpty();
+  }
+
+  @Test
+  void multiItemCartBundleShortReportsListingAvailable() throws Exception {
+    StockFixture.Shop shop = fixture.shop("ACTIVE");
+    String shopId = fixture.tsfShopId(shop);
+    UUID account = fixture.channelAccount(shop, "ACTIVE", "CONNECTED");
+    UUID okSku = fixture.sku(shop, 10);
+    UUID shortSku = fixture.sku(shop, 0);
+    UUID bundle = fixture.bundle(shop, Map.of(okSku, 1, shortSku, 1));
+    fixture.channelListing(shop, account, "L-ok", okSku, true);
+    fixture.channelListing(shop, account, "L-bundle", bundle, true);
+    HttpResponse<String> response =
+        post("chk-cart", request(shopId, "chk-cart", List.of("L-ok", "L-bundle"), List.of(1, 1)));
+    assertThat(response.statusCode()).isEqualTo(409);
+    JsonNode items = JSON.readTree(response.body()).path("items");
+    List<String> listings = new ArrayList<>();
+    items.forEach(node -> listings.add(node.path("listing_sku_id").asString()));
+    assertThat(listings).contains("L-bundle");
+  }
+
+  @Test
+  void controlModeUnenforcedWhenStockControlFalse() throws Exception {
+    StockFixture.Shop shop = fixture.shop("ACTIVE");
+    String shopId = fixture.tsfShopId(shop);
+    UUID account = fixture.channelAccount(shop, "CONTROL", "CONNECTED");
+    UUID sku = fixture.sku(shop, 5);
+    fixture.channelListing(shop, account, "L-no-ctrl", sku, false);
+    HttpResponse<String> response =
+        post("chk-no-ctrl", request(shopId, "chk-no-ctrl", "L-no-ctrl", 2));
+    assertThat(response.statusCode()).isEqualTo(201);
+    assertThat(JSON.readTree(response.body()).path("enforced").asBoolean()).isFalse();
+    assertThat(fixture.reserved(shop, sku)).isZero();
+  }
+
+  @Test
+  void nullSkuMappingIsUnenforced() throws Exception {
+    StockFixture.Shop shop = fixture.shop("ACTIVE");
+    String shopId = fixture.tsfShopId(shop);
+    UUID account = fixture.channelAccount(shop, "ACTIVE", "CONNECTED");
+    fixture.channelListing(shop, account, "L-null", fixture.sku(shop, 5), true, false);
+    HttpResponse<String> response = post("chk-null", request(shopId, "chk-null", "L-null", 1));
+    assertThat(JSON.readTree(response.body()).path("enforced").asBoolean()).isFalse();
+  }
+
+  @Test
+  void deleteLockTimeoutReturns503AndHoldStaysActive() throws Exception {
+    StockFixture.Shop shop = fixture.shop("ACTIVE");
+    String shopId = fixture.tsfShopId(shop);
+    UUID account = fixture.channelAccount(shop, "ACTIVE", "CONNECTED");
+    UUID sku = fixture.sku(shop, 3);
+    fixture.channelListing(shop, account, "L-lock", sku, true);
+    HttpResponse<String> created = post("chk-lock", request(shopId, "chk-lock", "L-lock", 2));
+    String reservationId = JSON.readTree(created.body()).path("reservation_id").asString();
+    faults.failNext(Fault.LOCK_TIMEOUT);
+    HttpResponse<String> busy = delete(reservationId);
+    assertThat(busy.statusCode()).isEqualTo(503);
+    assertThat(busy.headers().firstValue("Retry-After")).contains("1");
+    assertThat(fixture.reserved(shop, sku)).isEqualTo(2);
+    fixture.assertInvariants(shop);
+  }
+
+  @Test
+  @Timeout(value = 2, unit = TimeUnit.MINUTES)
+  void concurrentOppositeSkuOrderWithSweeperDoesNotDeadlock() throws Exception {
+    StockFixture.Shop shop = fixture.shop("ACTIVE");
+    UUID a = fixture.sku(shop, 30);
+    UUID b = fixture.sku(shop, 30);
+    ExecutorService pool = Executors.newFixedThreadPool(8);
+    try {
+      List<Callable<Void>> tasks = new ArrayList<>();
+      for (int i = 0; i < 16; i++) {
+        boolean reverse = i % 2 == 1;
+        tasks.add(
+            () -> {
+              TenantContext.set(shop.tenant(), null);
+              try {
+                engine.reserve(
+                    com.thaishopfun.oms.stock.StockOwner.checkout("chk-" + UUID.randomUUID()),
+                    reverse
+                        ? List.of(
+                            com.thaishopfun.oms.stock.ReserveItem.of(b, 1),
+                            com.thaishopfun.oms.stock.ReserveItem.of(a, 1))
+                        : List.of(
+                            com.thaishopfun.oms.stock.ReserveItem.of(a, 1),
+                            com.thaishopfun.oms.stock.ReserveItem.of(b, 1)),
+                    "k-" + UUID.randomUUID());
+              } finally {
+                TenantContext.clear();
+              }
+              return null;
+            });
+      }
+      pool.invokeAll(tasks, 90, TimeUnit.SECONDS);
+      expiryJob.runOnce();
+      fixture.assertInvariants(shop);
+    } finally {
+      pool.shutdownNow();
+    }
   }
 
   @Test

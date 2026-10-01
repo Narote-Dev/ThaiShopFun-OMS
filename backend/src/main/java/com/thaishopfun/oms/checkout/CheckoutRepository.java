@@ -81,10 +81,12 @@ class CheckoutRepository {
     return rows.isEmpty() ? Optional.empty() : Optional.of(rows.get(0));
   }
 
-  boolean hasDefaultWarehouse() {
-    List<Integer> rows =
-        jdbc.queryForList("SELECT 1 FROM warehouse WHERE is_default LIMIT 1", Integer.class);
-    return !rows.isEmpty();
+  boolean tenantHasDefaultWarehouse(UUID tenantId) {
+    return Boolean.TRUE.equals(
+        jdbc.queryForObject(
+            "SELECT EXISTS (SELECT 1 FROM warehouse WHERE tenant_id = ? AND is_default)",
+            Boolean.class,
+            tenantId));
   }
 
   Optional<ListingRow> listing(UUID tenantId, UUID channelAccountId, String externalSkuId) {

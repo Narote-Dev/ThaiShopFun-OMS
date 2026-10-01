@@ -111,27 +111,36 @@ public class CheckoutReserveService {
     TenantContext.set(tenantId, null);
     try {
       String hash = requestHash(request);
-      ReserveHttpResult result =
-          retry.execute(
-              "checkout.reserve",
-              () ->
-                  writeTx.execute(
-                      status -> {
-                        try {
-                          return reserveInTransaction(tenantId, request, hash);
-                        } catch (StockOperationException ex) {
-                          if (ex.error() == StockError.OWNER_ALREADY_RESERVED) {
-                            throw new IdempotencyConflictException(CheckoutIdempotency.SCOPE);
+      try {
+        ReserveHttpResult result =
+            retry.execute(
+                "checkout.reserve",
+                () ->
+                    writeTx.execute(
+                        status -> {
+                          try {
+                            return reserveInTransaction(tenantId, request, hash);
+                          } catch (StockOperationException ex) {
+                            if (ex.error() == StockError.OWNER_ALREADY_RESERVED) {
+                              throw new IdempotencyConflictException(CheckoutIdempotency.SCOPE);
+                            }
+                            throw ex;
                           }
-                          throw ex;
-                        }
-                      }));
-      sample.stop(
-          Timer.builder(RESERVE_TIMER)
-              .tag("outcome", result.outcome())
-              .tag("mode", result.mode())
-              .register(meters));
-      return result;
+                        }));
+        sample.stop(
+            Timer.builder(RESERVE_TIMER)
+                .tag("outcome", result.outcome())
+                .tag("mode", result.mode())
+                .register(meters));
+        return result;
+      } catch (IdempotencyConflictException ex) {
+        sample.stop(
+            Timer.builder(RESERVE_TIMER)
+                .tag("outcome", "conflict")
+                .tag("mode", "none")
+                .register(meters));
+        throw ex;
+      }
     } finally {
       TenantContext.clear();
     }
@@ -148,14 +157,27 @@ public class CheckoutReserveService {
     }
     TenantContext.set(tenantId, null);
     try {
-      engine.release(groupId, "release:" + reservationIdRaw.trim());
-    } catch (StockOperationException ex) {
-      log.info("checkout release ignored: {}", ex.getMessage());
-    } catch (RuntimeException ex) {
-      log.warn("checkout release ignored after auth: {}", ex.getMessage());
+      retry.execute(
+          "checkout.release",
+          () -> {
+            try {
+              engine.release(groupId, "release:" + reservationIdRaw.trim());
+            } catch (StockOperationException ex) {
+              if (benignReleaseFailure(ex.error())) {
+                log.info("checkout release ignored: {}", ex.getMessage());
+                return null;
+              }
+              throw ex;
+            }
+            return null;
+          });
     } finally {
       TenantContext.clear();
     }
+  }
+
+  private static boolean benignReleaseFailure(StockError error) {
+    return error == StockError.RESERVATION_NOT_FOUND || error == StockError.RESERVATION_NOT_ACTIVE;
   }
 
   private ReserveHttpResult reserveInTransaction(
@@ -242,11 +264,11 @@ public class CheckoutReserveService {
         || "OBSERVE".equals(account.get().mode())) {
       return unenforcedPlans(request);
     }
-    if (!repository.hasDefaultWarehouse()) {
+    UUID tenantId = TenantContext.requireTenantId();
+    if (!repository.tenantHasDefaultWarehouse(tenantId)) {
       return unenforcedPlans(request);
     }
     String mode = account.get().mode();
-    UUID tenantId = TenantContext.requireTenantId();
     UUID accountId = account.get().id();
     List<ItemPlan> plans = new ArrayList<>();
     for (RequestItem item : request.items()) {
@@ -278,19 +300,26 @@ public class CheckoutReserveService {
         && tenant.entitlementExpiresAt().isBefore(clock.instant())) {
       return false;
     }
-    return "ACTIVE".equals(tenant.entitlementStatus())
-        || "GRACE".equals(tenant.entitlementStatus());
+    return "ACTIVE".equals(tenant.entitlementStatus());
   }
 
   private ObjectNode shadowOmsValue(List<ItemPlan> plans) {
+    Map<UUID, Integer> demandBySku = new LinkedHashMap<>();
+    for (ItemPlan plan : plans) {
+      if (plan.skuId() != null) {
+        demandBySku.merge(plan.skuId(), plan.qty(), Integer::sum);
+      }
+    }
     boolean wouldReserve = true;
     ArrayNode items = json.createArrayNode();
     for (ItemPlan plan : plans) {
       int available = 0;
+      int skuDemand = 0;
       if (plan.skuId() != null) {
         available = availability.available(plan.skuId(), null);
+        skuDemand = demandBySku.getOrDefault(plan.skuId(), plan.qty());
       }
-      boolean itemWould = plan.skuId() != null && plan.qty() <= available;
+      boolean itemWould = plan.skuId() != null && skuDemand <= available;
       if (!itemWould) {
         wouldReserve = false;
       }
@@ -378,11 +407,19 @@ public class CheckoutReserveService {
     List<RequestItem> sorted = new ArrayList<>(request.items());
     sorted.sort(Comparator.comparing(RequestItem::listingSkuId));
     StringBuilder canonical = new StringBuilder();
-    canonical.append(request.checkoutId()).append('|').append(request.tsfShopId());
+    appendField(canonical, request.checkoutId());
+    appendField(canonical, request.tsfShopId());
+    canonical.append('|').append(sorted.size());
     for (RequestItem item : sorted) {
-      canonical.append('|').append(item.listingSkuId()).append(':').append(item.qty());
+      canonical.append('|');
+      appendField(canonical, item.listingSkuId());
+      canonical.append(':').append(item.qty());
     }
     return CheckoutKeys.sha256(canonical.toString());
+  }
+
+  private static void appendField(StringBuilder canonical, String value) {
+    canonical.append(value.length()).append(':').append(value);
   }
 
   private ReserveRequest parse(JsonNode body) {
@@ -390,6 +427,10 @@ public class CheckoutReserveService {
       throw new CheckoutBadRequestException("body must be a JSON object");
     }
     String checkoutId = text(body, "checkout_id");
+    if (checkoutId.length() > CheckoutKeys.MAX_KEY_LENGTH) {
+      throw new CheckoutBadRequestException(
+          "checkout_id must be at most " + CheckoutKeys.MAX_KEY_LENGTH + " characters");
+    }
     String shopId = text(body, "tsf_shop_id");
     JsonNode itemsNode = body.get("items");
     if (itemsNode == null || !itemsNode.isArray() || itemsNode.isEmpty()) {

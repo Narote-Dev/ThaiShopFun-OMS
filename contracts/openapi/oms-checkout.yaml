@@ -34,7 +34,8 @@ paths:
             Reserved or unenforced (SHADOW / observe / unmapped listing / unknown shop).
             Unknown `tsf_shop_id` is not idempotent — each call mints a new `reservation_id`.
             `channel_account.stock_sync_paused` does not change `enforced`; only mode, mapping,
-            entitlement, and connection status do.
+            entitlement, and connection status do. `GRACE` entitlement is treated like expired or
+            suspended: checkout reserve is not enforced (`enforced=false`, no stock held).
           content:
             application/json:
               schema:
@@ -73,6 +74,16 @@ paths:
           description: |
             Released. Repeating the delete is also 204, including when the id is
             unknown, malformed, already released, expired, consumed, or held nothing.
+        "503":
+          description: Stock layer is busy (deadlock retries exhausted or lock timeout). Retry after `Retry-After`.
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: ../schemas/rest/error.json
 components:
   securitySchemes:
     omsInternal:

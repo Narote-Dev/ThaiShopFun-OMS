@@ -39,7 +39,7 @@ public class StockTestConfig {
     return new StockEventRecorder();
   }
 
-  static final class MutableClock extends Clock {
+  public static final class MutableClock extends Clock {
 
     private volatile Instant now;
 
@@ -73,7 +73,9 @@ public class StockTestConfig {
     /** A real server-side 40001: the engine retries the whole transaction. */
     SERIALIZATION,
     /** A real server-side 40P01. */
-    DEADLOCK
+    DEADLOCK,
+    /** A real server-side 55P03 (lock_timeout). */
+    LOCK_TIMEOUT
   }
 
   /** One-shot fault on the next engine write, fired once its inventory rows are locked. */
@@ -95,7 +97,7 @@ public class StockTestConfig {
     }
 
     /** Runs once on the next write, before inventory rows are locked. */
-    void atNextBeforeInventoryLock(Runnable action) {
+    public void atNextBeforeInventoryLock(Runnable action) {
       beforeInventoryLock.set(action);
     }
 
@@ -112,7 +114,7 @@ public class StockTestConfig {
       atInventoryLock.set(null);
     }
 
-    int fired() {
+    public int fired() {
       return fired.get();
     }
 
@@ -139,6 +141,7 @@ public class StockTestConfig {
         case THROW -> throw new IllegalStateException("injected failure in " + operation);
         case SERIALIZATION -> raise("serialization_failure");
         case DEADLOCK -> raise("deadlock_detected");
+        case LOCK_TIMEOUT -> raise("55P03");
         default -> throw new IllegalStateException("unknown fault");
       }
     }

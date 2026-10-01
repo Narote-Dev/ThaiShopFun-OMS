@@ -232,6 +232,17 @@ public final class StockFixture {
 
   public void channelListing(
       Shop shop, UUID channelAccountId, String externalSkuId, UUID skuId, boolean stockControl) {
+    channelListing(shop, channelAccountId, externalSkuId, skuId, stockControl, true);
+  }
+
+  public void channelListing(
+      Shop shop,
+      UUID channelAccountId,
+      String externalSkuId,
+      UUID skuId,
+      boolean stockControl,
+      boolean mapped) {
+    UUID listingSku = mapped ? skuId : null;
     inTenant(
         shop.tenant(),
         () ->
@@ -241,7 +252,7 @@ public final class StockFixture {
                 UuidV7.generate(),
                 shop.tenant(),
                 channelAccountId,
-                skuId,
+                listingSku,
                 externalSkuId,
                 stockControl));
   }

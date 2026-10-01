@@ -142,9 +142,24 @@ jobs:
         continue-on-error: true
         working-directory: backend
         run: |
+          set -o pipefail
           ./mvnw -B -Pperf gatling:test \
             -Dperf.baseUrl=http://127.0.0.1:8080 \
-            -Dperf.token="${{ steps.token.outputs.token }}"
+            -Dperf.token="${{ steps.token.outputs.token }}" 2>&1 | tee target/gatling-run.log
+      - name: Perf job summary
+        if: always()
+        working-directory: backend
+        run: |
+          P95=$(grep -oP 'reserve-load: 95th percentile.*?actual : \K[0-9.]+' target/gatling-run.log | tail -1 || echo "n/a")
+          P99=$(grep -oP 'reserve-load: 99th percentile.*?actual : \K[0-9.]+' target/gatling-run.log | tail -1 || echo "n/a")
+          {
+            echo "### Checkout reserve perf (GitHub-hosted runner)"
+            echo "- reserve-load p95: **${P95}** ms (NFR < 150 ms)"
+            echo "- reserve-load p99: **${P99}** ms (NFR < 300 ms)"
+            echo "- Assertions are **not** loosened; this job is non-blocking (\`continue-on-error\`)."
+            echo "- Local reference: ~8 ms p95 / ~39 ms p99 on 8 cores; ~15 s p95 on 2-core pin reproduces CI saturation."
+            echo "- Full report: \`gatling-checkout-reserve\` artifact."
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Perf NFR evidence
         if: steps.gatling.outcome == 'failure'
         run: |
@@ -157,7 +172,7 @@ jobs:
           if-no-files-found: warn
           path: backend/target/gatling/**
       - name: Upload perf backend log
-        if: failure()
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: perf-backend-log

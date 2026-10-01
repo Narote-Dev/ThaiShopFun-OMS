@@ -3,9 +3,12 @@ package com.thaishopfun.oms.stock;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.thaishopfun.oms.auth.AuthTestSupport;
 import com.thaishopfun.oms.stock.StockFixture.Shop;
 import com.thaishopfun.oms.stock.StockTestConfig.Fault;
 import com.thaishopfun.oms.tenant.TenantContext;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -254,6 +257,25 @@ class ReservationEngineTest extends StockTestBase {
   }
 
   @Test
+  void anotherCheckoutsExpiredHoldIsInlinedBeforeFullReserve() {
+    Shop shop = fixture.shop("ACTIVE");
+    UUID sku = fixture.sku(shop, 10);
+    StockOwner expired = checkout();
+    as(
+        shop,
+        () ->
+            engine.reserve(
+                expired, List.of(ReserveItem.of(sku, 10)), key(), Duration.ofMinutes(1)));
+    clock.advance(Duration.ofMinutes(2));
+    StockOwner buyer = checkout();
+    ReserveResult result =
+        as(shop, () -> engine.reserve(buyer, List.of(ReserveItem.of(sku, 10)), key()));
+    assertThat(result.reserved()).isTrue();
+    assertThat(fixture.reserved(shop, sku)).isEqualTo(10);
+    fixture.assertInvariants(shop);
+  }
+
+  @Test
   void unexpiredCheckoutHoldIsNotInlinedOnReserve() {
     Shop shop = fixture.shop("ACTIVE");
     UUID sku = fixture.sku(shop, 10);
@@ -282,21 +304,42 @@ class ReservationEngineTest extends StockTestBase {
                     checkoutOwner, List.of(ReserveItem.of(sku, 4)), key(), Duration.ofMinutes(15)));
     UUID groupId = held.reservationGroupId();
     clock.advance(Duration.ofMinutes(16));
-
-    clock.advance(Duration.ofMinutes(16));
     StockOwner otherCheckout = checkout();
     faults.atNextBeforeInventoryLock(
-        () ->
-            fixture.inTenant(
-                shop.tenant(),
-                () ->
-                    jdbc.update(
-                        """
-                        UPDATE stock_reservation
-                        SET owner_type = 'ORDER', owner_ref = 'ord-before-ttl', expires_at = NULL
-                        WHERE reservation_group_id = ?
-                        """,
-                        groupId)));
+        () -> {
+          Thread transfer =
+              new Thread(
+                  () -> {
+                    try (Connection app = AuthTestSupport.app()) {
+                      app.setAutoCommit(false);
+                      try (PreparedStatement tenant =
+                          app.prepareStatement("SELECT set_config('app.tenant_id', ?, true)")) {
+                        tenant.setString(1, shop.tenant().toString());
+                        tenant.execute();
+                      }
+                      try (PreparedStatement update =
+                          app.prepareStatement(
+                              """
+                              UPDATE stock_reservation
+                              SET owner_type = 'ORDER', owner_ref = 'ord-before-ttl', expires_at = NULL
+                              WHERE reservation_group_id = ?
+                              """)) {
+                        update.setObject(1, groupId);
+                        update.executeUpdate();
+                      }
+                      app.commit();
+                    } catch (Exception ex) {
+                      throw new RuntimeException(ex);
+                    }
+                  });
+          transfer.start();
+          try {
+            transfer.join(15_000);
+          } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException(ex);
+          }
+        });
 
     ReserveResult result =
         as(shop, () -> engine.reserve(otherCheckout, List.of(ReserveItem.of(sku, 2)), key()));
