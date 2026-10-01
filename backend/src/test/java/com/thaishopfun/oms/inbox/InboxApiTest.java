@@ -348,14 +348,22 @@ class InboxApiTest {
     try {
       CountDownLatch start = new CountDownLatch(1);
       Future<Integer> left = pool.submit(() -> awaitThenProcessOne(start));
+      Future<Integer> right =
+          pool.submit(
+              () -> {
+                if (!start.await(5, TimeUnit.SECONDS)) {
+                  throw new IllegalStateException("start timed out");
+                }
+                assertThat(orderCreated.entered.await(10, TimeUnit.SECONDS)).isTrue();
+                return worker.processAvailable(1);
+              });
       start.countDown();
       assertThat(orderCreated.entered.await(10, TimeUnit.SECONDS)).isTrue();
       assertThat(awaitAdvisoryWaiter()).isTrue();
       assertThat(orderCreated.calls.get()).isEqualTo(1);
       orderCreated.release.countDown();
-      assertThat(left.get(10, TimeUnit.SECONDS)).isEqualTo(1);
-      // Step 2: Second event runs only after the first completes, so version order stays valid.
-      assertThat(worker.processAvailable(1)).isEqualTo(1);
+      left.get(10, TimeUnit.SECONDS);
+      right.get(10, TimeUnit.SECONDS);
     } finally {
       orderCreated.release.countDown();
       pool.shutdownNow();

@@ -6,6 +6,7 @@ import com.thaishopfun.mocktsf.MockTsfApplication;
 import com.thaishopfun.mocktsf.OmsEndpoint;
 import com.thaishopfun.mocktsf.contract.ContractValidator;
 import com.thaishopfun.oms.auth.AuthTestSupport;
+import com.thaishopfun.oms.auth.UuidV7;
 import com.thaishopfun.oms.inbox.InboxWorker;
 import com.thaishopfun.oms.outbox.OutboxPublisher;
 import com.thaishopfun.oms.stock.StockFixture;
@@ -113,7 +114,7 @@ class OrderIntakeAcceptanceTest {
       statement.execute(
           "TRUNCATE TABLE outbox_event, inbox_event, order_status_history, order_line, "
               + "order_recipient, sales_order, stock_reservation, inventory_ledger, inventory, "
-              + "reconciliation_issue, shadow_diff CASCADE");
+              + "idempotency_key, reconciliation_issue, shadow_diff CASCADE");
       statement.execute("SET session_replication_role = DEFAULT");
     }
   }
@@ -484,7 +485,11 @@ class OrderIntakeAcceptanceTest {
     event.put("occurred_at", Instant.now().truncatedTo(ChronoUnit.SECONDS).toString());
     ObjectNode data = (ObjectNode) event.get("data");
     data.put("order_id", orderId);
-    data.put("reservation_id", reservationId);
+    String rid =
+        reservationId == null || reservationId.isBlank()
+            ? UuidV7.generate().toString()
+            : reservationId;
+    data.put("reservation_id", rid);
     data.put("payment_method", paymentMethod);
     if ("PREPAID".equals(paymentMethod)) {
       data.put("payment_expires_at", Instant.now().plus(30, ChronoUnit.MINUTES).toString());
