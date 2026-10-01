@@ -1,5 +1,8 @@
 package com.thaishopfun.oms.channel;
 
+import com.thaishopfun.oms.channel.exception.ChannelClientException;
+import com.thaishopfun.oms.channel.exception.ChannelIdempotencyConflictException;
+import com.thaishopfun.oms.channel.exception.ChannelRateLimitedException;
 import io.github.resilience4j.bulkhead.Bulkhead;
 import io.github.resilience4j.bulkhead.BulkheadConfig;
 import io.github.resilience4j.bulkhead.BulkheadRegistry;
@@ -91,6 +94,10 @@ public class AccountResilienceRegistry {
             .permittedNumberOfCallsInHalfOpenState(settings.getCircuitPermittedCallsInHalfOpen())
             .recordExceptions(
                 com.thaishopfun.oms.channel.exception.ChannelUnavailableException.class)
+            .ignoreExceptions(
+                ChannelRateLimitedException.class,
+                ChannelClientException.class,
+                ChannelIdempotencyConflictException.class)
             .build();
     CircuitBreaker breaker =
         circuitBreakerRegistry.circuitBreaker(channel.name() + ":" + channelAccountId, config);

@@ -122,7 +122,7 @@ class FlywayV7OrdersTest {
   void freshMigrateAppliesV7() throws SQLException {
     try (Connection admin = openAdmin()) {
       // Step 1: The full chain ran on the empty container, V5 skipped.
-      assertThat(versions(admin)).containsExactly("1", "2", "3", "4", "6", "7", "8", "9");
+      assertThat(versions(admin)).containsExactly("1", "2", "3", "4", "6", "7", "8", "9", "10");
       // Step 2: Every V7 table exists, with the indexes 03-data-model.md requires.
       Set<String> tables = new HashSet<>();
       try (Statement statement = admin.createStatement();

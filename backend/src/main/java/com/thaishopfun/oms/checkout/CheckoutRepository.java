@@ -62,15 +62,13 @@ class CheckoutRepository {
     return rows.isEmpty() ? Optional.empty() : Optional.of(rows.get(0));
   }
 
-  Optional<ChannelAccount> tsfAccount(UUID tenantId) {
+  Optional<ChannelAccount> tsfAccount(UUID tenantId, String tsfShopId) {
     List<ChannelAccount> rows =
         jdbc.query(
             """
             SELECT id, mode, status, stock_sync_paused
             FROM channel_account
-            WHERE tenant_id = ? AND channel = 'TSF'
-            ORDER BY created_at
-            LIMIT 1
+            WHERE tenant_id = ? AND channel = 'TSF' AND external_shop_id = ?
             """,
             (rs, row) ->
                 new ChannelAccount(
@@ -78,7 +76,8 @@ class CheckoutRepository {
                     rs.getString("mode"),
                     rs.getString("status"),
                     rs.getBoolean("stock_sync_paused")),
-            tenantId);
+            tenantId,
+            tsfShopId);
     return rows.isEmpty() ? Optional.empty() : Optional.of(rows.get(0));
   }
 

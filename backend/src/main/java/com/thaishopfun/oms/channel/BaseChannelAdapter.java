@@ -29,8 +29,8 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.BooleanSupplier;
 
 /**
- * Decorator order: capability check → bulkhead → circuit breaker → retry (re-acquire rate limit
- * each attempt) → HTTP timeout inside {@link #executeHttp}.
+ * Decorator order: capability check → bulkhead → retry loop (rate limiter → circuit breaker → HTTP
+ * with timeout per attempt).
  */
 public abstract class BaseChannelAdapter implements ChannelAdapter {
 
@@ -74,7 +74,7 @@ public abstract class BaseChannelAdapter implements ChannelAdapter {
 
   @Override
   public final ListingPage listListings(ChannelAccountRef account, String cursor) {
-    requireCapability("listListings", capabilities()::supportsOrderPull);
+    requireCapability("listListings", capabilities()::supportsStockPush);
     return invoke(account, "listListings", () -> doListListings(account, cursor));
   }
 
@@ -149,17 +149,11 @@ public abstract class BaseChannelAdapter implements ChannelAdapter {
 
   private <T> T invoke(ChannelAccountRef account, String operation, Callable<T> httpCall) {
     Bulkhead bulkhead = resilience.bulkhead(channel());
-    CircuitBreaker circuitBreaker =
-        resilience.circuitBreaker(channel(), account.channelAccountId());
     Timer.Sample sample = metrics.startTimer();
     String outcome = "success";
     try {
       return Bulkhead.decorateCallable(
-              bulkhead,
-              () ->
-                  CircuitBreaker.decorateCallable(
-                          circuitBreaker, () -> invokeWithRetry(account, operation, httpCall))
-                      .call())
+              bulkhead, () -> invokeWithRetry(account, operation, httpCall))
           .call();
     } catch (BulkheadFullException ex) {
       outcome = "bulkhead_rejected";
@@ -195,15 +189,20 @@ public abstract class BaseChannelAdapter implements ChannelAdapter {
     ChannelProperties.TsfChannelSettings settings = settings();
     int maxAttempts = Math.max(1, settings.getRetryMaxAttempts());
     Exception last = null;
+    CircuitBreaker circuitBreaker =
+        resilience.circuitBreaker(channel(), account.channelAccountId());
     for (int attempt = 1; attempt <= maxAttempts; attempt++) {
       RateLimiter rateLimiter = resilience.rateLimiter(channel(), account.channelAccountId());
       try {
-        return RateLimiter.decorateCallable(rateLimiter, httpCall::call).call();
+        return RateLimiter.decorateCallable(
+                rateLimiter,
+                () -> CircuitBreaker.decorateCallable(circuitBreaker, httpCall::call).call())
+            .call();
       } catch (RequestNotPermitted ex) {
         last = ex;
         metrics.recordRetry(channel(), operation, "rate_limiter_timeout");
         if (attempt >= maxAttempts) {
-          throw new ChannelUnavailableException("Rate limit wait exceeded for " + operation, ex);
+          throw new ChannelRateLimitedException("Rate limit wait exceeded for " + operation, null);
         }
         sleepBackoff(settings, attempt, null);
       } catch (ChannelRateLimitedException ex) {
@@ -212,7 +211,14 @@ public abstract class BaseChannelAdapter implements ChannelAdapter {
         if (attempt >= maxAttempts) {
           throw ex;
         }
-        sleepRetryAfter(settings, ex);
+        Duration retryAfter =
+            ex.retryAfterSeconds() != null && ex.retryAfterSeconds() > 0
+                ? Duration.ofSeconds(ex.retryAfterSeconds())
+                : Duration.ZERO;
+        if (!retryAfter.isZero() && retryAfter.compareTo(settings.getMaxRetryAfter()) > 0) {
+          throw ex;
+        }
+        sleepBackoff(settings, attempt, retryAfter.isZero() ? null : retryAfter);
       } catch (ChannelUnavailableException ex) {
         last = ex;
         metrics.recordRetry(channel(), operation, "unavailable");
@@ -235,8 +241,8 @@ public abstract class BaseChannelAdapter implements ChannelAdapter {
     if (ex.retryAfterSeconds() != null && ex.retryAfterSeconds() > 0) {
       wait = Duration.ofSeconds(ex.retryAfterSeconds());
     }
-    if (wait.compareTo(settings.getMaxRetryAfter()) > 0) {
-      wait = settings.getMaxRetryAfter();
+    if (!wait.isZero() && wait.compareTo(settings.getMaxRetryAfter()) > 0) {
+      throw ex;
     }
     if (!wait.isZero()) {
       sleeper.sleep(wait);
