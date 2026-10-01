@@ -72,17 +72,10 @@ class OrderIntakeAcceptanceTest {
   @DynamicPropertySource
   static void properties(DynamicPropertyRegistry registry) {
     startMock();
-    AuthTestSupport.registerDatabase(registry);
+    AuthTestSupport.register(registry);
     int mockPort = mockPort();
-    registry.add("oms.security.issuer", () -> ISSUER);
-    registry.add(
-        "oms.security.jwks-uri",
-        () -> "http://127.0.0.1:" + mockPort + "/tsf-idp/.well-known/jwks.json");
-    registry.add("oms.security.audience", () -> "oms");
-    registry.add("oms.security.internal-audience", () -> "oms-internal");
     registry.add("oms.security.internal-client-ids", () -> "tsf,tsf-checkout");
     registry.add("oms.inbox.hmac-secrets", () -> INBOX_SECRET);
-    registry.add("oms.inbox.worker-enabled", () -> "false");
     registry.add("oms.inbox.jitter-ratio", () -> "0");
     registry.add("oms.outbox.publisher-enabled", () -> "false");
     registry.add("oms.outbox.jitter-ratio", () -> "0");
