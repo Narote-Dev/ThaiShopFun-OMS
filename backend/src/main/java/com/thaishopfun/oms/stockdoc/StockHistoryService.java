@@ -12,7 +12,6 @@ import java.sql.SQLException;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
-import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
@@ -23,11 +22,12 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
 /**
- * Per-SKU stock history: {@code inventory_ledger} newest first, keyset-paged on {@code (created_at,
- * id)}. Running totals come from a window over the SKU's whole ledger (per warehouse), so they stay
- * correct under the reason and date filters. That window reads every ledger row of one SKU per
- * request, which is fine at shop volumes; a snapshot table would replace it if a single SKU ever
- * reaches hundreds of thousands of entries.
+ * Per-SKU stock history: {@code inventory_ledger} newest first, keyset-paged on {@code
+ * (warehouse_id, ledger_seq)}. Running totals use a window over the SKU's whole ledger (per
+ * warehouse) ordered by {@code ledger_seq}, so commit order stays correct when transactions
+ * overlap. That window reads every ledger row of one SKU per request, which is fine at shop
+ * volumes; a snapshot table would replace it if a single SKU ever reaches hundreds of thousands of
+ * entries.
  */
 @Service
 public class StockHistoryService {
@@ -54,7 +54,7 @@ public class StockHistoryService {
     this.tx = tx;
   }
 
-  private record Cursor(Instant createdAt, UUID id) {}
+  private record Cursor(UUID warehouseId, long ledgerSeq) {}
 
   public StockHistoryPage history(
       UUID skuId,
@@ -93,13 +93,13 @@ public class StockHistoryService {
               new StringBuilder(
                   """
                   WITH l AS (
-                    SELECT l.id, l.created_at, l.warehouse_id, l.reason, l.delta_on_hand,
-                           l.delta_reserved, l.actor, l.ref_type, l.ref_id,
+                    SELECT l.id, l.created_at, l.warehouse_id, l.ledger_seq, l.reason,
+                           l.delta_on_hand, l.delta_reserved, l.actor, l.ref_type, l.ref_id,
                            sum(l.delta_on_hand) OVER w AS on_hand_after,
                            sum(l.delta_reserved) OVER w AS reserved_after
                     FROM inventory_ledger l
                     WHERE l.sku_id = ?
-                    WINDOW w AS (PARTITION BY l.warehouse_id ORDER BY l.created_at, l.id
+                    WINDOW w AS (PARTITION BY l.warehouse_id ORDER BY l.ledger_seq
                                  ROWS UNBOUNDED PRECEDING)
                   )
                   SELECT l.*, w.code AS warehouse_code,
@@ -133,11 +133,11 @@ public class StockHistoryService {
             params.add(OffsetDateTime.ofInstant(toAt, ZoneOffset.UTC));
           }
           if (after != null) {
-            sql.append(" AND (l.created_at, l.id) < (?, ?)");
-            params.add(OffsetDateTime.ofInstant(after.createdAt(), ZoneOffset.UTC));
-            params.add(after.id());
+            sql.append(" AND (l.warehouse_id, l.ledger_seq) < (?, ?)");
+            params.add(after.warehouseId());
+            params.add(after.ledgerSeq());
           }
-          sql.append(" ORDER BY l.created_at DESC, l.id DESC LIMIT ?");
+          sql.append(" ORDER BY l.warehouse_id DESC, l.ledger_seq DESC LIMIT ?");
           params.add(pageLimit + 1);
           List<Entry> rows = jdbc.query(sql.toString(), (rs, n) -> entry(rs), params.toArray());
           // Step 4: One extra row tells whether another page exists.
@@ -145,7 +145,7 @@ public class StockHistoryService {
           if (rows.size() > pageLimit) {
             rows = rows.subList(0, pageLimit);
             Entry last = rows.get(rows.size() - 1);
-            next = encode(new Cursor(last.createdAt(), last.id()));
+            next = encode(new Cursor(last.warehouseId(), last.ledgerSeq()));
           }
           return new StockHistoryPage(
               new SkuRef(skuId, (String) sku.get("sku_code"), (String) sku.get("name")),
@@ -170,7 +170,8 @@ public class StockHistoryService {
         rs.getString("actor"),
         refType,
         refId,
-        link(rs, refType, refId));
+        link(rs, refType, refId),
+        rs.getLong("ledger_seq"));
   }
 
   private static Link link(ResultSet rs, String refType, UUID refId) throws SQLException {
@@ -209,8 +210,7 @@ public class StockHistoryService {
   }
 
   private static String encode(Cursor cursor) {
-    long micros = ChronoUnit.MICROS.between(Instant.EPOCH, cursor.createdAt());
-    String raw = micros + ":" + cursor.id();
+    String raw = cursor.warehouseId() + ":" + cursor.ledgerSeq();
     return Base64.getUrlEncoder()
         .withoutPadding()
         .encodeToString(raw.getBytes(StandardCharsets.UTF_8));
@@ -223,9 +223,9 @@ public class StockHistoryService {
     try {
       String raw = new String(Base64.getUrlDecoder().decode(cursor), StandardCharsets.UTF_8);
       int colon = raw.indexOf(':');
-      long micros = Long.parseLong(raw.substring(0, colon));
-      return new Cursor(
-          Instant.EPOCH.plus(micros, ChronoUnit.MICROS), UUID.fromString(raw.substring(colon + 1)));
+      UUID warehouseId = UUID.fromString(raw.substring(0, colon));
+      long ledgerSeq = Long.parseLong(raw.substring(colon + 1));
+      return new Cursor(warehouseId, ledgerSeq);
     } catch (RuntimeException ex) {
       throw CatalogApiException.invalid("cursor is invalid");
     }

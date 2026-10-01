@@ -52,6 +52,7 @@ Drafts may be incomplete. Line writes check only the shape: `qty` within ±1,000
 
 - `start-count` sets `count_started_at` and snapshots `system_qty_at_start` = current `on_hand` (0 without a row) on every line; lines added later snapshot at insert. The correction is applied to the **current** `on_hand`, so units shipped after the start (T08 `consume`) are not taken twice: final `on_hand` = counted − shipped since the start. Reserved-but-not-shipped units are still on the shelf and counted, so `reserved` is untouched. The post writes the applied correction into each COUNT line's `qty`.
 - Several lines for the same SKU and warehouse are summed into one delta for that inventory row; the ledger keeps one entry per line (`ref_type = stock_document_line`, `ref_id` = line id).
+- After an OPENING is voided, the row still has ledger history, so a new OPENING is refused (`422 OPENING_ALREADY_SET`). Use an ADJUSTMENT (or another document type) to change stock instead.
 - A row whose delta would take `on_hand` below `reserved` (or 0) is `422 BELOW_RESERVED`. The check runs under the row lock and the UPDATE is conditional (`on_hand + delta >= reserved`); the `CHECK` constraint is the last line of defence.
 - All lines post or none do. Every refused line is listed in `errors`.
 - Missing `(sku, warehouse)` inventory rows are created first in their own short transaction (`on_hand = reserved = 0`).
@@ -86,9 +87,9 @@ Movement result: `{document_id, type, status, posted_at, posted_by, voided_at, m
 
 `GET /skus/{id}/stock-history?warehouse_id=&reason=&from=&to=&cursor=&limit=`
 
-`{sku: {id, sku_code, name}, items, next_cursor}`. Ledger rows newest first, keyset-paged on `(created_at, id)`; pass `next_cursor` back as `cursor` (`null` on the last page). `limit` default 50, max 200. `from`/`to` accept an ISO instant or a date (`YYYY-MM-DD`, a Bangkok calendar day; a `to` date includes that whole day). A bundle SKU is `422 BUNDLE_NOT_STOCKABLE`: bundles have no stock of their own, open a component's history instead.
+`{sku: {id, sku_code, name}, items, next_cursor}`. Ledger rows newest first, keyset-paged on `(warehouse_id, ledger_seq)`; pass `next_cursor` back as `cursor` (`null` on the last page). `limit` default 50, max 200. `from`/`to` accept an ISO instant or a date (`YYYY-MM-DD`, a Bangkok calendar day; a `to` date includes that whole day). A bundle SKU is `422 BUNDLE_NOT_STOCKABLE`: bundles have no stock of their own, open a component's history instead.
 
-An entry has `id, created_at, warehouse_id, warehouse_code, reason, delta_on_hand, delta_reserved, on_hand_after, reserved_after, actor, ref_type, ref_id, link`. `on_hand_after`/`reserved_after` are running totals of that (sku, warehouse) row right after the entry, computed by a window over the SKU's whole ledger, so they stay right under any filter. That reads every ledger row of the SKU per request, which is fine at shop volumes.
+An entry has `id, created_at, warehouse_id, warehouse_code, reason, delta_on_hand, delta_reserved, on_hand_after, reserved_after, actor, ref_type, ref_id, link, ledger_seq`. `on_hand_after`/`reserved_after` are running totals of that (sku, warehouse) row right after the entry, computed by a window over the SKU's whole ledger ordered by `ledger_seq` (commit order under the inventory row lock, not `created_at`), so they stay correct when transactions overlap. That reads every ledger row of the SKU per request, which is fine at shop volumes. Flyway **V8** adds `inventory.ledger_seq` and `inventory_ledger.ledger_seq` with `UNIQUE (tenant_id, sku_id, warehouse_id, ledger_seq)`.
 
 `link` by `ref_type`:
 

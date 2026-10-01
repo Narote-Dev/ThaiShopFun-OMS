@@ -425,12 +425,45 @@ class StockRepository {
     if (entries.isEmpty()) {
       return;
     }
+    // Step 1: Assign ledger_seq while the caller still holds each inventory row lock.
+    Map<UUID, Long> seqByEntryId = new LinkedHashMap<>();
+    LinkedHashMap<SkuWarehouse, List<LedgerEntry>> grouped = new LinkedHashMap<>();
+    for (LedgerEntry entry : entries) {
+      grouped
+          .computeIfAbsent(
+              new SkuWarehouse(entry.skuId(), entry.warehouseId()), k -> new ArrayList<>())
+          .add(entry);
+    }
+    for (Map.Entry<SkuWarehouse, List<LedgerEntry>> group : grouped.entrySet()) {
+      SkuWarehouse key = group.getKey();
+      List<LedgerEntry> lines = group.getValue();
+      int count = lines.size();
+      Long endSeq =
+          jdbc.queryForObject(
+              """
+              UPDATE inventory
+              SET ledger_seq = ledger_seq + ?
+              WHERE tenant_id = ? AND sku_id = ? AND warehouse_id = ?
+              RETURNING ledger_seq
+              """,
+              Long.class,
+              count,
+              tenantId,
+              key.skuId(),
+              key.warehouseId());
+      long startSeq = endSeq - count + 1;
+      for (int i = 0; i < count; i++) {
+        seqByEntryId.put(lines.get(i).id(), startSeq + i);
+      }
+    }
+    // Step 2: Append ledger rows with their commit-order sequence.
     List<UUID> ids = new ArrayList<>();
     List<UUID> skus = new ArrayList<>();
     List<UUID> warehouses = new ArrayList<>();
     List<Integer> onHand = new ArrayList<>();
     List<Integer> reserved = new ArrayList<>();
     List<UUID> refs = new ArrayList<>();
+    List<Long> seqs = new ArrayList<>();
     for (LedgerEntry entry : entries) {
       ids.add(entry.id());
       skus.add(entry.skuId());
@@ -438,15 +471,17 @@ class StockRepository {
       onHand.add(entry.deltaOnHand());
       reserved.add(entry.deltaReserved());
       refs.add(entry.refId());
+      seqs.add(seqByEntryId.get(entry.id()));
     }
     jdbc.update(
         """
         INSERT INTO inventory_ledger
           (id, tenant_id, sku_id, warehouse_id, delta_on_hand, delta_reserved, reason,
-           ref_type, ref_id, actor)
-        SELECT l.id, ?, l.sku_id, l.warehouse_id, l.d_on_hand, l.d_reserved, ?, ?, l.ref_id, ?
-        FROM unnest(?::uuid[], ?::uuid[], ?::uuid[], ?::int[], ?::int[], ?::uuid[])
-          AS l (id, sku_id, warehouse_id, d_on_hand, d_reserved, ref_id)
+           ref_type, ref_id, actor, ledger_seq)
+        SELECT l.id, ?, l.sku_id, l.warehouse_id, l.d_on_hand, l.d_reserved, ?, ?, l.ref_id, ?,
+               l.ledger_seq
+        FROM unnest(?::uuid[], ?::uuid[], ?::uuid[], ?::int[], ?::int[], ?::uuid[], ?::int8[])
+          AS l (id, sku_id, warehouse_id, d_on_hand, d_reserved, ref_id, ledger_seq)
         """,
         ps -> {
           ps.setObject(1, tenantId);
@@ -459,6 +494,7 @@ class StockRepository {
           intArray(ps, 8, onHand);
           intArray(ps, 9, reserved);
           uuidArray(ps, 10, refs);
+          longArray(ps, 11, seqs);
         });
   }
 
@@ -619,5 +655,10 @@ class StockRepository {
   private static void intArray(PreparedStatement ps, int index, Collection<Integer> values)
       throws SQLException {
     ps.setArray(index, ps.getConnection().createArrayOf("int4", values.toArray(new Integer[0])));
+  }
+
+  private static void longArray(PreparedStatement ps, int index, Collection<Long> values)
+      throws SQLException {
+    ps.setArray(index, ps.getConnection().createArrayOf("int8", values.toArray(new Long[0])));
   }
 }

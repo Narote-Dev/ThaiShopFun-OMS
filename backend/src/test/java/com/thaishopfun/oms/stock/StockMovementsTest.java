@@ -37,6 +37,7 @@ class StockMovementsTest extends StockTestBase {
 
   @Autowired StockMovements movements;
   @Autowired StockDocumentService documents;
+  @Autowired com.thaishopfun.oms.stockdoc.StockHistoryService history;
 
   private final UUID user = UuidV7.generate();
 
@@ -500,6 +501,95 @@ class StockMovementsTest extends StockTestBase {
     for (UUID doc : drafts) {
       assertThat(status(shop, doc)).isEqualTo("POSTED");
     }
+    fixture.assertInvariants(shop);
+  }
+
+  @Test
+  @Timeout(value = 2, unit = TimeUnit.MINUTES)
+  void historyRunningTotalsFollowCommitOrderWhenPostsOverlap() throws Exception {
+    Shop shop = fixture.shop("ACTIVE");
+    UUID sku = fixture.skuWithoutStock(shop);
+    UUID slowDoc = document(shop, "RECEIVE", "slow");
+    line(shop, slowDoc, sku, 10, null, null);
+    UUID fastDoc = document(shop, "RECEIVE", "fast");
+    line(shop, fastDoc, sku, 3, null, null);
+
+    // Step 1: The first post holds inventory under lock until the second post commits.
+    CountDownLatch slowLocked = new CountDownLatch(1);
+    CountDownLatch fastDone = new CountDownLatch(1);
+    faults.atNextBeforeInventoryLock(
+        () -> {
+          slowLocked.countDown();
+          try {
+            assertThat(fastDone.await(2, TimeUnit.MINUTES)).isTrue();
+          } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(ex);
+          }
+        });
+
+    ExecutorService pool = Executors.newFixedThreadPool(2);
+    try {
+      Future<?> slow =
+          pool.submit(
+              () -> {
+                TenantContext.set(shop.tenant(), user);
+                try {
+                  post(shop, slowDoc);
+                  return null;
+                } finally {
+                  TenantContext.clear();
+                }
+              });
+      Future<?> fast =
+          pool.submit(
+              () -> {
+                assertThat(slowLocked.await(2, TimeUnit.MINUTES)).isTrue();
+                TenantContext.set(shop.tenant(), user);
+                try {
+                  post(shop, fastDoc);
+                  return null;
+                } finally {
+                  TenantContext.clear();
+                  fastDone.countDown();
+                }
+              });
+      fast.get(2, TimeUnit.MINUTES);
+      slow.get(2, TimeUnit.MINUTES);
+    } finally {
+      pool.shutdownNow();
+      faults.reset();
+    }
+
+    // Step 2: Commit order is +3 then +10; running totals must match, not transaction start time.
+    assertThat(fixture.onHand(shop, sku)).isEqualTo(13);
+    var page =
+        asUser(shop, () -> history.history(sku, shop.warehouse(), null, null, null, null, 50));
+    assertThat(page.items()).hasSize(2);
+    assertThat(page.items().get(0).ledgerSeq()).isEqualTo(2);
+    assertThat(page.items().get(0).deltaOnHand()).isEqualTo(10);
+    assertThat(page.items().get(0).onHandAfter()).isEqualTo(13);
+    assertThat(page.items().get(1).ledgerSeq()).isEqualTo(1);
+    assertThat(page.items().get(1).deltaOnHand()).isEqualTo(3);
+    assertThat(page.items().get(1).onHandAfter()).isEqualTo(3);
+
+    List<Long> createdAtSeqOrder =
+        fixture.inTenant(
+            shop.tenant(),
+            () ->
+                jdbc
+                    .queryForList(
+                        """
+                        SELECT ledger_seq FROM inventory_ledger
+                        WHERE sku_id = ? AND warehouse_id = ?
+                        ORDER BY created_at, id
+                        """,
+                        sku,
+                        shop.warehouse())
+                    .stream()
+                    .map(row -> ((Number) row.get("ledger_seq")).longValue())
+                    .toList());
+    assertThat(createdAtSeqOrder).containsExactly(2L, 1L);
     fixture.assertInvariants(shop);
   }
 

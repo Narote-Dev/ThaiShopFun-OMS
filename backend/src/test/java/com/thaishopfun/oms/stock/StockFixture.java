@@ -303,14 +303,26 @@ final class StockFixture {
   }
 
   private void ledger(Shop shop, UUID sku, UUID warehouse, int qty, String reason) {
+    long seq =
+        jdbc.queryForObject(
+            """
+            UPDATE inventory SET ledger_seq = ledger_seq + 1
+            WHERE tenant_id = ? AND sku_id = ? AND warehouse_id = ?
+            RETURNING ledger_seq
+            """,
+            Long.class,
+            shop.tenant(),
+            sku,
+            warehouse);
     jdbc.update(
         "INSERT INTO inventory_ledger (id, tenant_id, sku_id, warehouse_id, delta_on_hand, "
-            + "delta_reserved, reason, actor) VALUES (?, ?, ?, ?, ?, 0, ?, 'test')",
+            + "delta_reserved, reason, actor, ledger_seq) VALUES (?, ?, ?, ?, ?, 0, ?, 'test', ?)",
         UuidV7.generate(),
         shop.tenant(),
         sku,
         warehouse,
         qty,
-        reason);
+        reason,
+        seq);
   }
 }

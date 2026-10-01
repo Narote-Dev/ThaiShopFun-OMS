@@ -16,8 +16,8 @@ public record StockHistoryPage(
 
   /**
    * A ledger row. {@code on_hand_after} and {@code reserved_after} are the running totals of its
-   * (sku, warehouse) row right after this entry, summed over the whole ledger in (created_at, id)
-   * order.
+   * (sku, warehouse) row right after this entry, summed over the whole ledger in {@code ledger_seq}
+   * order (commit order, not {@code created_at}).
    */
   public record Entry(
       UUID id,
@@ -32,7 +32,8 @@ public record StockHistoryPage(
       String actor,
       @JsonProperty("ref_type") String refType,
       @JsonProperty("ref_id") UUID refId,
-      Link link) {}
+      Link link,
+      @JsonProperty("ledger_seq") long ledgerSeq) {}
 
   /**
    * Where the entry came from, derived from {@code ref_type}: {@code stock_document}, {@code

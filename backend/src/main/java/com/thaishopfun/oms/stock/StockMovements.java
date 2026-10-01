@@ -194,6 +194,7 @@ public class StockMovements {
     // Step 4: Inventory rows in id order. A row created after Step 1 of post() is not there yet.
     Set<SkuWarehouse> keys = new LinkedHashSet<>();
     planned.forEach(p -> keys.add(p.key()));
+    hooks.beforeInventoryLock(SCOPE_POST);
     Map<SkuWarehouse, InventoryRow> inventory = repository.lockInventory(keys);
     hooks.afterInventoryLocked(SCOPE_POST);
     if (!inventory.keySet().containsAll(keys)) {
@@ -384,6 +385,7 @@ public class StockMovements {
     }
     Set<SkuWarehouse> keys = new LinkedHashSet<>();
     reversal.forEach(p -> keys.add(p.key()));
+    hooks.beforeInventoryLock(SCOPE_VOID);
     Map<SkuWarehouse, InventoryRow> inventory = repository.lockInventory(keys);
     hooks.afterInventoryLocked(SCOPE_VOID);
     if (!inventory.keySet().containsAll(keys)) {
@@ -440,6 +442,7 @@ public class StockMovements {
     // Step 3: One row, so creating it here cannot invert the id order; then lock it.
     SkuWarehouse row = new SkuWarehouse(skuId, warehouse);
     repository.ensureInventory(tenantId, List.of(row));
+    hooks.beforeInventoryLock(SCOPE_RESTOCK);
     Map<SkuWarehouse, InventoryRow> inventory = repository.lockInventory(List.of(row));
     hooks.afterInventoryLocked(SCOPE_RESTOCK);
     InventoryRow locked = inventory.get(row);

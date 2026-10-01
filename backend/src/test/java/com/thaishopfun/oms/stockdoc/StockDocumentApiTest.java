@@ -431,10 +431,20 @@ class StockDocumentApiTest extends CatalogIntegrationTest {
       String reason,
       String refType,
       UUID refId) {
+    long seq =
+        count(
+            """
+            UPDATE inventory SET ledger_seq = ledger_seq + 1
+            WHERE tenant_id = ? AND sku_id = ? AND warehouse_id = ?
+            RETURNING ledger_seq
+            """,
+            shop.tenantId(),
+            UUID.fromString(sku.id()),
+            warehouse);
     execute(
         "INSERT INTO inventory_ledger (id, tenant_id, sku_id, warehouse_id, delta_on_hand,"
-            + " delta_reserved, reason, ref_type, ref_id, actor) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?,"
-            + " 'test')",
+            + " delta_reserved, reason, ref_type, ref_id, actor, ledger_seq) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?,"
+            + " 'test', ?)",
         UUID.randomUUID(),
         shop.tenantId(),
         UUID.fromString(sku.id()),
@@ -443,7 +453,8 @@ class StockDocumentApiTest extends CatalogIntegrationTest {
         reserved,
         reason,
         refType,
-        refId);
+        refId,
+        seq);
   }
 
   private static void expect(CatalogHttp.Result result, int status, String error) {
