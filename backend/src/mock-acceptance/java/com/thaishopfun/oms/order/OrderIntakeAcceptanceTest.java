@@ -539,10 +539,17 @@ class OrderIntakeAcceptanceTest {
     }
   }
 
-  private static boolean matchesStatusChanged(JsonNode received, String externalOrderId) {
-    return "order.status_changed".equals(received.path("event_type").asString())
-        && externalOrderId.equals(received.path("data").path("order_id").asString())
-        && "READY_TO_PICK".equals(received.path("data").path("fulfillment_status").asString());
+  private boolean matchesStatusChanged(JsonNode row, String externalOrderId) {
+    if (!"order.status_changed".equals(row.path("event_type").asString())) {
+      return false;
+    }
+    String rawBody = row.path("body").asString(null);
+    if (rawBody == null || rawBody.isBlank()) {
+      return false;
+    }
+    JsonNode envelope = JSON.readTree(rawBody);
+    return externalOrderId.equals(envelope.path("data").path("order_id").asString())
+        && "READY_TO_PICK".equals(envelope.path("data").path("fulfillment_status").asString());
   }
 
   private long countSalesOrders(String externalOrderId) throws Exception {
