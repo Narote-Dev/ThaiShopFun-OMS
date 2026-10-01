@@ -760,6 +760,57 @@ class CheckoutT12AAcceptanceTest {
   }
 
   @Test
+  void activeComponentlessBundleLineIsUnenforced() throws Exception {
+    StockFixture.Shop shop = fixture.shop("ACTIVE");
+    String shopId = fixture.tsfShopId(shop);
+    UUID account = fixture.channelAccount(shop, "ACTIVE", "CONNECTED");
+    UUID componentless = fixture.componentlessBundle(shop);
+    UUID sku = fixture.sku(shop, 10);
+    fixture.channelListing(shop, account, "L-empty", componentless, true);
+    fixture.channelListing(shop, account, "L-ok", sku, true);
+    int reservedBefore = fixture.reserved(shop, sku);
+    HttpResponse<String> response =
+        post("chk-empty", request(shopId, "chk-empty", List.of("L-empty", "L-ok"), List.of(3, 2)));
+    assertThat(response.statusCode()).isEqualTo(201);
+    JsonNode body = JSON.readTree(response.body());
+    assertThat(body.path("enforced").asBoolean()).isFalse();
+    for (JsonNode item : body.path("items")) {
+      String listing = item.path("listing_sku_id").asString();
+      if ("L-empty".equals(listing)) {
+        assertThat(item.path("enforced").asBoolean()).isFalse();
+      } else {
+        assertThat(item.path("enforced").asBoolean()).isTrue();
+      }
+    }
+    assertThat(fixture.reserved(shop, sku)).isEqualTo(reservedBefore + 2);
+    assertThat(fixture.reserved(shop, componentless)).isZero();
+    fixture.assertInvariants(shop);
+  }
+
+  @Test
+  void shadowComponentlessBundleWouldNotReserve() throws Exception {
+    StockFixture.Shop shop = fixture.shop("ACTIVE");
+    String shopId = fixture.tsfShopId(shop);
+    UUID account = fixture.channelAccount(shop, "SHADOW", "CONNECTED");
+    UUID componentless = fixture.componentlessBundle(shop);
+    fixture.channelListing(shop, account, "L-empty", componentless, true);
+    HttpResponse<String> response =
+        post("chk-sh-empty", request(shopId, "chk-sh-empty", "L-empty", 2));
+    assertThat(response.statusCode()).isEqualTo(201);
+    JsonNode omsValue =
+        fixture.inTenant(
+            shop.tenant(),
+            () ->
+                JSON.readTree(
+                    jdbc.queryForObject(
+                        "SELECT oms_value::text FROM shadow_diff WHERE ref = ?",
+                        String.class,
+                        "chk-sh-empty")));
+    assertThat(omsValue.path("would_reserve").asBoolean()).isTrue();
+    assertThat(omsValue.path("items").get(0).path("would_reserve").asBoolean()).isFalse();
+  }
+
+  @Test
   void qtyOutsideIntRangeIs400() throws Exception {
     StockFixture.Shop shop = fixture.shop("ACTIVE");
     ObjectNode body = request(fixture.tsfShopId(shop), "chk-big", "L-1", 1);

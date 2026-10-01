@@ -163,6 +163,22 @@ public final class StockFixture {
     return bundle;
   }
 
+  /** A bundle SKU with {@code is_bundle=true} and no component rows. */
+  public UUID componentlessBundle(Shop shop) {
+    UUID bundle = UuidV7.generate();
+    inTenant(
+        shop.tenant(),
+        () ->
+            jdbc.update(
+                "INSERT INTO sku (id, tenant_id, product_id, sku_code, name, is_bundle) "
+                    + "VALUES (?, ?, ?, ?, 'Empty bundle', true)",
+                bundle,
+                shop.tenant(),
+                shop.product(),
+                "BUNDLE-EMPTY-" + bundle));
+    return bundle;
+  }
+
   /** Receives stock (on_hand += qty) with a RECEIVE ledger row, like a posted document would. */
   public void receive(Shop shop, UUID sku, int qty) {
     inTenant(

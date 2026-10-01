@@ -12,6 +12,7 @@ import com.thaishopfun.oms.stock.ReserveItem;
 import com.thaishopfun.oms.stock.ReserveResult;
 import com.thaishopfun.oms.stock.Shortfall;
 import com.thaishopfun.oms.stock.StockAvailability;
+import com.thaishopfun.oms.stock.StockBusyException;
 import com.thaishopfun.oms.stock.StockError;
 import com.thaishopfun.oms.stock.StockOperationException;
 import com.thaishopfun.oms.stock.StockOwner;
@@ -30,9 +31,11 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -146,6 +149,11 @@ public class CheckoutReserveService {
                 .tag("outcome", "conflict")
                 .tag("mode", "none")
                 .register(meters));
+        throw ex;
+      } catch (RuntimeException ex) {
+        if (CheckoutTimeouts.isStockBusyTimeout(ex)) {
+          throw new StockBusyException("transaction_timeout", ex);
+        }
         throw ex;
       }
     } finally {
@@ -274,9 +282,13 @@ public class CheckoutReserveService {
     String mode = account.get().mode();
     UUID accountId = account.get().id();
     List<ItemPlan> plans = new ArrayList<>();
+    Set<UUID> skuIds = new LinkedHashSet<>();
     for (RequestItem item : request.items()) {
       Optional<ListingRow> listing = repository.listing(tenantId, accountId, item.listingSkuId());
       UUID skuId = listing.map(ListingRow::skuId).orElse(null);
+      if (skuId != null) {
+        skuIds.add(skuId);
+      }
       boolean enforced =
           skuId != null
               && ("ACTIVE".equals(mode)
@@ -286,12 +298,26 @@ public class CheckoutReserveService {
       }
       plans.add(new ItemPlan(item.listingSkuId(), item.qty(), enforced, skuId));
     }
+    Set<UUID> componentless = demandPlanner.componentlessBundleSkus(skuIds);
+    if (!componentless.isEmpty()) {
+      List<ItemPlan> adjusted = new ArrayList<>();
+      for (ItemPlan plan : plans) {
+        if (plan.skuId() != null && componentless.contains(plan.skuId())) {
+          log.warn(
+              "checkout reserve: componentless bundle tenant={} sku={}", tenantId, plan.skuId());
+          adjusted.add(new ItemPlan(plan.listingSkuId(), plan.qty(), false, plan.skuId()));
+        } else {
+          adjusted.add(plan);
+        }
+      }
+      return adjusted;
+    }
     return plans;
   }
 
   private void validateComponentDemand(List<ReserveItem> reserveItems) {
     try {
-      demandPlanner.componentDemand(reserveItems);
+      demandPlanner.componentDemandPlan(reserveItems);
     } catch (IllegalArgumentException ex) {
       throw new CheckoutBadRequestException("aggregate quantity is too large");
     }
@@ -315,16 +341,22 @@ public class CheckoutReserveService {
   }
 
   private ObjectNode shadowOmsValue(List<ItemPlan> plans) {
+    Set<UUID> skuIds =
+        plans.stream()
+            .map(ItemPlan::skuId)
+            .filter(Objects::nonNull)
+            .collect(Collectors.toCollection(LinkedHashSet::new));
+    Set<UUID> componentless = demandPlanner.componentlessBundleSkus(skuIds);
     List<ReserveItem> shadowItems = new ArrayList<>();
     for (ItemPlan plan : plans) {
-      if (plan.skuId() != null) {
+      if (plan.skuId() != null && !componentless.contains(plan.skuId())) {
         shadowItems.add(ReserveItem.of(plan.skuId(), plan.qty()));
       }
     }
     Map<UUID, Integer> componentDemand = Map.of();
     boolean demandValid = true;
     try {
-      componentDemand = demandPlanner.componentDemand(shadowItems);
+      componentDemand = demandPlanner.componentDemandPlan(shadowItems).demand();
     } catch (IllegalArgumentException ex) {
       demandValid = false;
     }
@@ -343,7 +375,8 @@ public class CheckoutReserveService {
       if (plan.skuId() != null) {
         available = availability.available(plan.skuId(), null);
       }
-      boolean itemWould = plan.skuId() != null && wouldReserve;
+      boolean itemWould =
+          plan.skuId() != null && !componentless.contains(plan.skuId()) && wouldReserve;
       ObjectNode row = json.createObjectNode();
       row.put("listing_sku_id", plan.listingSkuId());
       row.put("requested", plan.qty());

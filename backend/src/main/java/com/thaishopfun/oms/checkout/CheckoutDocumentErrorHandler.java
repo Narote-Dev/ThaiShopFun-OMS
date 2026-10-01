@@ -80,6 +80,9 @@ class CheckoutDocumentErrorHandler {
 
   @ExceptionHandler(Exception.class)
   ResponseEntity<Map<String, Object>> unexpected(Exception ex, HttpServletRequest request) {
+    if (CheckoutTimeouts.isStockBusyTimeout(ex)) {
+      return busy(new StockBusyException("transaction_timeout", ex), request);
+    }
     SqlErrors.Failure failure = SqlErrors.failure(ex);
     log.warn(
         "checkout request failed: {} sqlstate={} constraint={}",

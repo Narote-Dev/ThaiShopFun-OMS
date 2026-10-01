@@ -36,6 +36,13 @@ paths:
             `channel_account.stock_sync_paused` does not change `enforced`; only mode, mapping,
             entitlement, and connection status do. `GRACE` entitlement is treated like expired or
             suspended: checkout reserve is not enforced (`enforced=false`, no stock held).
+            A bundle SKU with no component rows is treated as unenforced for that line only (fail
+            open): `enforced=false`, no stock held, other cart lines still enforce normally.
+            In SHADOW, `shadow_diff.oms_value` records per-line `would_reserve`. Unmapped listings
+            always have `would_reserve=false` on that line; the top-level `would_reserve` follows
+            ACTIVE semantics (unmapped lines are unenforced, so a cart of only unmapped listings
+            can still show `would_reserve=true`). Componentless bundle lines have
+            `would_reserve=false`.
           content:
             application/json:
               schema:
@@ -60,6 +67,18 @@ paths:
                 oneOf:
                   - $ref: ../schemas/rest/reservation-conflict.json
                   - $ref: ../schemas/rest/error.json
+        "503":
+          description: |
+            Stock layer is busy (lock timeout, transaction timeout, or deadlock retries exhausted).
+            Retry after `Retry-After`.
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: ../schemas/rest/error.json
   /internal/v1/inventory/reservations/{reservationId}:
     delete:
       operationId: releaseReservation
