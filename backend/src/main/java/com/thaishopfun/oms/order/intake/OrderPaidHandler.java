@@ -6,7 +6,7 @@ import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
 @Component
-@Profile("!chaos")
+@Profile("!chaos & !inbox-api-test")
 public class OrderPaidHandler implements InboxHandler {
 
   private final OrderIntakeSupport support;

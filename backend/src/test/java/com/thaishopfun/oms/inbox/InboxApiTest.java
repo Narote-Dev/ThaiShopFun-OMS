@@ -53,7 +53,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
-@ActiveProfiles("test")
+@ActiveProfiles({"test", "inbox-api-test"})
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @Import(InboxApiTest.Handlers.class)
 class InboxApiTest {

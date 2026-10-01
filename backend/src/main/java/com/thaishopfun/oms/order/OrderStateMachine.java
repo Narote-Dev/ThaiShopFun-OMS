@@ -75,11 +75,11 @@ public class OrderStateMachine {
   public TransitionResult applyFulfillmentStatus(
       SalesOrder order, String to, String reason, String actor, GuardContext guards) {
     requireAllowed("FULFILLMENT", to);
-    if ("READY_TO_PICK".equals(to)) {
-      guardReadyToPick(order, guards);
-    }
     if (!"NONE".equals(order.holdReason()) && !to.equals(order.fulfillmentStatus())) {
       throw new OrderStateException("hold blocks fulfillment changes");
+    }
+    if ("READY_TO_PICK".equals(to)) {
+      guardReadyToPick(order, guards);
     }
     return persist(
         order, "FULFILLMENT", order.fulfillmentStatus(), to, reason, actor, null, null, null);
