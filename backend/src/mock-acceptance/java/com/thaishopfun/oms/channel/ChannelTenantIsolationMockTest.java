@@ -35,9 +35,7 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ObjectNode;
 
-/**
- * JIT tenant provisioning via mock-tsf control events and checkout reservation isolation (T16).
- */
+/** JIT tenant provisioning via mock-tsf control events and checkout reservation isolation (T16). */
 @ActiveProfiles("test")
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 class ChannelTenantIsolationMockTest {

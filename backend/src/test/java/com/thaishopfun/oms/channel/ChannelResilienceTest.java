@@ -564,13 +564,7 @@ class ChannelResilienceTest {
     com.thaishopfun.oms.channel.tsf.TsfHttpTransport transport =
         new com.thaishopfun.oms.channel.tsf.TsfHttpTransport(tsf, tokens, json, clock);
     return new TsfChannelAdapter(
-        resilience,
-        properties,
-        new ChannelMetrics(meters),
-        sleeper,
-        clock,
-        transport,
-        json);
+        resilience, properties, new ChannelMetrics(meters), sleeper, clock, transport, json);
   }
 
   private TestChannelAdapter adapter(ChannelProperties properties, RecordingSleeper sleeper) {

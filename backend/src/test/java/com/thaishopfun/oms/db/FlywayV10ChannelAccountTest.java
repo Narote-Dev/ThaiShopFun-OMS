@@ -366,8 +366,7 @@ class FlywayV10ChannelAccountTest {
       assertThatThrownBy(
               () ->
                   Flyway.configure()
-                      .dataSource(
-                          url, upgradePostgres.getUsername(), upgradePostgres.getPassword())
+                      .dataSource(url, upgradePostgres.getUsername(), upgradePostgres.getPassword())
                       .load()
                       .migrate())
           .hasMessageContaining("already bound to another tenant");

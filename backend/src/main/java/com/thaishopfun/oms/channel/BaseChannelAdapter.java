@@ -30,8 +30,8 @@ import java.util.function.BooleanSupplier;
 
 /**
  * Decorator order: capability check → retry loop (bulkhead per attempt → rate limiter → circuit
- * breaker → HTTP). Backoff and Retry-After sleeps run outside the bulkhead. Total wall time including
- * sleeps is capped by {@link ChannelProperties.TsfChannelSettings#getHttpTimeout()}.
+ * breaker → HTTP). Backoff and Retry-After sleeps run outside the bulkhead. Total wall time
+ * including sleeps is capped by {@link ChannelProperties.TsfChannelSettings#getHttpTimeout()}.
  */
 public abstract class BaseChannelAdapter implements ChannelAdapter {
 
@@ -152,7 +152,8 @@ public abstract class BaseChannelAdapter implements ChannelAdapter {
 
   private static void requireIdempotencyKey(String idempotencyKey) {
     if (idempotencyKey == null || idempotencyKey.isBlank()) {
-      throw new ChannelClientException(400, "IDEMPOTENCY_KEY_REQUIRED", "Idempotency-Key is required");
+      throw new ChannelClientException(
+          400, "IDEMPOTENCY_KEY_REQUIRED", "Idempotency-Key is required");
     }
   }
 
@@ -213,13 +214,14 @@ public abstract class BaseChannelAdapter implements ChannelAdapter {
         try {
           return RateLimiter.decorateCallable(
                   rateLimiter,
-                  () ->
-                      CircuitBreaker.decorateCallable(circuitBreaker, httpCall::call).call())
+                  () -> CircuitBreaker.decorateCallable(circuitBreaker, httpCall::call).call())
               .call();
         } catch (RequestNotPermitted ex) {
           throw new ChannelRateLimitedException("Rate limit wait exceeded for " + operation, null);
         }
-      } catch (ChannelClientException | ChannelIdempotencyConflictException | UnsupportedCapabilityException ex) {
+      } catch (ChannelClientException
+          | ChannelIdempotencyConflictException
+          | UnsupportedCapabilityException ex) {
         throw ex;
       } catch (ChannelRateLimitedException ex) {
         metrics.recordRetry(channel(), operation, "retry_after");
@@ -281,7 +283,8 @@ public abstract class BaseChannelAdapter implements ChannelAdapter {
     sleeper.sleep(sleep);
   }
 
-  private void ensureBudget(Instant deadline, Duration nextSleep, ChannelRateLimitedException rate) {
+  private void ensureBudget(
+      Instant deadline, Duration nextSleep, ChannelRateLimitedException rate) {
     Instant now = clock.instant();
     if (!now.isBefore(deadline)) {
       if (rate != null) {

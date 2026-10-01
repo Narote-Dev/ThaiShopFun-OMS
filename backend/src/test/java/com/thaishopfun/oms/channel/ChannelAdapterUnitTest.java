@@ -21,7 +21,6 @@ import com.thaishopfun.oms.channel.tsf.TsfHttpTransport;
 import com.thaishopfun.oms.channel.tsf.TsfTokenProvider;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.net.InetSocketAddress;
-import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
@@ -71,8 +70,9 @@ class ChannelAdapterUnitTest {
     Instant fixed = Instant.parse("2026-01-01T00:00:00Z");
     Clock clock = Clock.fixed(fixed, ZoneOffset.UTC);
     String retryAt =
-        DateTimeFormatter.RFC_1123_DATE_TIME.withLocale(Locale.US).format(
-            ZonedDateTime.ofInstant(fixed.plusSeconds(3), ZoneOffset.UTC));
+        DateTimeFormatter.RFC_1123_DATE_TIME
+            .withLocale(Locale.US)
+            .format(ZonedDateTime.ofInstant(fixed.plusSeconds(3), ZoneOffset.UTC));
     AtomicInteger hits = new AtomicInteger();
     int port = startOrderServer(clock, hits, 429, "Retry-After", retryAt, null);
     ChannelResilienceTest.RecordingSleeper sleeper = new ChannelResilienceTest.RecordingSleeper();
@@ -259,8 +259,7 @@ class ChannelAdapterUnitTest {
         .isInstanceOf(UnsupportedCapabilityException.class);
     assertThatThrownBy(() -> adapter.getLabel(account, "shp"))
         .isInstanceOf(UnsupportedCapabilityException.class);
-    assertThatThrownBy(
-            () -> adapter.requestCancel(account, "x", "k", new CancelRequest("buyer")))
+    assertThatThrownBy(() -> adapter.requestCancel(account, "x", "k", new CancelRequest("buyer")))
         .isInstanceOf(UnsupportedCapabilityException.class);
     assertThat(calls).hasValue(0);
   }
@@ -395,7 +394,11 @@ class ChannelAdapterUnitTest {
         exchange -> {
           tokenHits.incrementAndGet();
           byte[] body =
-              ("{\"access_token\":\"token-" + tokenHits.get() + "\",\"expires_in\":" + expiresIn + "}")
+              ("{\"access_token\":\"token-"
+                      + tokenHits.get()
+                      + "\",\"expires_in\":"
+                      + expiresIn
+                      + "}")
                   .getBytes(StandardCharsets.UTF_8);
           exchange.getResponseHeaders().set("Content-Type", "application/json");
           exchange.sendResponseHeaders(200, body.length);
@@ -479,17 +482,12 @@ class ChannelAdapterUnitTest {
     return tsfAdapter(port, properties, sleeper, clock, port > 0);
   }
 
-  private TsfChannelAdapter tsfAdapter(
-      int port, Sleeper sleeper, Clock clock, boolean bindServer) {
+  private TsfChannelAdapter tsfAdapter(int port, Sleeper sleeper, Clock clock, boolean bindServer) {
     return tsfAdapter(port, properties(), sleeper, clock, bindServer);
   }
 
   private TsfChannelAdapter tsfAdapter(
-      int port,
-      ChannelProperties properties,
-      Sleeper sleeper,
-      Clock clock,
-      boolean bindServer) {
+      int port, ChannelProperties properties, Sleeper sleeper, Clock clock, boolean bindServer) {
     TsfProperties tsf = tsfProperties(bindServer ? port : 1);
     JsonMapper json = JsonMapper.builder().build();
     AccountResilienceRegistry resilience =
@@ -551,5 +549,4 @@ class ChannelAdapterUnitTest {
           exchange.close();
         });
   }
-
 }

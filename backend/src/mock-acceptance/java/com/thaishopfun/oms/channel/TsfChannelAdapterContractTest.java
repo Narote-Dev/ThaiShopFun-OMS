@@ -159,7 +159,8 @@ class TsfChannelAdapterContractTest {
     // Step 1: Armed 429 fault is honored once; real sleep waits at least Retry-After seconds.
     Instant start = Instant.now();
     realSleepAdapter.getOrder(account, "TSF-240929-000124");
-    assertThat(Duration.between(start, Instant.now()).compareTo(Duration.ofSeconds(5))).isGreaterThanOrEqualTo(0);
+    assertThat(Duration.between(start, Instant.now()).compareTo(Duration.ofSeconds(5)))
+        .isGreaterThanOrEqualTo(0);
     // Step 2: With the fault consumed, a follow-up call succeeds on the first attempt.
     realSleepAdapter.getOrder(account, "TSF-240929-000124");
   }

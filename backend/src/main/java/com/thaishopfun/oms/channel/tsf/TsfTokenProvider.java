@@ -126,7 +126,8 @@ public class TsfTokenProvider {
       String token = tokenNode.isString() ? tokenNode.asString() : null;
       int expiresIn = body.path("expires_in").asInt(0);
       if (token == null || token.isBlank() || expiresIn < 1) {
-        throw new ChannelClientException(502, "TOKEN_RESPONSE_INVALID", "TSF token response is invalid");
+        throw new ChannelClientException(
+            502, "TOKEN_RESPONSE_INVALID", "TSF token response is invalid");
       }
       Instant expiresAt = clock.instant().plusSeconds(expiresIn);
       return new CachedToken(token, expiresAt, expiresIn);
