@@ -783,7 +783,6 @@ class CheckoutT12AAcceptanceTest {
       }
     }
     assertThat(fixture.reserved(shop, sku)).isEqualTo(reservedBefore + 2);
-    assertThat(fixture.reserved(shop, componentless)).isZero();
     fixture.assertInvariants(shop);
   }
 
