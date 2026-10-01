@@ -217,16 +217,11 @@ class FlywayV7OrdersTest {
           DriverManager.getConnection(url, postgres.getUsername(), postgres.getPassword())) {
         assertThat(versions(upgrade)).containsExactly("1", "2", "3", "4", "6", "7", "8", "9", "10");
         for (String table :
-            List.of(
-                "tenant",
-                "channel_account",
-                "product",
-                "sku",
-                "warehouse",
-                "inventory",
-                "stock_reservation")) {
+            List.of("tenant", "product", "sku", "warehouse", "inventory", "stock_reservation")) {
           assertThat(count(upgrade, table)).as(table).isEqualTo(1);
         }
+        // V10 backfills a TSF channel_account for tsf_shop_id; the V6 seed row uses another id.
+        assertThat(count(upgrade, "channel_account")).as("channel_account").isEqualTo(2);
         UUID order = UUID.randomUUID();
         insertOrder(upgrade, order, tenant, channelAccount, "EXT-1");
         insertLine(upgrade, UUID.randomUUID(), tenant, order, sku, 2);
