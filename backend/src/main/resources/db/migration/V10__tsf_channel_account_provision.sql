@@ -117,7 +117,31 @@ BEGIN
 END
 $fn$;
 
--- Step 2: Backfill TSF channel_account for tenants that only exist in tenant.tsf_shop_id.
+-- Step 2: Reject tenant.tsf_shop_id rows already owned by another tenant's channel_account.
+DO $validate$
+DECLARE
+  r RECORD;
+  v_owner uuid;
+BEGIN
+  FOR r IN
+    SELECT t.id AS tenant_id, t.tsf_shop_id
+    FROM public.tenant AS t
+    WHERE t.tsf_shop_id IS NOT NULL AND btrim(t.tsf_shop_id) <> ''
+  LOOP
+    SELECT c.tenant_id
+      INTO v_owner
+    FROM public.channel_account AS c
+    WHERE c.channel = 'TSF'
+      AND c.external_shop_id = r.tsf_shop_id;
+
+    IF v_owner IS NOT NULL AND v_owner <> r.tenant_id THEN
+      RAISE EXCEPTION 'tsf_shop_id % is already bound to another tenant', r.tsf_shop_id;
+    END IF;
+  END LOOP;
+END
+$validate$;
+
+-- Step 3: Backfill TSF channel_account for tenants that only exist in tenant.tsf_shop_id.
 DO $backfill$
 DECLARE
   r RECORD;
@@ -165,7 +189,7 @@ BEGIN
 END
 $backfill$;
 
--- Step 3: resolve_tenant via channel_account; TSF falls back to tenant.tsf_shop_id.
+-- Step 4: resolve_tenant via channel_account; TSF falls back to tenant.tsf_shop_id.
 CREATE OR REPLACE FUNCTION resolve_tenant(channel text, external_shop_id text)
 RETURNS uuid
 LANGUAGE sql

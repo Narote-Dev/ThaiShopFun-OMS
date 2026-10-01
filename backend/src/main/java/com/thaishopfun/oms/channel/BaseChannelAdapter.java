@@ -263,10 +263,21 @@ public abstract class BaseChannelAdapter implements ChannelAdapter {
 
   private void sleepBeforeRetry(Instant deadline, Duration sleep, ChannelRateLimitedException rate)
       throws InterruptedException {
+    ChannelProperties.TsfChannelSettings settings = settings();
+    ensureBudget(deadline, sleep, rate);
+    if (settings.getHttpTimeout().compareTo(settings.getRetryWaitBase()) < 0) {
+      Duration remaining = Duration.between(clock.instant(), deadline);
+      if (!settings.getRetryWaitBase().isZero()
+          && remaining.compareTo(settings.getRetryWaitBase()) < 0) {
+        if (rate != null) {
+          throw rate;
+        }
+        throw new ChannelUnavailableException("Channel call budget exceeded");
+      }
+    }
     if (sleep.isZero()) {
       return;
     }
-    ensureBudget(deadline, sleep, rate);
     sleeper.sleep(sleep);
   }
 

@@ -113,7 +113,10 @@ public class TsfHttpTransport {
     }
     ParsedError parsed = parseError(body);
     throw new ChannelClientException(
-        status, parsed.error(), parsed.message() != null ? parsed.message() : errorMessage(body));
+        status,
+        parsed.error(),
+        parsed.message() != null ? parsed.message() : errorMessage(body),
+        parsed.traceId());
   }
 
   private String errorMessage(byte[] body) {
@@ -126,17 +129,19 @@ public class TsfHttpTransport {
 
   private ParsedError parseError(byte[] body) {
     if (body.length == 0) {
-      return new ParsedError(null, null);
+      return new ParsedError(null, null, null);
     }
     try {
       JsonNode node = json.readTree(body);
       JsonNode errorNode = node.path("error");
       JsonNode messageNode = node.path("message");
+      JsonNode traceNode = node.path("trace_id");
       return new ParsedError(
           errorNode.isString() ? errorNode.asString() : null,
-          messageNode.isString() ? messageNode.asString() : null);
+          messageNode.isString() ? messageNode.asString() : null,
+          traceNode.isString() ? traceNode.asString() : null);
     } catch (Exception ex) {
-      return new ParsedError(null, null);
+      return new ParsedError(null, null, null);
     }
   }
 
@@ -177,5 +182,5 @@ public class TsfHttpTransport {
 
   public record HttpResult(int statusCode, byte[] body) {}
 
-  private record ParsedError(String error, String message) {}
+  private record ParsedError(String error, String message, String traceId) {}
 }

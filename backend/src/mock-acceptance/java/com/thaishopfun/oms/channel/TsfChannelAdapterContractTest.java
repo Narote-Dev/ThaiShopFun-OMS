@@ -207,6 +207,7 @@ class TsfChannelAdapterContractTest {
         .satisfies(
             ex -> {
               ChannelClientException client = (ChannelClientException) ex;
+              assertThat(client.traceId()).isNotBlank();
               assertThat(
                       CONTRACT.restErrors(
                           "error",
@@ -214,6 +215,8 @@ class TsfChannelAdapterContractTest {
                               + client.errorCode()
                               + "\",\"message\":\""
                               + client.getMessage()
+                              + "\",\"trace_id\":\""
+                              + client.traceId()
                               + "\"}"))
                   .isEmpty();
             });
