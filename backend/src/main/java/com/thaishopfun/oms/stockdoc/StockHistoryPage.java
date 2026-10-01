@@ -7,7 +7,9 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * One keyset page of a SKU's ledger, newest first. {@code next_cursor} is null on the last page.
+ * One keyset page of a SKU's ledger. With {@code warehouse_id}, newest first for that warehouse;
+ * without it, grouped by warehouse (newest first within each). {@code next_cursor} is null on the
+ * last page.
  */
 public record StockHistoryPage(
     SkuRef sku, List<Entry> items, @JsonProperty("next_cursor") String nextCursor) {

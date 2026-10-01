@@ -22,12 +22,13 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
 /**
- * Per-SKU stock history: {@code inventory_ledger} newest first, keyset-paged on {@code
- * (warehouse_id, ledger_seq)}. Running totals use a window over the SKU's whole ledger (per
- * warehouse) ordered by {@code ledger_seq}, so commit order stays correct when transactions
- * overlap. That window reads every ledger row of one SKU per request, which is fine at shop
- * volumes; a snapshot table would replace it if a single SKU ever reaches hundreds of thousands of
- * entries.
+ * Per-SKU stock history: keyset-paged on {@code (warehouse_id, ledger_seq)}. With a {@code
+ * warehouse_id} filter, items are newest first for that warehouse. Without it, items are grouped by
+ * warehouse (warehouse id descending), newest first within each warehouse. Running totals use a
+ * window over the SKU's whole ledger (per warehouse) ordered by {@code ledger_seq}, so commit order
+ * stays correct when transactions overlap. That window reads every ledger row of one SKU per
+ * request, which is fine at shop volumes; a snapshot table would replace it if a single SKU ever
+ * reaches hundreds of thousands of entries.
  */
 @Service
 public class StockHistoryService {

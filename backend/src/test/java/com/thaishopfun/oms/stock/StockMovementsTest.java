@@ -514,7 +514,7 @@ class StockMovementsTest extends StockTestBase {
     UUID fastDoc = document(shop, "RECEIVE", "fast");
     line(shop, fastDoc, sku, 3, null, null);
 
-    // Step 1: The first post holds inventory under lock until the second post commits.
+    // Step 1: The slow post pauses before the inventory lock so the fast post can commit first.
     CountDownLatch slowLocked = new CountDownLatch(1);
     CountDownLatch fastDone = new CountDownLatch(1);
     faults.atNextBeforeInventoryLock(

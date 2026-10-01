@@ -1,10 +1,13 @@
 -- V8: commit-consistent ledger order (plan task T08A).
 --
--- created_at is the transaction start time, so concurrent writers on the same inventory
--- row can appear out of commit order in history. Each inventory row keeps ledger_seq,
--- the count of ledger rows already committed for that (tenant, sku, warehouse). The app
--- increments it while holding the inventory row lock and stores the value on each new
--- inventory_ledger row.
+-- Flyway must run this migration as the database superuser (the Flyway URL user). That role
+-- sees every row despite FORCE RLS. oms_migrator would not, so the backfill would assign no
+-- sequences and SET NOT NULL would fail on existing databases.
+--
+-- created_at is the transaction start time, so concurrent writers on the same inventory row can
+-- appear out of commit order in history. Each inventory row keeps ledger_seq, the count of
+-- ledger rows already committed for that (tenant, sku, warehouse). The app increments it while
+-- holding the inventory row lock and stores the value on each new inventory_ledger row.
 
 -- Step 1: Per-inventory-row sequence counter.
 ALTER TABLE inventory
@@ -16,6 +19,9 @@ ALTER TABLE inventory
 -- Step 2: Backfill existing ledger rows in commit-time order, then require the column.
 ALTER TABLE inventory_ledger
   ADD COLUMN ledger_seq bigint;
+
+-- Change: V4 append-only trigger rejects UPDATE; disable only for the backfill.
+ALTER TABLE inventory_ledger DISABLE TRIGGER inventory_ledger_append_only;
 
 WITH numbered AS (
   SELECT
@@ -30,6 +36,8 @@ UPDATE inventory_ledger AS l
 SET ledger_seq = n.seq
 FROM numbered AS n
 WHERE l.id = n.id;
+
+ALTER TABLE inventory_ledger ENABLE TRIGGER inventory_ledger_append_only;
 
 ALTER TABLE inventory_ledger
   ALTER COLUMN ledger_seq SET NOT NULL;
