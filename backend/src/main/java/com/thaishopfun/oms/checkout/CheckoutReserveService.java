@@ -7,6 +7,7 @@ import com.thaishopfun.oms.checkout.CheckoutRepository.ListingRow;
 import com.thaishopfun.oms.checkout.CheckoutRepository.TenantRow;
 import com.thaishopfun.oms.stock.IdempotencyConflictException;
 import com.thaishopfun.oms.stock.ReservationEngine;
+import com.thaishopfun.oms.stock.ReserveDemandPlanner;
 import com.thaishopfun.oms.stock.ReserveItem;
 import com.thaishopfun.oms.stock.ReserveResult;
 import com.thaishopfun.oms.stock.Shortfall;
@@ -51,12 +52,14 @@ public class CheckoutReserveService {
 
   private static final Logger log = LoggerFactory.getLogger(CheckoutReserveService.class);
   private static final int MAX_ITEMS = 100;
+  private static final int WRITE_TX_TIMEOUT_SECONDS = 10;
   private static final String TSF_CHANNEL = "TSF";
 
   private final CheckoutRepository repository;
   private final CheckoutIdempotency idempotency;
   private final ReservationEngine engine;
   private final StockAvailability availability;
+  private final ReserveDemandPlanner demandPlanner;
   private final StockRetry retry;
   private final StockProperties stockProperties;
   private final TransactionTemplate writeTx;
@@ -70,6 +73,7 @@ public class CheckoutReserveService {
       CheckoutIdempotency idempotency,
       ReservationEngine engine,
       StockAvailability availability,
+      ReserveDemandPlanner demandPlanner,
       StockRetry retry,
       StockProperties stockProperties,
       PlatformTransactionManager transactions,
@@ -80,10 +84,12 @@ public class CheckoutReserveService {
     this.idempotency = idempotency;
     this.engine = engine;
     this.availability = availability;
+    this.demandPlanner = demandPlanner;
     this.retry = retry;
     this.stockProperties = stockProperties;
     this.writeTx = new TransactionTemplate(transactions);
     this.writeTx.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
+    this.writeTx.setTimeout(WRITE_TX_TIMEOUT_SECONDS);
     this.json = json;
     this.clock = clock;
     this.replays = Counter.builder(REPLAY_COUNTER).register(meters);
@@ -118,6 +124,7 @@ public class CheckoutReserveService {
                 () ->
                     writeTx.execute(
                         status -> {
+                          repository.applyLockTimeout(stockProperties.getLockTimeout());
                           try {
                             return reserveInTransaction(tenantId, request, hash);
                           } catch (StockOperationException ex) {
@@ -157,20 +164,15 @@ public class CheckoutReserveService {
     }
     TenantContext.set(tenantId, null);
     try {
-      retry.execute(
-          "checkout.release",
-          () -> {
-            try {
-              engine.release(groupId, "release:" + reservationIdRaw.trim());
-            } catch (StockOperationException ex) {
-              if (benignReleaseFailure(ex.error())) {
-                log.info("checkout release ignored: {}", ex.getMessage());
-                return null;
-              }
-              throw ex;
-            }
-            return null;
-          });
+      try {
+        engine.release(groupId, "release:" + reservationIdRaw.trim());
+      } catch (StockOperationException ex) {
+        if (benignReleaseFailure(ex.error())) {
+          log.info("checkout release ignored: {}", ex.getMessage());
+          return;
+        }
+        throw ex;
+      }
     } finally {
       TenantContext.clear();
     }
@@ -230,6 +232,7 @@ public class CheckoutReserveService {
         reserveItems.add(ReserveItem.of(plan.skuId(), plan.qty()));
       }
     }
+    validateComponentDemand(reserveItems);
     StockOwner owner = StockOwner.checkout(request.checkoutId());
     ReserveResult result = engine.reserve(owner, reserveItems, request.checkoutId());
     if (!result.reserved()) {
@@ -286,6 +289,14 @@ public class CheckoutReserveService {
     return plans;
   }
 
+  private void validateComponentDemand(List<ReserveItem> reserveItems) {
+    try {
+      demandPlanner.componentDemand(reserveItems);
+    } catch (IllegalArgumentException ex) {
+      throw new CheckoutBadRequestException("aggregate quantity is too large");
+    }
+  }
+
   private static List<ItemPlan> unenforcedPlans(ReserveRequest request) {
     return request.items().stream()
         .map(item -> new ItemPlan(item.listingSkuId(), item.qty(), false, null))
@@ -304,25 +315,35 @@ public class CheckoutReserveService {
   }
 
   private ObjectNode shadowOmsValue(List<ItemPlan> plans) {
-    Map<UUID, Integer> demandBySku = new LinkedHashMap<>();
+    List<ReserveItem> shadowItems = new ArrayList<>();
     for (ItemPlan plan : plans) {
       if (plan.skuId() != null) {
-        demandBySku.merge(plan.skuId(), plan.qty(), Integer::sum);
+        shadowItems.add(ReserveItem.of(plan.skuId(), plan.qty()));
       }
     }
-    boolean wouldReserve = true;
+    Map<UUID, Integer> componentDemand = Map.of();
+    boolean demandValid = true;
+    try {
+      componentDemand = demandPlanner.componentDemand(shadowItems);
+    } catch (IllegalArgumentException ex) {
+      demandValid = false;
+    }
+    boolean wouldReserve = demandValid;
+    if (demandValid) {
+      for (Map.Entry<UUID, Integer> entry : componentDemand.entrySet()) {
+        if (availability.available(entry.getKey(), null) < entry.getValue()) {
+          wouldReserve = false;
+          break;
+        }
+      }
+    }
     ArrayNode items = json.createArrayNode();
     for (ItemPlan plan : plans) {
       int available = 0;
-      int skuDemand = 0;
       if (plan.skuId() != null) {
         available = availability.available(plan.skuId(), null);
-        skuDemand = demandBySku.getOrDefault(plan.skuId(), plan.qty());
       }
-      boolean itemWould = plan.skuId() != null && skuDemand <= available;
-      if (!itemWould) {
-        wouldReserve = false;
-      }
+      boolean itemWould = plan.skuId() != null && wouldReserve;
       ObjectNode row = json.createObjectNode();
       row.put("listing_sku_id", plan.listingSkuId());
       row.put("requested", plan.qty());

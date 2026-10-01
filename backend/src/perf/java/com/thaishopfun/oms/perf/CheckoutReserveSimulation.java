@@ -83,8 +83,8 @@ public class CheckoutReserveSimulation extends Simulation {
           .randomSwitch()
           .on(
               percent(70).then(reserveLoad),
-              percent(30).then(reserveLoad.chain(releaseLoad)))
-          .injectOpen(constantUsersPerSec(200).during(60));
+              percent(30).then(reserveLoad.exec(releaseLoad)))
+          .injectOpen(constantUsersPerSec(154).during(60));
 
   {
     setUp(warmUp.andThen(mainLoad))

@@ -150,12 +150,12 @@ jobs:
         if: always()
         working-directory: backend
         run: |
-          P95=$(grep -oP 'reserve-load: 95th percentile.*?actual : \K[0-9.]+' target/gatling-run.log | tail -1 || echo "n/a")
-          P99=$(grep -oP 'reserve-load: 99th percentile.*?actual : \K[0-9.]+' target/gatling-run.log | tail -1 || echo "n/a")
+          P95=$(grep -oP 'reserve-load: 95th percentile.*?actual : \K[0-9.]+' target/gatling-run.log | tail -1 || true)
+          P99=$(grep -oP 'reserve-load: 99th percentile.*?actual : \K[0-9.]+' target/gatling-run.log | tail -1 || true)
           {
             echo "### Checkout reserve perf (GitHub-hosted runner)"
-            echo "- reserve-load p95: **${P95}** ms (NFR < 150 ms)"
-            echo "- reserve-load p99: **${P99}** ms (NFR < 300 ms)"
+            echo "- reserve-load p95: **${P95:-n/a}** ms (NFR < 150 ms)"
+            echo "- reserve-load p99: **${P99:-n/a}** ms (NFR < 300 ms)"
             echo "- Assertions are **not** loosened; this job is non-blocking (\`continue-on-error\`)."
             echo "- Local reference: ~8 ms p95 / ~39 ms p99 on 8 cores; ~15 s p95 on 2-core pin reproduces CI saturation."
             echo "- Full report: \`gatling-checkout-reserve\` artifact."

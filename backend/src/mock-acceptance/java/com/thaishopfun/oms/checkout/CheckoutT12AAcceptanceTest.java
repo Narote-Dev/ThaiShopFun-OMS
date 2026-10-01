@@ -25,10 +25,12 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -42,6 +44,8 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ArrayNode;
@@ -225,11 +229,11 @@ class CheckoutT12AAcceptanceTest {
       for (int i = 0; i < threads; i++) {
         futures.add(pool.submit(() -> post("chk-20", body)));
       }
-      Set<String> bodies = new HashSet<>();
+      Set<JsonNode> bodies = new HashSet<>();
       for (Future<HttpResponse<String>> future : futures) {
         HttpResponse<String> response = future.get(90, TimeUnit.SECONDS);
         assertThat(response.statusCode()).isEqualTo(201);
-        bodies.add(response.body());
+        bodies.add(JSON.readTree(response.body()));
       }
       assertThat(bodies).hasSize(1);
     } finally {
@@ -525,6 +529,15 @@ class CheckoutT12AAcceptanceTest {
     List<String> listings = new ArrayList<>();
     items.forEach(node -> listings.add(node.path("listing_sku_id").asString()));
     assertThat(listings).contains("L-bundle");
+    JsonNode bundleRow = null;
+    for (JsonNode row : items) {
+      if ("L-bundle".equals(row.path("listing_sku_id").asString())) {
+        bundleRow = row;
+      }
+    }
+    assertThat(bundleRow).isNotNull();
+    assertThat(bundleRow.path("available").asInt()).isZero();
+    assertThat(fixture.reserved(shop, okSku)).isZero();
   }
 
   @Test
@@ -546,9 +559,12 @@ class CheckoutT12AAcceptanceTest {
     StockFixture.Shop shop = fixture.shop("ACTIVE");
     String shopId = fixture.tsfShopId(shop);
     UUID account = fixture.channelAccount(shop, "ACTIVE", "CONNECTED");
-    fixture.channelListing(shop, account, "L-null", fixture.sku(shop, 5), true, false);
+    UUID sku = fixture.sku(shop, 5);
+    fixture.channelListing(shop, account, "L-null", sku, true, false);
     HttpResponse<String> response = post("chk-null", request(shopId, "chk-null", "L-null", 1));
+    assertThat(response.statusCode()).isEqualTo(201);
     assertThat(JSON.readTree(response.body()).path("enforced").asBoolean()).isFalse();
+    assertThat(fixture.reserved(shop, sku)).isZero();
   }
 
   @Test
@@ -574,37 +590,172 @@ class CheckoutT12AAcceptanceTest {
     StockFixture.Shop shop = fixture.shop("ACTIVE");
     UUID a = fixture.sku(shop, 30);
     UUID b = fixture.sku(shop, 30);
+    fixture.inTenant(
+        shop.tenant(),
+        () -> {
+          for (int i = 0; i < 4; i++) {
+            UUID group =
+                engine
+                    .reserve(
+                        com.thaishopfun.oms.stock.StockOwner.checkout("exp-" + i),
+                        List.of(com.thaishopfun.oms.stock.ReserveItem.of(a, 1)),
+                        "exp-" + i)
+                    .reservationGroupId();
+            jdbc.update(
+                "UPDATE stock_reservation SET expires_at = now() - interval '1 minute' "
+                    + "WHERE reservation_group_id = ?",
+                group);
+          }
+          return null;
+        });
     ExecutorService pool = Executors.newFixedThreadPool(8);
     try {
-      List<Callable<Void>> tasks = new ArrayList<>();
+      CountDownLatch start = new CountDownLatch(1);
+      List<Future<Void>> reserves = new ArrayList<>();
       for (int i = 0; i < 16; i++) {
         boolean reverse = i % 2 == 1;
-        tasks.add(
-            () -> {
-              TenantContext.set(shop.tenant(), null);
-              try {
-                engine.reserve(
-                    com.thaishopfun.oms.stock.StockOwner.checkout("chk-" + UUID.randomUUID()),
-                    reverse
-                        ? List.of(
-                            com.thaishopfun.oms.stock.ReserveItem.of(b, 1),
-                            com.thaishopfun.oms.stock.ReserveItem.of(a, 1))
-                        : List.of(
-                            com.thaishopfun.oms.stock.ReserveItem.of(a, 1),
-                            com.thaishopfun.oms.stock.ReserveItem.of(b, 1)),
-                    "k-" + UUID.randomUUID());
-              } finally {
-                TenantContext.clear();
-              }
-              return null;
-            });
+        reserves.add(
+            pool.submit(
+                () -> {
+                  start.await(30, TimeUnit.SECONDS);
+                  TenantContext.set(shop.tenant(), null);
+                  try {
+                    engine.reserve(
+                        com.thaishopfun.oms.stock.StockOwner.checkout("chk-" + UUID.randomUUID()),
+                        reverse
+                            ? List.of(
+                                com.thaishopfun.oms.stock.ReserveItem.of(b, 1),
+                                com.thaishopfun.oms.stock.ReserveItem.of(a, 1))
+                            : List.of(
+                                com.thaishopfun.oms.stock.ReserveItem.of(a, 1),
+                                com.thaishopfun.oms.stock.ReserveItem.of(b, 1)),
+                        "k-" + UUID.randomUUID());
+                  } finally {
+                    TenantContext.clear();
+                  }
+                  return null;
+                }));
       }
-      pool.invokeAll(tasks, 90, TimeUnit.SECONDS);
-      expiryJob.runOnce();
+      Future<?> sweeper =
+          pool.submit(
+              () -> {
+                start.await(30, TimeUnit.SECONDS);
+                for (int pass = 0; pass < 30; pass++) {
+                  expiryJob.runOnce();
+                  Thread.sleep(15);
+                }
+                return null;
+              });
+      start.countDown();
+      for (Future<Void> future : reserves) {
+        future.get(90, TimeUnit.SECONDS);
+      }
+      sweeper.get(90, TimeUnit.SECONDS);
+      assertThat(fixture.reserved(shop, a)).isEqualTo(16);
+      assertThat(fixture.reserved(shop, b)).isEqualTo(16);
       fixture.assertInvariants(shop);
     } finally {
       pool.shutdownNow();
     }
+  }
+
+  @Test
+  @Timeout(value = 1, unit = TimeUnit.MINUTES)
+  void reserveReturns503WhenInventoryRowIsLocked() throws Exception {
+    StockFixture.Shop shop = fixture.shop("ACTIVE");
+    String shopId = fixture.tsfShopId(shop);
+    UUID account = fixture.channelAccount(shop, "ACTIVE", "CONNECTED");
+    UUID sku = fixture.sku(shop, 10);
+    fixture.channelListing(shop, account, "L-block", sku, true);
+    CountDownLatch locked = new CountDownLatch(1);
+    CountDownLatch release = new CountDownLatch(1);
+    AtomicReference<Throwable> holderFailure = new AtomicReference<>();
+    TransactionTemplate holdTx = new TransactionTemplate(transactions);
+    holdTx.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+    Thread holder =
+        new Thread(
+            () -> {
+              TenantContext.set(shop.tenant(), null);
+              try {
+                holdTx.executeWithoutResult(
+                    status -> {
+                      jdbc.query(
+                          "SELECT 1 FROM inventory WHERE sku_id = ? AND warehouse_id = ? FOR UPDATE",
+                          (org.springframework.jdbc.core.RowCallbackHandler)
+                              rs -> {
+                                locked.countDown();
+                                try {
+                                  release.await(30, TimeUnit.SECONDS);
+                                } catch (InterruptedException ex) {
+                                  Thread.currentThread().interrupt();
+                                  throw new IllegalStateException(ex);
+                                }
+                              },
+                          sku,
+                          shop.warehouse());
+                    });
+              } catch (Throwable ex) {
+                holderFailure.set(ex);
+              } finally {
+                TenantContext.clear();
+              }
+            });
+    holder.start();
+    assertThat(locked.await(30, TimeUnit.SECONDS)).isTrue();
+    long started = System.nanoTime();
+    HttpResponse<String> busy = post("chk-block", request(shopId, "chk-block", "L-block", 1));
+    release.countDown();
+    holder.join(30_000);
+    assertThat(holderFailure.get()).isNull();
+    assertThat(busy.statusCode()).isEqualTo(503);
+    assertThat(JSON.readTree(busy.body()).path("error").asString()).isEqualTo("STOCK_BUSY");
+    assertThat(busy.headers().firstValue("Retry-After")).contains("1");
+    assertThat(System.nanoTime() - started).isLessThan(TimeUnit.SECONDS.toNanos(8));
+    assertThat(fixture.reserved(shop, sku)).isZero();
+    fixture.assertInvariants(shop);
+  }
+
+  @Test
+  void aggregateQuantityOverflowIs400() throws Exception {
+    StockFixture.Shop shop = fixture.shop("ACTIVE");
+    String shopId = fixture.tsfShopId(shop);
+    UUID account = fixture.channelAccount(shop, "ACTIVE", "CONNECTED");
+    UUID sku = fixture.sku(shop, 100);
+    fixture.channelListing(shop, account, "L-a", sku, true);
+    fixture.channelListing(shop, account, "L-b", sku, true);
+    ObjectNode body =
+        request(
+            shopId, "chk-overflow", List.of("L-a", "L-b"), List.of(2_000_000_000, 2_000_000_000));
+    HttpResponse<String> response = post("chk-overflow", body);
+    assertThat(response.statusCode()).isEqualTo(400);
+    assertThat(CONTRACT.restErrors("error-bad-request", response.body())).isEmpty();
+    assertThat(fixture.reserved(shop, sku)).isZero();
+  }
+
+  @Test
+  void shadowBundleAndComponentWouldNotReserve() throws Exception {
+    StockFixture.Shop shop = fixture.shop("ACTIVE");
+    String shopId = fixture.tsfShopId(shop);
+    UUID account = fixture.channelAccount(shop, "SHADOW", "CONNECTED");
+    UUID component = fixture.sku(shop, 5);
+    UUID bundle = fixture.bundle(shop, Map.of(component, 1));
+    fixture.channelListing(shop, account, "L-bundle", bundle, true);
+    fixture.channelListing(shop, account, "L-c", component, true);
+    HttpResponse<String> response =
+        post(
+            "chk-shadow-bundle",
+            request(shopId, "chk-shadow-bundle", List.of("L-bundle", "L-c"), List.of(4, 4)));
+    assertThat(response.statusCode()).isEqualTo(201);
+    JsonNode omsValue =
+        fixture.inTenant(
+            shop.tenant(),
+            () ->
+                JSON.readTree(
+                    jdbc.queryForObject(
+                        "SELECT oms_value::text FROM shadow_diff WHERE ref = ?",
+                        String.class,
+                        "chk-shadow-bundle")));
+    assertThat(omsValue.path("would_reserve").asBoolean()).isFalse();
   }
 
   @Test

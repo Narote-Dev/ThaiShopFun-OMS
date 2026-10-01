@@ -1,6 +1,7 @@
 package com.thaishopfun.oms.checkout;
 
 import com.thaishopfun.oms.auth.UuidV7;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -87,6 +88,13 @@ class CheckoutRepository {
             "SELECT EXISTS (SELECT 1 FROM warehouse WHERE tenant_id = ? AND is_default)",
             Boolean.class,
             tenantId));
+  }
+
+  void applyLockTimeout(Duration timeout) {
+    jdbc.query(
+        "SELECT set_config('lock_timeout', ?, true)",
+        ps -> ps.setString(1, timeout.toMillis() + "ms"),
+        rs -> null);
   }
 
   Optional<ListingRow> listing(UUID tenantId, UUID channelAccountId, String externalSkuId) {
