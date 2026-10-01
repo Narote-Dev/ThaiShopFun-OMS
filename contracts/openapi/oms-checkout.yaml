@@ -32,6 +32,8 @@ paths:
         "201":
           description: |
             Reserved or unenforced (SHADOW / observe / unmapped listing / unknown shop).
+            TSF must pass `reservation_id` in `order.created` and DELETE on abandon whenever any
+            response item has `enforced=true`, even when top-level `enforced=false` (mixed CONTROL).
             Unknown `tsf_shop_id` is not idempotent — each call mints a new `reservation_id`.
             `channel_account.stock_sync_paused` does not change `enforced`; only mode, mapping,
             entitlement, and connection status do. `GRACE` entitlement is treated like expired or

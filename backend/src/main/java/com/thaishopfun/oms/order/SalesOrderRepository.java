@@ -20,9 +20,9 @@ public class SalesOrderRepository {
 
   private static final String COLUMNS =
       "id, tenant_id, channel_account_id, external_order_id, order_status, payment_status, "
-          + "fulfillment_status, hold_reason, channel_status, payment_method, currency, subtotal, "
-          + "shipping_fee, discount, grand_total, ordered_at, paid_at, ship_by, external_version, "
-          + "version";
+          + "fulfillment_status, hold_reason, hold_note, channel_status, payment_method, currency, "
+          + "subtotal, shipping_fee, discount, grand_total, ordered_at, paid_at, ship_by, "
+          + "external_version, version";
 
   private final JdbcTemplate jdbc;
 
@@ -35,7 +35,7 @@ public class SalesOrderRepository {
     jdbc.update(
         "INSERT INTO sales_order ("
             + COLUMNS
-            + ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            + ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         order.id(),
         order.tenantId(),
         order.channelAccountId(),
@@ -44,6 +44,7 @@ public class SalesOrderRepository {
         order.paymentStatus(),
         order.fulfillmentStatus(),
         order.holdReason(),
+        order.holdNote(),
         order.channelStatus(),
         order.paymentMethod(),
         order.currency(),
@@ -73,6 +74,61 @@ public class SalesOrderRepository {
             externalOrderId));
   }
 
+  public boolean existsByExternalId(UUID channelAccountId, String externalOrderId) {
+    return Boolean.TRUE.equals(
+        jdbc.queryForObject(
+            """
+            SELECT EXISTS (
+              SELECT 1 FROM sales_order
+              WHERE channel_account_id = ? AND external_order_id = ?
+            )
+            """,
+            Boolean.class,
+            channelAccountId,
+            externalOrderId));
+  }
+
+  /**
+   * Updates status fields with optimistic locking on {@code version}. Returns the new row or empty
+   * when the version did not match.
+   */
+  public java.util.Optional<SalesOrder> updateStatusFields(
+      UUID id,
+      long expectedVersion,
+      String orderStatus,
+      String paymentStatus,
+      String fulfillmentStatus,
+      String holdReason,
+      String holdNote,
+      Instant paidAt) {
+    int updated =
+        jdbc.update(
+            """
+            UPDATE sales_order
+            SET order_status = ?,
+                payment_status = ?,
+                fulfillment_status = ?,
+                hold_reason = ?,
+                hold_note = ?,
+                paid_at = ?,
+                version = version + 1,
+                updated_at = now()
+            WHERE id = ? AND version = ?
+            """,
+            orderStatus,
+            paymentStatus,
+            fulfillmentStatus,
+            holdReason,
+            holdNote,
+            timestamp(paidAt),
+            id,
+            expectedVersion);
+    if (updated != 1) {
+      return Optional.empty();
+    }
+    return findById(id);
+  }
+
   private SalesOrder map(ResultSet rows, int rowNum) throws SQLException {
     return new SalesOrder(
         rows.getObject("id", UUID.class),
@@ -83,6 +139,7 @@ public class SalesOrderRepository {
         rows.getString("payment_status"),
         rows.getString("fulfillment_status"),
         rows.getString("hold_reason"),
+        rows.getString("hold_note"),
         rows.getString("channel_status"),
         rows.getString("payment_method"),
         rows.getString("currency"),

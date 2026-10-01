@@ -58,6 +58,9 @@ public class ReservationEngine {
   static final String SCOPE_RELEASE = "stock.release";
   static final String SCOPE_CONSUME = "stock.consume";
   static final String SCOPE_UNPACK = "stock.unpack";
+  static final String SCOPE_ADOPT = "stock.adopt";
+  static final String SCOPE_ENSURE_ORDER_HOLD = "stock.ensure_order_hold";
+  public static final String ADOPT_SKIPPED_METRIC = "oms.stock.adopt_skipped";
 
   static final String EXPIRY_ACTOR = "system:expiry";
   public static final String INLINE_EXPIRED_METRIC = "oms.stock.inline_expired";
@@ -75,6 +78,7 @@ public class ReservationEngine {
   private final ApplicationEventPublisher events;
   private final Clock clock;
   private final Counter inlineExpired;
+  private final Counter adoptSkipped;
 
   ReservationEngine(
       StockTransactions transactions,
@@ -93,6 +97,73 @@ public class ReservationEngine {
     this.events = events;
     this.clock = clock;
     this.inlineExpired = Counter.builder(INLINE_EXPIRED_METRIC).register(meters);
+    this.adoptSkipped = Counter.builder(ADOPT_SKIPPED_METRIC).register(meters);
+  }
+
+  /**
+   * CHECKOUT→ORDER hand-off in one engine write: inline-expire stale checkout rows, transfer
+   * ACTIVE CHECKOUT rows to the ORDER owner (setting {@code expires_at}), trim surplus, then
+   * all-or-nothing reserve any remaining component need. On {@link AdoptResult.Status#SHORT}, rows
+   * already transferred stay under the ORDER owner and nothing new is reserved.
+   *
+   * <p>Lock order: idempotency key → ORDER owner advisory lock → inventory (id order) → reservation
+   * rows (id order), same as {@link #reserve} and {@link #transferOwner}.
+   */
+  public AdoptResult adoptForOrder(
+      UUID checkoutGroupId,
+      StockOwner orderOwner,
+      List<ReserveItem> items,
+      Instant expiresAt,
+      String idempotencyKey) {
+    requireOwner(orderOwner);
+    if (orderOwner.type() != OwnerType.ORDER) {
+      throw new IllegalArgumentException("adoptForOrder target must be ORDER");
+    }
+    String key = StockIdempotency.requireKey(idempotencyKey);
+    if (items == null || items.isEmpty() || items.size() > MAX_ITEMS) {
+      throw new IllegalArgumentException("items must hold 1.." + MAX_ITEMS + " entries");
+    }
+    List<ReserveItem> sorted = new ArrayList<>(items);
+    sorted.sort(
+        Comparator.comparing((ReserveItem item) -> item.skuId().toString())
+            .thenComparing(item -> String.valueOf(item.warehouseId()))
+            .thenComparingInt(ReserveItem::qty));
+    String hash =
+        StockIdempotency.sha256(
+            "adopt|"
+                + (checkoutGroupId == null ? "none" : checkoutGroupId)
+                + "|"
+                + ownerKey(orderOwner)
+                + "|"
+                + (expiresAt == null ? "null" : expiresAt)
+                + "|"
+                + canonicalReserve(orderOwner, null, sorted));
+    Outcome<AdoptResult> outcome =
+        transactions.write(SCOPE_ADOPT, () -> doAdoptForOrder(checkoutGroupId, orderOwner, sorted, expiresAt, key, hash));
+    return outcome.unwrap();
+  }
+
+  /**
+   * Clears {@code expires_at} on ACTIVE ORDER rows, or re-reserves the full need when nothing
+   * ACTIVE remains (swept expiry). One engine write.
+   */
+  public EnsureHoldResult ensureOrderHold(
+      StockOwner owner, List<ReserveItem> items, String idempotencyKey) {
+    requireOrderOwner(owner, "ensureOrderHold");
+    String key = StockIdempotency.requireKey(idempotencyKey);
+    if (items == null || items.isEmpty() || items.size() > MAX_ITEMS) {
+      throw new IllegalArgumentException("items must hold 1.." + MAX_ITEMS + " entries");
+    }
+    List<ReserveItem> sorted = new ArrayList<>(items);
+    sorted.sort(
+        Comparator.comparing((ReserveItem item) -> item.skuId().toString())
+            .thenComparing(item -> String.valueOf(item.warehouseId()))
+            .thenComparingInt(ReserveItem::qty));
+    String hash = StockIdempotency.sha256("ensure|" + ownerKey(owner) + "|" + canonicalReserve(owner, null, sorted));
+    Outcome<EnsureHoldResult> outcome =
+        transactions.write(
+            SCOPE_ENSURE_ORDER_HOLD, () -> doEnsureOrderHold(owner, sorted, key, hash));
+    return outcome.unwrap();
   }
 
   /** {@link #reserve(StockOwner, List, String, Duration)} with the default TTL. */
@@ -636,6 +707,315 @@ public class ReservationEngine {
     }
     repository.insertLedger(tenantId, settle.reason, actor, ledger);
     publishChanged(tenantId, lines(rows));
+  }
+
+  // ---- adopt / ensure ----------------------------------------------------------------------
+
+  private Outcome<AdoptResult> doAdoptForOrder(
+      UUID checkoutGroupId,
+      StockOwner orderOwner,
+      List<ReserveItem> items,
+      Instant expiresAt,
+      String key,
+      String hash) {
+    UUID tenantId = TenantContext.requireTenantId();
+    Stored stored = idempotency.claim(tenantId, SCOPE_ADOPT, key, hash);
+    if (stored != null) {
+      return idempotency.replay(stored, AdoptResult.class);
+    }
+    repository.lockOwner(tenantId, orderOwner);
+    Instant now = clock.instant();
+    UUID defaultWarehouse = null;
+    if (items.stream().anyMatch(item -> item.warehouseId() == null)) {
+      defaultWarehouse = repository.defaultWarehouse();
+      if (defaultWarehouse == null) {
+        return fail(
+            tenantId,
+            SCOPE_ADOPT,
+            key,
+            StockError.NO_DEFAULT_WAREHOUSE,
+            "tenant has no default warehouse");
+      }
+    }
+    Set<UUID> itemSkuIds = new LinkedHashSet<>();
+    items.forEach(item -> itemSkuIds.add(item.skuId()));
+    Map<UUID, SkuInfo> skus = repository.skus(itemSkuIds);
+    Map<SkuWarehouse, Need> needs = explode(items, skus, defaultWarehouse);
+
+    int transferredQty = 0;
+    int releasedQty = 0;
+    UUID groupId = checkoutGroupId;
+    List<ReservationRow> adoptable = List.of();
+    if (checkoutGroupId != null) {
+      List<ReservationRow> group = repository.reservationsByGroup(checkoutGroupId);
+      if (!group.isEmpty()) {
+        groupId = checkoutGroupId;
+        List<ReservationRow> active = group.stream().filter(ReservationRow::active).toList();
+        if (!active.isEmpty()) {
+          if (active.stream().allMatch(row -> row.ownedBy(orderOwner))) {
+            adoptable = active;
+          } else if (active.stream().anyMatch(row -> row.ownerType() == OwnerType.ORDER)) {
+            adoptSkipped.increment();
+          } else if (active.stream().allMatch(row -> row.ownerType() == OwnerType.CHECKOUT)) {
+            adoptable = active;
+          } else {
+            adoptSkipped.increment();
+          }
+        }
+      }
+    }
+
+    Set<SkuWarehouse> inventoryKeys = new LinkedHashSet<>(needs.keySet());
+    adoptable.forEach(row -> inventoryKeys.add(row.key()));
+    hooks.beforeInventoryLock(SCOPE_ADOPT);
+    Map<SkuWarehouse, InventoryRow> inventory = repository.lockInventory(inventoryKeys);
+    hooks.afterInventoryLocked(SCOPE_ADOPT);
+
+    if (!adoptable.isEmpty()) {
+      List<ReservationRow> locked = repository.lockReservations(ids(adoptable));
+      List<ReservationRow> checkout =
+          locked.stream()
+              .filter(ReservationRow::active)
+              .filter(row -> row.ownerType() == OwnerType.CHECKOUT)
+              .toList();
+      if (!checkout.isEmpty() && checkout.stream().anyMatch(row -> row.expiredAt(now))) {
+        settle(tenantId, checkout, inventory, Settle.EXPIRE, EXPIRY_ACTOR);
+        inlineExpired.increment(checkout.size());
+        repository.reloadLockedInventory(inventory);
+        checkout = List.of();
+      }
+      if (!checkout.isEmpty()) {
+        int moved =
+            repository.transferOwnerWithExpiry(ids(checkout), orderOwner, expiresAt);
+        if (moved != checkout.size()) {
+          throw new StockConflictException("adopt transfer moved " + moved + " of " + checkout.size());
+        }
+        transferredQty = checkout.stream().mapToInt(ReservationRow::qty).sum();
+      }
+    }
+
+    List<ReservationRow> owned = repository.activeByOwner(orderOwner);
+    owned = repository.lockReservations(ids(owned)).stream().filter(ReservationRow::active).toList();
+    Map<SkuWarehouse, Integer> held = new LinkedHashMap<>();
+    for (ReservationRow row : owned) {
+      held.merge(row.key(), row.qty(), Integer::sum);
+    }
+
+    List<ReservationRow> toRelease = new ArrayList<>();
+    for (Map.Entry<SkuWarehouse, Integer> entry : held.entrySet()) {
+      int needQty = needs.getOrDefault(entry.getKey(), new Need()).qty;
+      int surplus = entry.getValue() - needQty;
+      if (surplus <= 0) {
+        continue;
+      }
+      int remaining = surplus;
+      for (ReservationRow row : owned) {
+        if (!row.key().equals(entry.getKey()) || remaining <= 0) {
+          continue;
+        }
+        toRelease.add(row);
+        remaining -= row.qty();
+      }
+    }
+    if (!toRelease.isEmpty()) {
+      releasedQty = toRelease.stream().mapToInt(ReservationRow::qty).sum();
+      settle(tenantId, toRelease, inventory, Settle.RELEASE, actor());
+      repository.reloadLockedInventory(inventory);
+      owned = repository.activeByOwner(orderOwner);
+      owned = repository.lockReservations(ids(owned)).stream().filter(ReservationRow::active).toList();
+      held.clear();
+      for (ReservationRow row : owned) {
+        held.merge(row.key(), row.qty(), Integer::sum);
+      }
+    }
+
+    List<Shortfall> shortfalls = new ArrayList<>();
+    List<ReserveItem> deficitItems = new ArrayList<>();
+    for (Map.Entry<SkuWarehouse, Need> entry : needs.entrySet()) {
+      int have = held.getOrDefault(entry.getKey(), 0);
+      int needQty = entry.getValue().qty;
+      if (have >= needQty) {
+        continue;
+      }
+      deficitItems.add(
+          new ReserveItem(entry.getKey().skuId(), needQty - have, entry.getKey().warehouseId()));
+    }
+
+    int newlyReserved = 0;
+    if (!deficitItems.isEmpty()) {
+      for (Map.Entry<SkuWarehouse, Need> entry : needs.entrySet()) {
+        InventoryRow row = inventory.get(entry.getKey());
+        int available = row == null ? 0 : row.available();
+        Need need = entry.getValue();
+        int have = held.getOrDefault(entry.getKey(), 0);
+        if (have + available < need.qty) {
+          shortfalls.add(
+              new Shortfall(
+                  entry.getKey().skuId(),
+                  entry.getKey().warehouseId(),
+                  need.qty - have,
+                  Math.max(available, 0),
+                  List.copyOf(need.requestedBy)));
+        }
+      }
+      if (!shortfalls.isEmpty()) {
+        AdoptResult result =
+            AdoptResult.shortfall(
+                groupId, transferredQty, releasedQty, List.copyOf(shortfalls));
+        idempotency.complete(tenantId, SCOPE_ADOPT, key, StockError.OUT_OF_STOCK.status(), result);
+        return Outcome.success(result);
+      }
+      Map<UUID, Integer> byInventory = new LinkedHashMap<>();
+      Map<SkuWarehouse, Need> deficitNeeds = explode(deficitItems, skus, defaultWarehouse);
+      for (Map.Entry<SkuWarehouse, Need> entry : deficitNeeds.entrySet()) {
+        byInventory.merge(inventory.get(entry.getKey()).id(), entry.getValue().qty, Integer::sum);
+      }
+      int updated = repository.reserveInventory(byInventory);
+      if (updated != byInventory.size()) {
+        throw new StockConflictException(
+            "adopt reserve updated " + updated + " of " + byInventory.size());
+      }
+      UUID newGroup = groupId == null ? UuidV7.generate() : groupId;
+      List<ReservedLine> lines = new ArrayList<>();
+      List<LedgerEntry> ledger = new ArrayList<>();
+      for (Map.Entry<SkuWarehouse, Need> entry : deficitNeeds.entrySet()) {
+        ReservedLine line =
+            new ReservedLine(
+                UuidV7.generate(),
+                entry.getKey().skuId(),
+                entry.getKey().warehouseId(),
+                entry.getValue().qty);
+        lines.add(line);
+        ledger.add(
+            new LedgerEntry(
+                UuidV7.generate(),
+                line.skuId(),
+                line.warehouseId(),
+                0,
+                line.qty(),
+                line.reservationId()));
+        newlyReserved += line.qty();
+      }
+      repository.insertReservations(tenantId, orderOwner, newGroup, expiresAt, lines);
+      repository.insertLedger(tenantId, "RESERVE", actor(), ledger);
+      publishChanged(tenantId, lines);
+      groupId = newGroup;
+    }
+
+    AdoptResult result =
+        AdoptResult.adopted(groupId, transferredQty, newlyReserved, releasedQty);
+    idempotency.complete(tenantId, SCOPE_ADOPT, key, 201, result);
+    return Outcome.success(result);
+  }
+
+  private Outcome<EnsureHoldResult> doEnsureOrderHold(
+      StockOwner owner, List<ReserveItem> items, String key, String hash) {
+    UUID tenantId = TenantContext.requireTenantId();
+    Stored stored = idempotency.claim(tenantId, SCOPE_ENSURE_ORDER_HOLD, key, hash);
+    if (stored != null) {
+      return idempotency.replay(stored, EnsureHoldResult.class);
+    }
+    repository.lockOwner(tenantId, owner);
+    Instant now = clock.instant();
+    UUID defaultWarehouse = null;
+    if (items.stream().anyMatch(item -> item.warehouseId() == null)) {
+      defaultWarehouse = repository.defaultWarehouse();
+      if (defaultWarehouse == null) {
+        return fail(
+            tenantId,
+            SCOPE_ENSURE_ORDER_HOLD,
+            key,
+            StockError.NO_DEFAULT_WAREHOUSE,
+            "tenant has no default warehouse");
+      }
+    }
+    Set<UUID> itemSkuIds = new LinkedHashSet<>();
+    items.forEach(item -> itemSkuIds.add(item.skuId()));
+    Map<UUID, SkuInfo> skus = repository.skus(itemSkuIds);
+    Map<SkuWarehouse, Need> needs = explode(items, skus, defaultWarehouse);
+
+    List<ReservationRow> active = repository.activeByOwner(owner);
+    Set<SkuWarehouse> inventoryKeys = new LinkedHashSet<>(needs.keySet());
+    active.forEach(row -> inventoryKeys.add(row.key()));
+    hooks.beforeInventoryLock(SCOPE_ENSURE_ORDER_HOLD);
+    Map<SkuWarehouse, InventoryRow> inventory = repository.lockInventory(inventoryKeys);
+    hooks.afterInventoryLocked(SCOPE_ENSURE_ORDER_HOLD);
+
+    if (!active.isEmpty()) {
+      List<ReservationRow> locked =
+          repository.lockReservations(ids(active)).stream().filter(ReservationRow::active).toList();
+      List<ReservationRow> unexpired =
+          locked.stream().filter(row -> !row.expiredAt(now)).toList();
+      if (!unexpired.isEmpty()) {
+        repository.clearActiveExpiry(owner);
+        EnsureHoldResult result = EnsureHoldResult.ok();
+        idempotency.complete(tenantId, SCOPE_ENSURE_ORDER_HOLD, key, 200, result);
+        return Outcome.success(result);
+      }
+      List<ReservationRow> expired =
+          locked.stream().filter(row -> row.expiredAt(now)).toList();
+      if (!expired.isEmpty()) {
+        settle(tenantId, expired, inventory, Settle.EXPIRE, EXPIRY_ACTOR);
+        repository.reloadLockedInventory(inventory);
+      }
+    }
+
+    List<Shortfall> shortfalls = new ArrayList<>();
+    for (Map.Entry<SkuWarehouse, Need> entry : needs.entrySet()) {
+      InventoryRow row = inventory.get(entry.getKey());
+      int available = row == null ? 0 : row.available();
+      Need need = entry.getValue();
+      if (available < need.qty) {
+        shortfalls.add(
+            new Shortfall(
+                entry.getKey().skuId(),
+                entry.getKey().warehouseId(),
+                need.qty,
+                Math.max(available, 0),
+                List.copyOf(need.requestedBy)));
+      }
+    }
+    if (!shortfalls.isEmpty()) {
+      EnsureHoldResult result = EnsureHoldResult.shortfall(List.copyOf(shortfalls));
+      idempotency.complete(tenantId, SCOPE_ENSURE_ORDER_HOLD, key, StockError.OUT_OF_STOCK.status(), result);
+      return Outcome.success(result);
+    }
+
+    Map<UUID, Integer> byInventory = new LinkedHashMap<>();
+    for (Map.Entry<SkuWarehouse, Need> entry : needs.entrySet()) {
+      byInventory.merge(inventory.get(entry.getKey()).id(), entry.getValue().qty, Integer::sum);
+    }
+    int updated = repository.reserveInventory(byInventory);
+    if (updated != byInventory.size()) {
+      throw new StockConflictException(
+          "ensure reserve updated " + updated + " of " + byInventory.size());
+    }
+    UUID groupId = UuidV7.generate();
+    List<ReservedLine> lines = new ArrayList<>();
+    List<LedgerEntry> ledger = new ArrayList<>();
+    for (Map.Entry<SkuWarehouse, Need> entry : needs.entrySet()) {
+      ReservedLine line =
+          new ReservedLine(
+              UuidV7.generate(),
+              entry.getKey().skuId(),
+              entry.getKey().warehouseId(),
+              entry.getValue().qty);
+      lines.add(line);
+      ledger.add(
+          new LedgerEntry(
+              UuidV7.generate(),
+              line.skuId(),
+              line.warehouseId(),
+              0,
+              line.qty(),
+              line.reservationId()));
+    }
+    repository.insertReservations(tenantId, owner, groupId, null, lines);
+    repository.insertLedger(tenantId, "RESERVE", actor(), ledger);
+    publishChanged(tenantId, lines);
+    EnsureHoldResult result = EnsureHoldResult.ok();
+    idempotency.complete(tenantId, SCOPE_ENSURE_ORDER_HOLD, key, 201, result);
+    return Outcome.success(result);
   }
 
   // ---- helpers -----------------------------------------------------------------------------

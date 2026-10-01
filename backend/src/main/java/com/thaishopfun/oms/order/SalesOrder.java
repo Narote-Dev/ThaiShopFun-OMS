@@ -14,6 +14,7 @@ public record SalesOrder(
     String paymentStatus,
     String fulfillmentStatus,
     String holdReason,
+    String holdNote,
     String channelStatus,
     String paymentMethod,
     String currency,

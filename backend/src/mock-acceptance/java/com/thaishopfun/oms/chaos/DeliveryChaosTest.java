@@ -97,7 +97,7 @@ import tools.jackson.databind.node.ObjectNode;
  * <p>Tagged {@code chaos}: excluded from the default build, run by {@code -Pmock-acceptance,chaos}.
  */
 @Tag("chaos")
-@ActiveProfiles("test")
+@ActiveProfiles({"test", "chaos"})
 @SpringBootTest(
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
     properties = {

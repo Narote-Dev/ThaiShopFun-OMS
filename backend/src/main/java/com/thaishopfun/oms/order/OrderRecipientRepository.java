@@ -59,6 +59,36 @@ public class OrderRecipientRepository {
         SalesOrderRepository.timestamp(redactAfter));
   }
 
+  public void update(UUID orderId, Recipient recipient) {
+    UUID tenantId = TenantContext.requireTenantId();
+    boolean hasPhone = recipient.phone() != null && !recipient.phone().isBlank();
+    byte[] name = cipher.encrypt(recipient.name(), tenantId, orderId, PiiColumn.NAME);
+    byte[] phone =
+        hasPhone ? cipher.encrypt(recipient.phone(), tenantId, orderId, PiiColumn.PHONE) : null;
+    byte[] address = cipher.encrypt(recipient.address(), tenantId, orderId, PiiColumn.ADDRESS);
+    byte[] phoneHash = hasPhone ? cipher.phoneHash(recipient.phone()) : null;
+    String phoneLast4 = hasPhone ? PiiCipher.phoneLast4(recipient.phone()) : null;
+    int updated =
+        jdbc.update(
+            """
+            UPDATE order_recipient
+            SET name_enc = ?, phone_enc = ?, phone_hash = ?, phone_last4 = ?, address_enc = ?,
+                province = ?, postcode = ?, updated_at = now()
+            WHERE order_id = ? AND pii_status = 'ACTIVE'
+            """,
+            name,
+            phone,
+            phoneHash,
+            phoneLast4,
+            address,
+            recipient.province(),
+            recipient.postcode(),
+            orderId);
+    if (updated != 1) {
+      throw new IllegalStateException("order recipient is not visible");
+    }
+  }
+
   public Optional<StoredRecipient> find(UUID orderId) {
     // Step 1: Read the row. The row's own tenant_id and order_id are the AAD for decryption.
     List<StoredRecipient> rows =

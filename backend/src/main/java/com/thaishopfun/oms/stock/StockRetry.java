@@ -140,7 +140,7 @@ public class StockRetry {
     return Math.min(nominal, cap);
   }
 
-  static Cause classify(Throwable ex) {
+  public static Cause classify(Throwable ex) {
     for (Throwable current = ex; current != null; current = current.getCause()) {
       if (current instanceof StockConflictException) {
         return Cause.CONDITIONAL_UPDATE;

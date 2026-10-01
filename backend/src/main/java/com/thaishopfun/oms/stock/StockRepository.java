@@ -690,17 +690,34 @@ class StockRepository {
   }
 
   int transferOwner(Collection<UUID> ids, StockOwner target) {
+    return transferOwnerWithExpiry(ids, target, null);
+  }
+
+  int transferOwnerWithExpiry(Collection<UUID> ids, StockOwner target, Instant expiresAt) {
     return jdbc.update(
         """
         UPDATE stock_reservation
-        SET owner_type = ?, owner_ref = ?, expires_at = NULL, updated_at = now()
+        SET owner_type = ?, owner_ref = ?, expires_at = ?, updated_at = now()
         WHERE id = ANY (?) AND status = 'ACTIVE'
         """,
         ps -> {
           ps.setString(1, target.type().name());
           ps.setString(2, target.ref());
-          uuidArray(ps, 3, ids);
+          ps.setObject(
+              3, expiresAt == null ? null : OffsetDateTime.ofInstant(expiresAt, ZoneOffset.UTC));
+          uuidArray(ps, 4, ids);
         });
+  }
+
+  int clearActiveExpiry(StockOwner owner) {
+    return jdbc.update(
+        """
+        UPDATE stock_reservation
+        SET expires_at = NULL, updated_at = now()
+        WHERE owner_type = ? AND owner_ref = ? AND status = 'ACTIVE'
+        """,
+        owner.type().name(),
+        owner.ref());
   }
 
   // ---- mapping -----------------------------------------------------------------------------

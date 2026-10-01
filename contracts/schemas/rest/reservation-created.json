@@ -11,14 +11,16 @@
   "properties": {
     "reservation_id": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "description": "Reservation group id. TSF must echo this in order.created whenever any response item has enforced=true (even if top-level enforced=false), and DELETE it on checkout abandon."
     },
     "expires_at": {
       "type": "string",
       "format": "date-time"
     },
     "enforced": {
-      "type": "boolean"
+      "type": "boolean",
+      "description": "True only when every item is enforced. Per-line enforced flags govern whether TSF must pass reservation_id on order.created and DELETE on abandon."
     },
     "items": {
       "type": "array",

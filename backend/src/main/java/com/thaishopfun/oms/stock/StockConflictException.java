@@ -5,9 +5,9 @@ package com.thaishopfun.oms.stock;
  * locks this means a writer skipped the lock order. The transaction is rolled back and retried
  * whole.
  */
-class StockConflictException extends RuntimeException {
+public class StockConflictException extends RuntimeException {
 
-  StockConflictException(String message) {
+  public StockConflictException(String message) {
     super(message);
   }
 }

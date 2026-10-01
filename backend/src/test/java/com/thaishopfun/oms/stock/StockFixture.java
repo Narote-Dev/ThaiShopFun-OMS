@@ -246,6 +246,24 @@ public final class StockFixture {
     return account;
   }
 
+  /** TSF account whose {@code external_shop_id} matches the tenant {@code tsf_shop_id}. */
+  public UUID tsfChannelAccount(Shop shop, String mode, String status) {
+    String tsfShopId = tsfShopId(shop);
+    UUID account = UuidV7.generate();
+    inTenant(
+        shop.tenant(),
+        () ->
+            jdbc.update(
+                "INSERT INTO channel_account (id, tenant_id, channel, external_shop_id, status, mode) "
+                    + "VALUES (?, ?, 'TSF', ?, ?, ?)",
+                account,
+                shop.tenant(),
+                tsfShopId,
+                status,
+                mode));
+    return account;
+  }
+
   public void channelListing(
       Shop shop, UUID channelAccountId, String externalSkuId, UUID skuId, boolean stockControl) {
     channelListing(shop, channelAccountId, externalSkuId, skuId, stockControl, true);

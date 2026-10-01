@@ -1,5 +1,9 @@
 package com.thaishopfun.oms.inbox;
 
+import com.thaishopfun.oms.order.OrderOptimisticLockException;
+import com.thaishopfun.oms.stock.StockBusyException;
+import com.thaishopfun.oms.stock.StockConflictException;
+import com.thaishopfun.oms.stock.StockRetry;
 import com.thaishopfun.oms.tenant.TenantContext;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -159,21 +163,93 @@ public class InboxWorker {
   private void processClaim(Claimed claimed) {
     TenantContext.set(claimed.tenantId(), null);
     try {
-      try {
-        applyTx.executeWithoutResult(
-            status -> {
-              // Step 1: Kill a stuck statement well before the lease expires.
-              jdbc.execute(
-                  "SET LOCAL statement_timeout = " + properties.getHandlerTimeout().toMillis());
-              apply(claimed);
-            });
-      } catch (RuntimeException ex) {
-        // Step 2: The handler transaction is gone. Record FAILED or DEAD on its own.
-        recordFailure(claimed, ex);
+      int attempts = 0;
+      while (true) {
+        try {
+          applyTx.executeWithoutResult(
+              status -> {
+                jdbc.execute(
+                    "SET LOCAL statement_timeout = " + properties.getHandlerTimeout().toMillis());
+                apply(claimed);
+              });
+          break;
+        } catch (InboxDeferException defer) {
+          handleDefer(claimed, defer);
+          break;
+        } catch (RuntimeException ex) {
+          if (attempts < 3 && retryableTransaction(ex)) {
+            attempts++;
+            continue;
+          }
+          recordFailure(claimed, ex);
+          break;
+        }
       }
     } finally {
       TenantContext.clear();
     }
+  }
+
+  private void handleDefer(Claimed claimed, InboxDeferException defer) {
+    failureTx.executeWithoutResult(
+        status -> {
+          InboxRow row = lock(claimed.id());
+          if (row == null) {
+            return;
+          }
+          if (!"RECEIVED".equals(row.status()) && !"FAILED".equals(row.status())) {
+            return;
+          }
+          if (!leaseMatches(row.nextAttemptAt(), claimed.leaseUntil())) {
+            return;
+          }
+          Instant received = row.receivedAt();
+          if (received != null
+              && received.isBefore(
+                  jdbc
+                      .queryForObject("SELECT now()", OffsetDateTime.class)
+                      .toInstant()
+                      .minus(properties.getMaxDefer()))) {
+            upsertOrderEventWithoutOrder(row);
+            recordFailure(new Claimed(row.id(), row.tenantId(), claimed.leaseUntil()), new RuntimeException("ORDER_EVENT_WITHOUT_ORDER"));
+            return;
+          }
+          pushBack(row, defer.delay() == null ? properties.getDeferDelay() : defer.delay());
+        });
+  }
+
+  private void upsertOrderEventWithoutOrder(InboxRow row) {
+    int updated =
+        jdbc.update(
+            """
+            UPDATE reconciliation_issue
+            SET details = ?::jsonb, updated_at = now()
+            WHERE tenant_id = ? AND rule = 'ORDER_EVENT_WITHOUT_ORDER' AND order_id IS NULL
+              AND status <> 'RESOLVED'
+            """,
+            "{\"inbox_event_id\":\"" + row.id() + "\"}",
+            row.tenantId());
+    if (updated == 0) {
+      jdbc.update(
+          """
+          INSERT INTO reconciliation_issue (id, tenant_id, run_id, rule, order_id, details, status)
+          VALUES (?, ?, ?, 'ORDER_EVENT_WITHOUT_ORDER', NULL, ?::jsonb, 'OPEN')
+          """,
+          UUID.randomUUID(),
+          row.tenantId(),
+          row.id(),
+          "{\"inbox_event_id\":\"" + row.id() + "\"}");
+    }
+  }
+
+  private static boolean retryableTransaction(RuntimeException ex) {
+    if (ex instanceof StockConflictException || ex instanceof OrderOptimisticLockException) {
+      return true;
+    }
+    if (ex instanceof StockBusyException) {
+      return true;
+    }
+    return StockRetry.classify(ex) != null;
   }
 
   private void apply(Claimed claimed) {
@@ -240,7 +316,7 @@ public class InboxWorker {
         """
         SELECT e.id, e.tenant_id, e.source, e.event_id, e.event_type, e.aggregate_id,
                e.aggregate_version, e.payload::text AS payload, e.status, e.attempts,
-               e.next_attempt_at, t.entitlement_status, t.entitlement_expires_at
+               e.next_attempt_at, e.received_at, t.entitlement_status, t.entitlement_expires_at
         FROM inbox_event AS e
         JOIN tenant AS t ON t.id = e.tenant_id
         WHERE e.id = ?
@@ -251,6 +327,7 @@ public class InboxWorker {
             return null;
           }
           OffsetDateTime expires = rs.getObject("entitlement_expires_at", OffsetDateTime.class);
+          OffsetDateTime receivedAt = rs.getObject("received_at", OffsetDateTime.class);
           return new InboxRow(
               rs.getObject("id", UUID.class),
               rs.getObject("tenant_id", UUID.class),
@@ -263,6 +340,7 @@ public class InboxWorker {
               rs.getString("status"),
               rs.getInt("attempts"),
               rs.getObject("next_attempt_at", OffsetDateTime.class),
+              receivedAt == null ? null : receivedAt.toInstant(),
               rs.getString("entitlement_status"),
               expires == null ? null : expires.toInstant());
         },
@@ -450,6 +528,7 @@ public class InboxWorker {
       String status,
       int attempts,
       OffsetDateTime nextAttemptAt,
+      Instant receivedAt,
       String entitlementStatus,
       Instant expiresAt) {
 
