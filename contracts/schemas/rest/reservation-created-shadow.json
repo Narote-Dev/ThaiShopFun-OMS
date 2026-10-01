@@ -3,19 +3,22 @@
   "type": "object",
   "additionalProperties": false,
   "required": [
-    "checkout_id",
-    "tsf_shop_id",
+    "reservation_id",
+    "expires_at",
+    "enforced",
     "items"
   ],
   "properties": {
-    "checkout_id": {
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 255
-    },
-    "tsf_shop_id": {
+    "reservation_id": {
       "type": "string",
       "minLength": 1
+    },
+    "expires_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "enforced": {
+      "type": "boolean"
     },
     "items": {
       "type": "array",
@@ -25,7 +28,8 @@
         "additionalProperties": false,
         "required": [
           "listing_sku_id",
-          "qty"
+          "qty",
+          "enforced"
         ],
         "properties": {
           "listing_sku_id": {
@@ -35,6 +39,9 @@
           "qty": {
             "type": "integer",
             "minimum": 1
+          },
+          "enforced": {
+            "type": "boolean"
           }
         }
       }

@@ -75,6 +75,110 @@ jobs:
         working-directory: mock-tsf
         run: ./mvnw -B verify
 
+  perf:
+    name: Checkout reserve perf
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+          cache-dependency-path: |
+            backend/pom.xml
+            mock-tsf/pom.xml
+      - name: Start Postgres and mock TSF
+        run: docker compose up -d postgres mock-tsf
+      - name: Wait for dependencies
+        run: |
+          for i in $(seq 1 30); do
+            docker compose exec -T postgres pg_isready -U oms -d oms && break
+            sleep 2
+          done
+          for i in $(seq 1 40); do
+            curl -sf http://127.0.0.1:8090/actuator/health && exit 0
+            sleep 3
+          done
+          exit 1
+      - name: Package backend
+        working-directory: backend
+        run: ./mvnw -B -DskipTests package
+      - name: Start OMS (local profile)
+        working-directory: backend
+        env:
+          SPRING_PROFILES_ACTIVE: local
+          OMS_INBOX_WORKER_ENABLED: "false"
+          OMS_STOCK_EXPIRY_ENABLED: "false"
+        run: |
+          java -jar target/*.jar --server.port=8080 > target/perf-backend.log 2>&1 &
+          echo $! > target/perf-backend.pid
+          for i in $(seq 1 60); do
+            curl -sf http://127.0.0.1:8080/actuator/health && exit 0
+            sleep 2
+          done
+          exit 1
+      - name: Seed perf data
+        working-directory: backend
+        env:
+          SPRING_DATASOURCE_URL: jdbc:postgresql://127.0.0.1:5432/oms
+          SPRING_FLYWAY_USER: oms
+          SPRING_FLYWAY_PASSWORD: oms
+        run: |
+          ./mvnw -B -Pperf test-compile
+          java -cp "target/test-classes:target/classes:$(./mvnw -q -Pperf dependency:build-classpath -Dmdep.outputFile=/tmp/cp && cat /tmp/cp)" \
+            com.thaishopfun.oms.perf.CheckoutPerfSeeder
+      - name: Mint perf token
+        id: token
+        run: |
+          TOKEN=$(curl -sf -X POST http://127.0.0.1:8090/tsf-idp/token \
+            -H "Content-Type: application/x-www-form-urlencoded" \
+            --data "grant_type=client_credentials&client_id=tsf&client_secret=dev-tsf-client-secret" \
+            | jq -r .access_token)
+          echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
+      - name: Gatling checkout reserve
+        id: gatling
+        continue-on-error: true
+        working-directory: backend
+        run: |
+          set -o pipefail
+          ./mvnw -B -Pperf gatling:test \
+            -Dperf.baseUrl=http://127.0.0.1:8080 \
+            -Dperf.token="${{ steps.token.outputs.token }}" 2>&1 | tee target/gatling-run.log
+      - name: Perf job summary
+        if: always()
+        working-directory: backend
+        run: |
+          P95=$(grep -oP 'reserve-load: 95th percentile.*?actual : \K[0-9.]+' target/gatling-run.log | tail -1 || true)
+          P99=$(grep -oP 'reserve-load: 99th percentile.*?actual : \K[0-9.]+' target/gatling-run.log | tail -1 || true)
+          {
+            echo "### Checkout reserve perf (GitHub-hosted runner)"
+            echo "- reserve-load p95: **${P95:-n/a}** ms (NFR < 150 ms)"
+            echo "- reserve-load p99: **${P99:-n/a}** ms (NFR < 300 ms)"
+            echo "- Assertions are **not** loosened; this job is non-blocking (\`continue-on-error\`)."
+            echo "- Local reference: ~8 ms p95 / ~39 ms p99 on 8 cores; ~15 s p95 on 2-core pin reproduces CI saturation."
+            echo "- Full report: \`gatling-checkout-reserve\` artifact."
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Perf NFR evidence
+        if: steps.gatling.outcome == 'failure'
+        run: |
+          echo "::warning title=Checkout reserve perf NFR::Gatling assertions (p95<150ms, p99<300ms) failed on the GitHub-hosted runner. See the gatling-checkout-reserve artifact; assertions are intentionally not loosened."
+      - name: Upload Gatling report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gatling-checkout-reserve
+          if-no-files-found: warn
+          path: backend/target/gatling/**
+      - name: Upload perf backend log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-backend-log
+          if-no-files-found: ignore
+          path: backend/target/perf-backend.log
+
   contracts:
     name: Contract examples
     runs-on: ubuntu-latest

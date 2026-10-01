@@ -235,6 +235,26 @@ class StockRepository {
     return rows;
   }
 
+  /**
+   * Re-reads on_hand and reserved for rows this transaction already locked. Used after an inline
+   * settle so shortfall checks see the released reserved qty without a second lock pass.
+   */
+  void reloadLockedInventory(Map<SkuWarehouse, InventoryRow> locked) {
+    for (SkuWarehouse key : locked.keySet()) {
+      InventoryRow row =
+          jdbc.queryForObject(
+              """
+              SELECT id, sku_id, warehouse_id, on_hand, reserved
+              FROM inventory
+              WHERE sku_id = ? AND warehouse_id = ?
+              """,
+              (rs, rowNum) -> inventoryRow(rs),
+              key.skuId(),
+              key.warehouseId());
+      locked.put(key, row);
+    }
+  }
+
   /** Unlocked read for availability. */
   Map<UUID, InventoryRow> inventoryInWarehouse(UUID warehouseId, Collection<UUID> skuIds) {
     Map<UUID, InventoryRow> rows = new LinkedHashMap<>();
@@ -567,6 +587,67 @@ class StockRepository {
         (rs, row) -> reservationRow(rs),
         owner.type().name(),
         owner.ref());
+  }
+
+  /** This owner's ACTIVE CHECKOUT rows with {@code expires_at <= now} (unswept expiry). */
+  List<ReservationRow> expiredActiveCheckoutByOwner(StockOwner owner, Instant now) {
+    return jdbc.query(
+        "SELECT "
+            + RESERVATION_COLUMNS
+            + " FROM stock_reservation "
+            + "WHERE owner_type = ? AND owner_ref = ? AND status = 'ACTIVE' "
+            + "AND expires_at IS NOT NULL AND expires_at <= ? ORDER BY id",
+        (rs, row) -> reservationRow(rs),
+        owner.type().name(),
+        owner.ref(),
+        OffsetDateTime.ofInstant(now, ZoneOffset.UTC));
+  }
+
+  /**
+   * Whether the owner still has an ACTIVE row that has not passed {@code expires_at}. ORDER rows
+   * ({@code expires_at} null) always count.
+   */
+  boolean ownerHasActiveUnexpired(StockOwner owner, Instant now) {
+    Boolean exists =
+        jdbc.queryForObject(
+            """
+            SELECT EXISTS (
+              SELECT 1 FROM stock_reservation
+              WHERE owner_type = ? AND owner_ref = ? AND status = 'ACTIVE'
+                AND (expires_at IS NULL OR expires_at > ?)
+            )
+            """,
+            Boolean.class,
+            owner.type().name(),
+            owner.ref(),
+            OffsetDateTime.ofInstant(now, ZoneOffset.UTC));
+    return Boolean.TRUE.equals(exists);
+  }
+
+  /**
+   * Other owners' ACTIVE CHECKOUT rows past {@code now} that touch one of {@code skuIds}. Used to
+   * inline-expire stale holds on the reserve path (T12A P2).
+   */
+  List<ReservationRow> expiredActiveCheckoutForSkus(
+      StockOwner excludeOwner, Collection<UUID> skuIds, Instant now, int limit) {
+    if (skuIds.isEmpty() || limit <= 0) {
+      return List.of();
+    }
+    return jdbc.query(
+        "SELECT "
+            + RESERVATION_COLUMNS
+            + " FROM stock_reservation "
+            + "WHERE status = 'ACTIVE' AND owner_type = 'CHECKOUT' AND expires_at <= ? "
+            + "AND sku_id = ANY (?) AND NOT (owner_type = ? AND owner_ref = ?) "
+            + "ORDER BY expires_at, id LIMIT ?",
+        ps -> {
+          ps.setObject(1, OffsetDateTime.ofInstant(now, ZoneOffset.UTC));
+          uuidArray(ps, 2, skuIds);
+          ps.setString(3, excludeOwner.type().name());
+          ps.setString(4, excludeOwner.ref());
+          ps.setInt(5, limit);
+        },
+        (rs, row) -> reservationRow(rs));
   }
 
   /** Unlocked candidates for the expiry job. Re-checked after the inventory lock. */

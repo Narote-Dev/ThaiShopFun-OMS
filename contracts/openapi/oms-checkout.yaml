@@ -4,8 +4,8 @@ info:
   version: 0.2.0
   description: |
     Section 4.3. TSF calls these routes with a client-credentials token whose
-    audience is oms-internal. OMS does not implement them yet (T12A). The mock
-    only calls them and returns OMS's response.
+    audience is oms-internal. The mock forwards requests to OMS and returns
+    OMS's response unchanged.
 servers:
   - url: "{OMS_API}"
     variables:
@@ -19,6 +19,7 @@ paths:
         - name: Idempotency-Key
           in: header
           required: true
+          description: Must equal checkout_id in the body.
           schema:
             type: string
       requestBody:
@@ -29,19 +30,55 @@ paths:
               $ref: ../schemas/rest/reservation-request.json
       responses:
         "201":
-          description: Reserved
+          description: |
+            Reserved or unenforced (SHADOW / observe / unmapped listing / unknown shop).
+            Unknown `tsf_shop_id` is not idempotent — each call mints a new `reservation_id`.
+            `channel_account.stock_sync_paused` does not change `enforced`; only mode, mapping,
+            entitlement, and connection status do. `GRACE` entitlement is treated like expired or
+            suspended: checkout reserve is not enforced (`enforced=false`, no stock held).
+            A bundle SKU with no component rows is treated as unenforced for that line only (fail
+            open): `enforced=false`, no stock held, other cart lines still enforce normally.
+            In SHADOW, `shadow_diff.oms_value` records per-line `would_reserve`. Unmapped listings
+            always have `would_reserve=false` on that line; the top-level `would_reserve` follows
+            ACTIVE semantics (unmapped lines are unenforced, so a cart of only unmapped listings
+            can still show `would_reserve=true`). Componentless bundle lines have
+            `would_reserve=false`.
           content:
             application/json:
               schema:
                 $ref: ../schemas/rest/reservation-created.json
+        "400":
+          description: Invalid request (including Idempotency-Key ≠ checkout_id).
+          content:
+            application/json:
+              schema:
+                $ref: ../schemas/rest/error.json
+        "401":
+          description: Missing or invalid service token.
+          content:
+            application/json:
+              schema:
+                $ref: ../schemas/rest/error.json
         "409":
-          description: Out of stock, or the idempotency key was reused with a different body
+          description: Out of stock, or the idempotency key was reused with a different body.
           content:
             application/json:
               schema:
                 oneOf:
                   - $ref: ../schemas/rest/reservation-conflict.json
                   - $ref: ../schemas/rest/error.json
+        "503":
+          description: |
+            Stock layer is busy (lock timeout, transaction timeout, or deadlock retries exhausted).
+            Retry after `Retry-After`.
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: ../schemas/rest/error.json
   /internal/v1/inventory/reservations/{reservationId}:
     delete:
       operationId: releaseReservation
@@ -53,7 +90,19 @@ paths:
             type: string
       responses:
         "204":
-          description: Released. Repeating the delete is also 204.
+          description: |
+            Released. Repeating the delete is also 204, including when the id is
+            unknown, malformed, already released, expired, consumed, or held nothing.
+        "503":
+          description: Stock layer is busy (deadlock retries exhausted or lock timeout). Retry after `Retry-After`.
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: ../schemas/rest/error.json
 components:
   securitySchemes:
     omsInternal:

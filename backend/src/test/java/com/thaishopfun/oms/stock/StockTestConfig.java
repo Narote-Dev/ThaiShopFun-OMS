@@ -19,7 +19,7 @@ import org.springframework.transaction.event.TransactionalEventListener;
 
 /** Test clock, fault seam, and an after-commit {@link StockChanged} recorder. */
 @TestConfiguration
-class StockTestConfig {
+public class StockTestConfig {
 
   @Bean
   @Primary
@@ -39,7 +39,7 @@ class StockTestConfig {
     return new StockEventRecorder();
   }
 
-  static final class MutableClock extends Clock {
+  public static final class MutableClock extends Clock {
 
     private volatile Instant now;
 
@@ -67,17 +67,19 @@ class StockTestConfig {
     }
   }
 
-  enum Fault {
+  public enum Fault {
     /** A plain exception after the inventory lock: the transaction rolls back, no retry. */
     THROW,
     /** A real server-side 40001: the engine retries the whole transaction. */
     SERIALIZATION,
     /** A real server-side 40P01. */
-    DEADLOCK
+    DEADLOCK,
+    /** A real server-side 55P03 (lock_timeout). */
+    LOCK_TIMEOUT
   }
 
   /** One-shot fault on the next engine write, fired once its inventory rows are locked. */
-  static final class FaultHooks extends StockHooks {
+  public static final class FaultHooks extends StockHooks {
 
     private final JdbcTemplate jdbc;
     private final AtomicReference<Fault> next = new AtomicReference<>();
@@ -90,12 +92,12 @@ class StockTestConfig {
       this.jdbc = jdbc;
     }
 
-    void failNext(Fault fault) {
+    public void failNext(Fault fault) {
       next.set(fault);
     }
 
     /** Runs once on the next write, before inventory rows are locked. */
-    void atNextBeforeInventoryLock(Runnable action) {
+    public void atNextBeforeInventoryLock(Runnable action) {
       beforeInventoryLock.set(action);
     }
 
@@ -106,13 +108,13 @@ class StockTestConfig {
       atInventoryLock.set(action);
     }
 
-    void reset() {
+    public void reset() {
       next.set(null);
       beforeInventoryLock.set(null);
       atInventoryLock.set(null);
     }
 
-    int fired() {
+    public int fired() {
       return fired.get();
     }
 
@@ -139,6 +141,7 @@ class StockTestConfig {
         case THROW -> throw new IllegalStateException("injected failure in " + operation);
         case SERIALIZATION -> raise("serialization_failure");
         case DEADLOCK -> raise("deadlock_detected");
+        case LOCK_TIMEOUT -> raise("55P03");
         default -> throw new IllegalStateException("unknown fault");
       }
     }

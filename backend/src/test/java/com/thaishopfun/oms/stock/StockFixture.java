@@ -4,6 +4,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.thaishopfun.oms.auth.UuidV7;
 import com.thaishopfun.oms.tenant.TenantContext;
+import java.time.Instant;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -17,19 +20,19 @@ import org.springframework.transaction.support.TransactionTemplate;
  * (T07 owns the real catalog services). Opening stock always gets an {@code OPENING_BALANCE} ledger
  * row, so the ledger-sum invariant holds from the start.
  */
-final class StockFixture {
+public final class StockFixture {
 
-  record Shop(UUID tenant, UUID product, UUID warehouse) {}
+  public record Shop(UUID tenant, UUID product, UUID warehouse) {}
 
   private final JdbcTemplate jdbc;
   private final TransactionTemplate tx;
 
-  StockFixture(JdbcTemplate jdbc, PlatformTransactionManager transactions) {
+  public StockFixture(JdbcTemplate jdbc, PlatformTransactionManager transactions) {
     this.jdbc = jdbc;
     this.tx = new TransactionTemplate(transactions);
   }
 
-  <T> T inTenant(UUID tenantId, Supplier<T> work) {
+  public <T> T inTenant(UUID tenantId, Supplier<T> work) {
     TenantContext.set(tenantId, null);
     try {
       return tx.execute(status -> work.get());
@@ -48,11 +51,11 @@ final class StockFixture {
   }
 
   /** A tenant with one product and a default warehouse. */
-  Shop shop(String entitlementStatus) {
+  public Shop shop(String entitlementStatus) {
     return shop(entitlementStatus, true);
   }
 
-  Shop shop(String entitlementStatus, boolean defaultWarehouse) {
+  public Shop shop(String entitlementStatus, boolean defaultWarehouse) {
     UUID tenant = UuidV7.generate();
     UUID product = UuidV7.generate();
     UUID warehouse = UuidV7.generate();
@@ -96,7 +99,7 @@ final class StockFixture {
   }
 
   /** A plain SKU with an inventory row in the shop's warehouse and opening stock. */
-  UUID sku(Shop shop, int onHand) {
+  public UUID sku(Shop shop, int onHand) {
     UUID sku = skuWithoutStock(shop);
     stock(shop, sku, shop.warehouse(), onHand);
     return sku;
@@ -135,7 +138,7 @@ final class StockFixture {
   }
 
   /** A bundle SKU with the given components (component sku id to qty per bundle). */
-  UUID bundle(Shop shop, Map<UUID, Integer> components) {
+  public UUID bundle(Shop shop, Map<UUID, Integer> components) {
     UUID bundle = UuidV7.generate();
     inTenant(
         shop.tenant(),
@@ -160,8 +163,24 @@ final class StockFixture {
     return bundle;
   }
 
+  /** A bundle SKU with {@code is_bundle=true} and no component rows. */
+  public UUID componentlessBundle(Shop shop) {
+    UUID bundle = UuidV7.generate();
+    inTenant(
+        shop.tenant(),
+        () ->
+            jdbc.update(
+                "INSERT INTO sku (id, tenant_id, product_id, sku_code, name, is_bundle) "
+                    + "VALUES (?, ?, ?, ?, 'Empty bundle', true)",
+                bundle,
+                shop.tenant(),
+                shop.product(),
+                "BUNDLE-EMPTY-" + bundle));
+    return bundle;
+  }
+
   /** Receives stock (on_hand += qty) with a RECEIVE ledger row, like a posted document would. */
-  void receive(Shop shop, UUID sku, int qty) {
+  public void receive(Shop shop, UUID sku, int qty) {
     inTenant(
         shop.tenant(),
         () -> {
@@ -173,6 +192,85 @@ final class StockFixture {
               shop.warehouse());
           ledger(shop, sku, shop.warehouse(), qty, "RECEIVE");
         });
+  }
+
+  public void setEntitlementExpiresAt(Shop shop, Instant expiresAt) {
+    inTenant(
+        shop.tenant(),
+        () ->
+            jdbc.update(
+                "UPDATE tenant SET entitlement_expires_at = ? WHERE id = ?",
+                expiresAt == null ? null : OffsetDateTime.ofInstant(expiresAt, ZoneOffset.UTC),
+                shop.tenant()));
+  }
+
+  public void setStockSyncPaused(Shop shop, UUID channelAccountId, boolean paused) {
+    inTenant(
+        shop.tenant(),
+        () ->
+            jdbc.update(
+                "UPDATE channel_account SET stock_sync_paused = ? WHERE id = ?",
+                paused,
+                channelAccountId));
+  }
+
+  public String tsfShopId(Shop shop) {
+    return inTenant(
+        shop.tenant(),
+        () ->
+            jdbc.queryForObject(
+                "SELECT tsf_shop_id FROM tenant WHERE id = ?", String.class, shop.tenant()));
+  }
+
+  void setTsfShopId(Shop shop, String tsfShopId) {
+    inTenant(
+        shop.tenant(),
+        () ->
+            jdbc.update(
+                "UPDATE tenant SET tsf_shop_id = ? WHERE id = ?", tsfShopId, shop.tenant()));
+  }
+
+  public UUID channelAccount(Shop shop, String mode, String status) {
+    UUID account = UuidV7.generate();
+    inTenant(
+        shop.tenant(),
+        () ->
+            jdbc.update(
+                "INSERT INTO channel_account (id, tenant_id, channel, external_shop_id, status, mode) "
+                    + "VALUES (?, ?, 'TSF', ?, ?, ?)",
+                account,
+                shop.tenant(),
+                "ext-" + account,
+                status,
+                mode));
+    return account;
+  }
+
+  public void channelListing(
+      Shop shop, UUID channelAccountId, String externalSkuId, UUID skuId, boolean stockControl) {
+    channelListing(shop, channelAccountId, externalSkuId, skuId, stockControl, true);
+  }
+
+  public void channelListing(
+      Shop shop,
+      UUID channelAccountId,
+      String externalSkuId,
+      UUID skuId,
+      boolean stockControl,
+      boolean mapped) {
+    UUID listingSku = mapped ? skuId : null;
+    inTenant(
+        shop.tenant(),
+        () ->
+            jdbc.update(
+                "INSERT INTO channel_listing (id, tenant_id, channel_account_id, sku_id, "
+                    + "external_sku_id, stock_control) VALUES (?, ?, ?, ?, ?, ?)",
+                UuidV7.generate(),
+                shop.tenant(),
+                channelAccountId,
+                listingSku,
+                externalSkuId,
+                stockControl));
   }
 
   UUID listing(Shop shop, UUID sku, int safetyBuffer) {
@@ -200,7 +298,7 @@ final class StockFixture {
     return listing;
   }
 
-  int reserved(Shop shop, UUID sku) {
+  public int reserved(Shop shop, UUID sku) {
     return inventoryValue(shop, sku, "reserved");
   }
 
@@ -208,7 +306,7 @@ final class StockFixture {
     return inventoryValue(shop, sku, "on_hand");
   }
 
-  long reservations(Shop shop, String status) {
+  public long reservations(Shop shop, String status) {
     return inTenant(
         shop.tenant(),
         () ->
@@ -216,7 +314,7 @@ final class StockFixture {
                 "SELECT count(*) FROM stock_reservation WHERE status = ?", Long.class, status));
   }
 
-  long ledger(Shop shop, String reason) {
+  public long ledger(Shop shop, String reason) {
     return inTenant(
         shop.tenant(),
         () ->
@@ -245,7 +343,7 @@ final class StockFixture {
    * qty per inventory row equals {@code reserved}; ledger delta sums equal {@code on_hand} and
    * {@code reserved}.
    */
-  void assertInvariants(Shop shop) {
+  public void assertInvariants(Shop shop) {
     inTenant(
         shop.tenant(),
         () -> {

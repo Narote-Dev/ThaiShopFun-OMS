@@ -21,7 +21,7 @@
     <java.version>17</java.version>
     <!-- Change: the T14B chaos suite (tag "chaos") runs only in its own CI job, via -Pchaos. -->
     <surefire.groups></surefire.groups>
-    <surefire.excludedGroups>chaos</surefire.excludedGroups>
+    <surefire.excludedGroups>chaos,perf</surefire.excludedGroups>
   </properties>
 
   <dependencies>
@@ -178,6 +178,59 @@
     </profile>
     <!-- Change: T14B delivery chaos suite only. Use with mock-acceptance, which compiles it:
          ./mvnw -Pmock-acceptance,chaos test. Override the fault seed with -Dchaos.seed=<long>. -->
+    <profile>
+      <id>perf</id>
+      <properties>
+        <surefire.groups>perf</surefire.groups>
+        <surefire.excludedGroups></surefire.excludedGroups>
+      </properties>
+      <dependencies>
+        <dependency>
+          <groupId>io.gatling.highcharts</groupId>
+          <artifactId>gatling-charts-highcharts</artifactId>
+          <version>3.13.5</version>
+          <scope>test</scope>
+        </dependency>
+        <dependency>
+          <groupId>io.gatling</groupId>
+          <artifactId>gatling-app</artifactId>
+          <version>3.13.5</version>
+          <scope>test</scope>
+        </dependency>
+      </dependencies>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>org.codehaus.mojo</groupId>
+            <artifactId>build-helper-maven-plugin</artifactId>
+            <version>3.6.0</version>
+            <executions>
+              <execution>
+                <id>add-perf-tests</id>
+                <phase>generate-test-sources</phase>
+                <goals>
+                  <goal>add-test-source</goal>
+                </goals>
+                <configuration>
+                  <sources>
+                    <source>src/perf/java</source>
+                  </sources>
+                </configuration>
+              </execution>
+            </executions>
+          </plugin>
+          <plugin>
+            <groupId>io.gatling</groupId>
+            <artifactId>gatling-maven-plugin</artifactId>
+            <version>4.16.0</version>
+            <configuration>
+              <simulationClass>com.thaishopfun.oms.perf.CheckoutReserveSimulation</simulationClass>
+              <runMultipleSimulations>false</runMultipleSimulations>
+            </configuration>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
     <profile>
       <id>chaos</id>
       <properties>

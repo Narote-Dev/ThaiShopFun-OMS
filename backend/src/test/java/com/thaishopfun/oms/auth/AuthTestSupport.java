@@ -74,6 +74,21 @@ public final class AuthTestSupport {
 
   private AuthTestSupport() {}
 
+  /** Prints a checkout service JWT for Gatling ({@code -Pperf} CI). */
+  public static void main(String[] args) {
+    System.out.print(
+        token(
+            "tsf-checkout",
+            "shop",
+            "ACTIVE",
+            null,
+            1,
+            "oms-internal",
+            Instant.now().plusSeconds(3600),
+            List.of(),
+            "SERVICE"));
+  }
+
   public static void registerDatabase(DynamicPropertyRegistry registry) {
     registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
     registry.add("spring.datasource.username", () -> "oms_app");
@@ -96,6 +111,10 @@ public final class AuthTestSupport {
   public static Connection admin() throws SQLException {
     return DriverManager.getConnection(
         POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+  }
+
+  public static Connection app() throws SQLException {
+    return DriverManager.getConnection(POSTGRES.getJdbcUrl(), "oms_app", APP_PASSWORD);
   }
 
   public static String userToken(

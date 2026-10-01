@@ -1,0 +1,5 @@
+{
+  "error": "IDEMPOTENCY_CONFLICT",
+  "message": "Request conflicts with an earlier one",
+  "trace_id": "01J9Z3K7Q8X2V4M6N0P1R3S5T7"
+}
