@@ -4,9 +4,9 @@ import java.time.Instant;
 import java.util.UUID;
 
 /**
- * A decrypted {@code order_recipient} row. After redaction {@code name}, {@code phone}, and {@code
- * address} are null; {@code province}, {@code postcode}, and {@code phoneLast4} remain. {@link
- * #toString()} masks the PII fields.
+ * A decrypted {@code order_recipient} row. After redaction {@code name}, {@code phone}, {@code
+ * address}, and {@code phoneLast4} are null; only {@code province} and {@code postcode} remain.
+ * {@link #toString()} masks the PII fields.
  */
 public record StoredRecipient(
     UUID orderId,

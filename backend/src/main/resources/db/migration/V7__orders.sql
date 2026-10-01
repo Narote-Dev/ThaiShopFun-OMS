@@ -112,8 +112,9 @@ CREATE TABLE sales_order (
 -- Step 2: Recipient PII, one row per order. *_enc columns are
 -- version(1) || kid length(1) || kid || nonce(12) || ciphertext+tag. The AAD is that header
 -- (version || kid length || kid) plus tenant, order, and column.
--- phone_hash is HMAC-SHA256 (32 bytes) of the normalized phone, for search. phone_last4 and
--- province/postcode stay in clear text: they survive redaction.
+-- phone_hash is HMAC-SHA256 (32 bytes) of the normalized phone, for search. phone_last4 is clear
+-- text. Redaction (PDPA, 03 "PII lifecycle") leaves only province and postcode: the three *_enc
+-- columns, phone_hash, and phone_last4 are all nulled, so no searchable identifier remains.
 CREATE TABLE order_recipient (
   order_id uuid PRIMARY KEY,
   tenant_id uuid NOT NULL REFERENCES tenant (id),
@@ -138,7 +139,10 @@ CREATE TABLE order_recipient (
     pii_status <> 'ACTIVE' OR (name_enc IS NOT NULL AND address_enc IS NOT NULL)
   ),
   CONSTRAINT order_recipient_phone_check CHECK (
-    pii_status <> 'ACTIVE' OR (phone_enc IS NULL) = (phone_hash IS NULL)
+    CASE pii_status
+      WHEN 'REDACTED' THEN phone_hash IS NULL AND phone_last4 IS NULL
+      ELSE (phone_enc IS NULL) = (phone_hash IS NULL)
+    END
   ),
   CONSTRAINT order_recipient_phone_hash_check CHECK (
     phone_hash IS NULL OR octet_length(phone_hash) = 32
@@ -788,7 +792,7 @@ REVOKE ALL ON FUNCTION return_request_rejected_guard() FROM PUBLIC;
 COMMENT ON TABLE sales_order IS
   'No PII. UNIQUE (channel_account_id, external_order_id). version is the optimistic lock.';
 COMMENT ON TABLE order_recipient IS
-  'The only PII table. *_enc = app-level AES-256-GCM (version || kid_len || kid || nonce || ct+tag, AAD header||tenant||order||column). REDACTED keeps province, postcode, phone_hash, phone_last4. ON DELETE CASCADE with its order.';
+  'The only PII table. *_enc = app-level AES-256-GCM (version || kid_len || kid || nonce || ct+tag, AAD header||tenant||order||column). REDACTED keeps province and postcode only (enc columns, phone_hash, phone_last4 are NULL). ON DELETE CASCADE with its order.';
 COMMENT ON TABLE order_status_history IS
   'Append-only. UPDATE, DELETE, and TRUNCATE are rejected by trigger.';
 COMMENT ON TABLE payment_status_snapshot IS

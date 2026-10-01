@@ -658,7 +658,9 @@ class FlywayV7OrdersTest {
           () ->
               update(
                   app,
-                  "UPDATE order_recipient SET pii_status = 'REDACTED' WHERE order_id = ?",
+                  "UPDATE order_recipient SET pii_status = 'REDACTED', phone_enc = NULL, "
+                      + "address_enc = NULL, phone_hash = NULL, phone_last4 = NULL "
+                      + "WHERE order_id = ?",
                   a.order()));
       assertCheck(
           app,
@@ -673,6 +675,25 @@ class FlywayV7OrdersTest {
               update(
                   app,
                   "UPDATE order_recipient SET phone_hash = NULL WHERE order_id = ?",
+                  a.order()));
+      assertCheck(
+          app,
+          "order_recipient_phone_check",
+          () ->
+              update(
+                  app,
+                  "UPDATE order_recipient SET name_enc = NULL, phone_enc = NULL, "
+                      + "address_enc = NULL, pii_status = 'REDACTED' WHERE order_id = ?",
+                  a.order()));
+      assertCheck(
+          app,
+          "order_recipient_phone_check",
+          () ->
+              update(
+                  app,
+                  "UPDATE order_recipient SET name_enc = NULL, phone_enc = NULL, "
+                      + "address_enc = NULL, phone_hash = NULL, pii_status = 'REDACTED' "
+                      + "WHERE order_id = ?",
                   a.order()));
       assertCheck(
           app,
@@ -694,7 +715,8 @@ class FlywayV7OrdersTest {
               update(
                   app,
                   "UPDATE order_recipient SET name_enc = NULL, phone_enc = NULL, "
-                      + "address_enc = NULL, pii_status = 'REDACTED' WHERE order_id = ?",
+                      + "address_enc = NULL, phone_hash = NULL, phone_last4 = NULL, "
+                      + "pii_status = 'REDACTED' WHERE order_id = ?",
                   a.order()))
           .isEqualTo(1);
       app.rollback();

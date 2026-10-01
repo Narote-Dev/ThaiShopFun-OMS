@@ -211,34 +211,55 @@ class OrderRepositoriesTest {
   }
 
   @Test
-  void redactionKeepsProvincePostcodeAndPhoneLookup() {
+  void redactionLeavesOnlyProvinceAndPostcode() throws SQLException {
     Shop a = shop();
     SalesOrder order = order(a, "TSF-RED-1");
+    SalesOrder kept = order(a, "TSF-RED-2");
     as(
         a,
         () -> {
           orders.insert(order);
+          orders.insert(kept);
           recipients.insert(
               order.id(), new Recipient(NAME, PHONE, ADDRESS, "Bangkok", "10110"), null);
+          recipients.insert(
+              kept.id(), new Recipient(NAME, PHONE, ADDRESS, "Bangkok", "10110"), null);
           return null;
         });
+    assertThat(as(a, () -> recipients.findOrderIdsByPhone(PHONE))).hasSize(2);
 
-    // Step 1: Redact. The encrypted columns are gone, the rest stays.
+    // Step 1: Redact. Only province and postcode remain; phone_last4 is gone too.
     assertThat(as(a, () -> recipients.redact(order.id()))).isTrue();
     StoredRecipient redacted = as(a, () -> recipients.find(order.id())).orElseThrow();
     assertThat(redacted.redacted()).isTrue();
     assertThat(redacted.name()).isNull();
     assertThat(redacted.phone()).isNull();
     assertThat(redacted.address()).isNull();
+    assertThat(redacted.phoneLast4()).isNull();
     assertThat(redacted.province()).isEqualTo("Bangkok");
     assertThat(redacted.postcode()).isEqualTo("10110");
-    assertThat(redacted.phoneLast4()).isEqualTo("5678");
 
-    // Step 2: phone_hash survives, so the order is still found by phone.
-    assertThat(as(a, () -> recipients.findOrderIdsByPhone("+66812345678")))
-        .containsExactly(order.id());
+    // Step 2: The raw row has no phone_hash either, so no searchable identifier is left.
+    try (Connection admin = AuthTestSupport.admin();
+        PreparedStatement statement =
+            admin.prepareStatement(
+                "SELECT phone_hash, phone_last4 FROM order_recipient WHERE order_id = ?")) {
+      statement.setObject(1, order.id());
+      try (ResultSet rows = statement.executeQuery()) {
+        assertThat(rows.next()).isTrue();
+        assertThat(rows.getBytes("phone_hash")).isNull();
+        assertThat(rows.getString("phone_last4")).isNull();
+      }
+    }
 
-    // Step 3: Redacting an order that has no visible recipient reports false.
+    // Step 3: Phone lookup, in any format, no longer returns the redacted order.
+    for (String phone : List.of(PHONE, "+66812345678", "0812345678")) {
+      assertThat(as(a, () -> recipients.findOrderIdsByPhone(phone)))
+          .as(phone)
+          .containsExactly(kept.id());
+    }
+
+    // Step 4: Redacting an order that has no visible recipient reports false.
     assertThat(as(shop(), () -> recipients.redact(order.id()))).isFalse();
   }
 

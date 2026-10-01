@@ -71,25 +71,32 @@ public class OrderRecipientRepository {
   }
 
   /**
-   * Nulls name/phone/address and marks the row REDACTED. Keeps province, postcode, phone_hash, and
-   * phone_last4. Returns false when no visible row exists.
+   * Nulls name/phone/address, phone_hash, and phone_last4, and marks the row REDACTED. Only
+   * province and postcode remain (03 PII lifecycle), so the order can no longer be found by phone.
+   * Returns false when no visible row exists.
    */
   public boolean redact(UUID orderId) {
-    // Step 1: One UPDATE. The CHECK order_recipient_redacted_check backs this up in the database.
+    // Step 1: One UPDATE. order_recipient_redacted_check and order_recipient_phone_check back this
+    // up in the database.
     return jdbc.update(
             "UPDATE order_recipient SET name_enc = NULL, phone_enc = NULL, address_enc = NULL, "
-                + "pii_status = 'REDACTED', updated_at = now() WHERE order_id = ?",
+                + "phone_hash = NULL, phone_last4 = NULL, pii_status = 'REDACTED', "
+                + "updated_at = now() WHERE order_id = ?",
             orderId)
         == 1;
   }
 
-  /** Orders of this tenant whose recipient phone matches after normalization, via phone_hash. */
+  /**
+   * Orders of this tenant whose recipient phone matches after normalization, via phone_hash.
+   * Redacted recipients are never returned.
+   */
   public List<UUID> findOrderIdsByPhone(String phone) {
     // Step 1: Hash the normalized phone. The index (tenant_id, phone_hash) serves the lookup.
+    // Redacted rows have no hash; the ACTIVE filter keeps that true even for a hand-edited row.
     byte[] hash = cipher.phoneHash(phone);
     return jdbc.query(
         "SELECT order_id FROM order_recipient WHERE tenant_id = ? AND phone_hash = ? "
-            + "ORDER BY order_id",
+            + "AND pii_status = 'ACTIVE' ORDER BY order_id",
         (rows, rowNum) -> rows.getObject("order_id", UUID.class),
         TenantContext.requireTenantId(),
         hash);
