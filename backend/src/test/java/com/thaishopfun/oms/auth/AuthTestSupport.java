@@ -74,6 +74,21 @@ public final class AuthTestSupport {
 
   private AuthTestSupport() {}
 
+  /** Prints a checkout service JWT for Gatling ({@code -Pperf} CI). */
+  public static void main(String[] args) {
+    System.out.print(
+        token(
+            "tsf-checkout",
+            "shop",
+            "ACTIVE",
+            null,
+            1,
+            "oms-internal",
+            Instant.now().plusSeconds(3600),
+            List.of(),
+            "SERVICE"));
+  }
+
   public static void registerDatabase(DynamicPropertyRegistry registry) {
     registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
     registry.add("spring.datasource.username", () -> "oms_app");

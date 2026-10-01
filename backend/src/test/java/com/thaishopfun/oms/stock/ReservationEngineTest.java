@@ -254,6 +254,61 @@ class ReservationEngineTest extends StockTestBase {
   }
 
   @Test
+  void unexpiredCheckoutHoldIsNotInlinedOnReserve() {
+    Shop shop = fixture.shop("ACTIVE");
+    UUID sku = fixture.sku(shop, 10);
+    StockOwner stale = checkout();
+    as(shop, () -> engine.reserve(stale, List.of(ReserveItem.of(sku, 3)), key()));
+    StockOwner other = checkout();
+    ReserveResult result =
+        as(shop, () -> engine.reserve(other, List.of(ReserveItem.of(sku, 2)), key()));
+    assertThat(result.reserved()).isTrue();
+    assertThat(fixture.reservations(shop, "ACTIVE")).isEqualTo(2);
+    assertThat(fixture.ledger(shop, "RELEASE")).isZero();
+    fixture.assertInvariants(shop);
+  }
+
+  @Test
+  void inlineExpireDoesNotReleaseOrderHoldTransferredBeforeTtl() {
+    Shop shop = fixture.shop("ACTIVE");
+    UUID sku = fixture.sku(shop, 10);
+    String checkoutRef = "chk-transfer-" + UUID.randomUUID();
+    StockOwner checkoutOwner = StockOwner.checkout(checkoutRef);
+    ReserveResult held =
+        as(
+            shop,
+            () ->
+                engine.reserve(
+                    checkoutOwner, List.of(ReserveItem.of(sku, 4)), key(), Duration.ofMinutes(15)));
+    UUID groupId = held.reservationGroupId();
+    clock.advance(Duration.ofMinutes(16));
+
+    clock.advance(Duration.ofMinutes(16));
+    StockOwner otherCheckout = checkout();
+    faults.atNextBeforeInventoryLock(
+        () ->
+            fixture.inTenant(
+                shop.tenant(),
+                () ->
+                    jdbc.update(
+                        """
+                        UPDATE stock_reservation
+                        SET owner_type = 'ORDER', owner_ref = 'ord-before-ttl', expires_at = NULL
+                        WHERE reservation_group_id = ?
+                        """,
+                        groupId)));
+
+    ReserveResult result =
+        as(shop, () -> engine.reserve(otherCheckout, List.of(ReserveItem.of(sku, 2)), key()));
+    assertThat(result.reserved()).isTrue();
+    assertThat(fixture.groupRows(shop, groupId).get(0).get("owner_type")).isEqualTo("ORDER");
+    assertThat(fixture.groupRows(shop, groupId).get(0).get("status")).isEqualTo("ACTIVE");
+    assertThat(fixture.reserved(shop, sku)).isEqualTo(6);
+    assertThat(fixture.ledger(shop, "RELEASE")).isZero();
+    fixture.assertInvariants(shop);
+  }
+
+  @Test
   void ownerWithActiveRowsCannotReserveAgainWithAnotherKey() {
     Shop shop = fixture.shop("ACTIVE");
     UUID a = fixture.sku(shop, 10);

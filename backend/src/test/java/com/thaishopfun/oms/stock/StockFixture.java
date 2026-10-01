@@ -4,6 +4,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.thaishopfun.oms.auth.UuidV7;
 import com.thaishopfun.oms.tenant.TenantContext;
+import java.time.Instant;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -52,7 +55,7 @@ public final class StockFixture {
     return shop(entitlementStatus, true);
   }
 
-  Shop shop(String entitlementStatus, boolean defaultWarehouse) {
+  public Shop shop(String entitlementStatus, boolean defaultWarehouse) {
     UUID tenant = UuidV7.generate();
     UUID product = UuidV7.generate();
     UUID warehouse = UuidV7.generate();
@@ -135,7 +138,7 @@ public final class StockFixture {
   }
 
   /** A bundle SKU with the given components (component sku id to qty per bundle). */
-  UUID bundle(Shop shop, Map<UUID, Integer> components) {
+  public UUID bundle(Shop shop, Map<UUID, Integer> components) {
     UUID bundle = UuidV7.generate();
     inTenant(
         shop.tenant(),
@@ -161,7 +164,7 @@ public final class StockFixture {
   }
 
   /** Receives stock (on_hand += qty) with a RECEIVE ledger row, like a posted document would. */
-  void receive(Shop shop, UUID sku, int qty) {
+  public void receive(Shop shop, UUID sku, int qty) {
     inTenant(
         shop.tenant(),
         () -> {
@@ -173,6 +176,26 @@ public final class StockFixture {
               shop.warehouse());
           ledger(shop, sku, shop.warehouse(), qty, "RECEIVE");
         });
+  }
+
+  public void setEntitlementExpiresAt(Shop shop, Instant expiresAt) {
+    inTenant(
+        shop.tenant(),
+        () ->
+            jdbc.update(
+                "UPDATE tenant SET entitlement_expires_at = ? WHERE id = ?",
+                expiresAt == null ? null : OffsetDateTime.ofInstant(expiresAt, ZoneOffset.UTC),
+                shop.tenant()));
+  }
+
+  public void setStockSyncPaused(Shop shop, UUID channelAccountId, boolean paused) {
+    inTenant(
+        shop.tenant(),
+        () ->
+            jdbc.update(
+                "UPDATE channel_account SET stock_sync_paused = ? WHERE id = ?",
+                paused,
+                channelAccountId));
   }
 
   public String tsfShopId(Shop shop) {
@@ -256,7 +279,7 @@ public final class StockFixture {
     return inventoryValue(shop, sku, "on_hand");
   }
 
-  long reservations(Shop shop, String status) {
+  public long reservations(Shop shop, String status) {
     return inTenant(
         shop.tenant(),
         () ->
@@ -264,7 +287,7 @@ public final class StockFixture {
                 "SELECT count(*) FROM stock_reservation WHERE status = ?", Long.class, status));
   }
 
-  long ledger(Shop shop, String reason) {
+  public long ledger(Shop shop, String reason) {
     return inTenant(
         shop.tenant(),
         () ->
@@ -293,7 +316,7 @@ public final class StockFixture {
    * qty per inventory row equals {@code reserved}; ledger delta sums equal {@code on_hand} and
    * {@code reserved}.
    */
-  void assertInvariants(Shop shop) {
+  public void assertInvariants(Shop shop) {
     inTenant(
         shop.tenant(),
         () -> {

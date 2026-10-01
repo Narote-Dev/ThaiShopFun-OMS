@@ -3,7 +3,7 @@ spring:
   datasource:
     hikari:
       # Shared Testcontainers Postgres; many Spring contexts run in one JVM on CI.
-      maximum-pool-size: 5
+      maximum-pool-size: 10
       minimum-idle: 1
 
 oms:

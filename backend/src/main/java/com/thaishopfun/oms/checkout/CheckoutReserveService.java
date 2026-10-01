@@ -98,11 +98,17 @@ public class CheckoutReserveService {
       throw new CheckoutBadRequestException("Idempotency-Key must equal checkout_id");
     }
     UUID tenantId = repository.resolveTenant(TSF_CHANNEL, request.tsfShopId());
+    Timer.Sample sample = Timer.start(meters);
     if (tenantId == null) {
-      return unenforcedUnknownShop(request);
+      ReserveHttpResult unknown = unenforcedUnknownShop(request);
+      sample.stop(
+          Timer.builder(RESERVE_TIMER)
+              .tag("outcome", unknown.outcome())
+              .tag("mode", unknown.mode())
+              .register(meters));
+      return unknown;
     }
     TenantContext.set(tenantId, null);
-    Timer.Sample sample = Timer.start(meters);
     try {
       String hash = requestHash(request);
       ReserveHttpResult result =
@@ -145,6 +151,8 @@ public class CheckoutReserveService {
       engine.release(groupId, "release:" + reservationIdRaw.trim());
     } catch (StockOperationException ex) {
       log.info("checkout release ignored: {}", ex.getMessage());
+    } catch (RuntimeException ex) {
+      log.warn("checkout release ignored after auth: {}", ex.getMessage());
     } finally {
       TenantContext.clear();
     }
@@ -300,22 +308,26 @@ public class CheckoutReserveService {
   }
 
   private List<ItemConflict> listingConflicts(List<ItemPlan> plans, List<Shortfall> shortfalls) {
-    Map<UUID, String> skuToListing = new LinkedHashMap<>();
+    Map<UUID, List<String>> skuToListings = new LinkedHashMap<>();
     for (ItemPlan plan : plans) {
       if (plan.skuId() != null) {
-        skuToListing.putIfAbsent(plan.skuId(), plan.listingSkuId());
+        skuToListings
+            .computeIfAbsent(plan.skuId(), ignored -> new ArrayList<>())
+            .add(plan.listingSkuId());
       }
     }
     Map<String, ItemConflict> byListing = new LinkedHashMap<>();
     for (Shortfall shortfall : shortfalls) {
       for (UUID skuId : shortfall.requestedBy()) {
-        String listingId = skuToListing.get(skuId);
-        if (listingId == null) {
+        List<String> listings = skuToListings.get(skuId);
+        if (listings == null) {
           continue;
         }
         int listingAvailable = availability.available(skuId, shortfall.warehouseId());
-        byListing.putIfAbsent(
-            listingId, new ItemConflict(listingId, planQty(plans, listingId), listingAvailable));
+        for (String listingId : listings) {
+          byListing.putIfAbsent(
+              listingId, new ItemConflict(listingId, planQty(plans, listingId), listingAvailable));
+        }
       }
     }
     return List.copyOf(byListing.values());
@@ -394,10 +406,14 @@ public class CheckoutReserveService {
         throw new CheckoutBadRequestException("duplicate listing_sku_id");
       }
       JsonNode qtyNode = item.get("qty");
-      if (qtyNode == null || !qtyNode.isIntegralNumber() || qtyNode.asInt() < 1) {
+      if (qtyNode == null || !qtyNode.isIntegralNumber() || !qtyNode.canConvertToInt()) {
         throw new CheckoutBadRequestException("qty must be a positive integer");
       }
-      items.add(new RequestItem(listingSkuId, qtyNode.asInt()));
+      int qty = qtyNode.intValue();
+      if (qty < 1) {
+        throw new CheckoutBadRequestException("qty must be a positive integer");
+      }
+      items.add(new RequestItem(listingSkuId, qty));
     }
     return new ReserveRequest(checkoutId, shopId, List.copyOf(items));
   }

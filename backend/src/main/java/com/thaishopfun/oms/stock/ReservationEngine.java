@@ -273,13 +273,19 @@ public class ReservationEngine {
         repository.expiredActiveCheckoutForSkus(owner, needSkuIds, now, MAX_INLINE_EXPIRE));
     Set<SkuWarehouse> inventoryKeys = new LinkedHashSet<>(needs.keySet());
     inlineCandidates.forEach(row -> inventoryKeys.add(row.key())); // reservation sku/warehouse
+    hooks.beforeInventoryLock(SCOPE_RESERVE);
     Map<SkuWarehouse, InventoryRow> inventory = repository.lockInventory(inventoryKeys);
     hooks.afterInventoryLocked(SCOPE_RESERVE);
     if (!inlineCandidates.isEmpty()) {
       List<UUID> inlineIds = ids(inlineCandidates);
       List<ReservationRow> lockedInline = repository.lockReservations(inlineIds);
-      // Step 5b: Candidates were chosen with expires_at <= now in SQL; re-check ACTIVE only.
-      List<ReservationRow> toExpire = lockedInline.stream().filter(ReservationRow::active).toList();
+      // Step 5b: Decision 4 — re-check ACTIVE CHECKOUT rows still past expires_at under the lock.
+      List<ReservationRow> toExpire =
+          lockedInline.stream()
+              .filter(
+                  row ->
+                      row.active() && row.ownerType() == OwnerType.CHECKOUT && row.expiredAt(now))
+              .toList();
       if (!toExpire.isEmpty()) {
         settle(tenantId, toExpire, inventory, Settle.EXPIRE, EXPIRY_ACTOR);
         inlineExpired.increment(toExpire.size());

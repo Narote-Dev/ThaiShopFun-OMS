@@ -30,7 +30,11 @@ paths:
               $ref: ../schemas/rest/reservation-request.json
       responses:
         "201":
-          description: Reserved or unenforced (SHADOW / observe / unmapped listing).
+          description: |
+            Reserved or unenforced (SHADOW / observe / unmapped listing / unknown shop).
+            Unknown `tsf_shop_id` is not idempotent — each call mints a new `reservation_id`.
+            `channel_account.stock_sync_paused` does not change `enforced`; only mode, mapping,
+            entitlement, and connection status do.
           content:
             application/json:
               schema:
