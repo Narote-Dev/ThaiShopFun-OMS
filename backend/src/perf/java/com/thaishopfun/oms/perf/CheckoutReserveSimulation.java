@@ -1,17 +1,18 @@
 package com.thaishopfun.oms.perf;
 
+import static io.gatling.javaapi.core.CoreDsl.*;
+import static io.gatling.javaapi.http.HttpDsl.*;
+
 import io.gatling.javaapi.core.ChainBuilder;
-import io.gatling.javaapi.core.CoreDsl;
-import io.gatling.javaapi.core.FeederBuilder;
-import io.gatling.javaapi.core.ScenarioBuilder;
+import io.gatling.javaapi.core.PopulationBuilder;
 import io.gatling.javaapi.core.Simulation;
-import io.gatling.javaapi.http.HttpDsl;
 import io.gatling.javaapi.http.HttpProtocolBuilder;
 import java.time.Duration;
-import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.stream.Stream;
+import java.util.concurrent.ThreadLocalRandom;
+import java.util.stream.IntStream;
 
 /** Gatling load test for checkout reserve (NFR p95/p99). Run with {@code -Pperf gatling:test}. */
 public class CheckoutReserveSimulation extends Simulation {
@@ -20,80 +21,68 @@ public class CheckoutReserveSimulation extends Simulation {
   private static final String TOKEN = System.getProperty("perf.token", "perf-token");
   private static final String SHOP = System.getProperty("perf.shopId", "perf-active");
 
-  private static final FeederBuilder<Object> CHECKOUT_IDS =
-      CoreDsl.feeder(
-          new Iterator<Map<String, Object>>() {
-            @Override
-            public boolean hasNext() {
-              return true;
-            }
+  private static final List<Map<String, Object>> LISTING_FEED =
+      IntStream.range(0, 200)
+          .mapToObj(i -> Map.<String, Object>of("listingSku", "L-" + i))
+          .toList();
 
-            @Override
-            public Map<String, Object> next() {
-              return Map.of("checkoutId", "chk-perf-" + UUID.randomUUID());
-            }
-          });
-
-  private static final FeederBuilder<Object> LISTINGS =
-      CoreDsl.feeder(
-          Stream.iterate(0, i -> i + 1)
-              .limit(200)
-              .map(i -> Map.<String, Object>of("listingSku", "L-" + i))
-              .iterator());
-
-  HttpProtocolBuilder http =
-      HttpDsl.http
+  HttpProtocolBuilder httpProtocol =
+      http
           .baseUrl(BASE)
           .acceptHeader("application/json")
           .contentTypeHeader("application/json")
           .authorizationHeader("Bearer " + TOKEN);
 
+  ChainBuilder assignCheckout =
+      exec(session -> session.set("checkoutId", "chk-perf-" + UUID.randomUUID()));
+
+  ChainBuilder assignListing =
+      exec(
+          session ->
+              session.set(
+                  "listingSku",
+                  "L-" + ThreadLocalRandom.current().nextInt(LISTING_FEED.size())));
+
   ChainBuilder reserve =
-      CoreDsl
-          .feed(CHECKOUT_IDS)
-          .feed(LISTINGS)
+      assignCheckout
+          .exec(assignListing)
           .exec(
-              HttpDsl.http("reserve-load")
+              http("reserve-load")
                   .post("/internal/v1/inventory/reservations")
                   .header("Idempotency-Key", "#{checkoutId}")
                   .body(
-                      CoreDsl.StringBody(
+                      StringBody(
                           """
                           {"checkout_id":"#{checkoutId}","tsf_shop_id":"%s","items":[{"listing_sku_id":"#{listingSku}","qty":1}]}
                           """
                               .formatted(SHOP)))
                   .check(
-                      HttpDsl.status().in(201, 409),
-                      HttpDsl.jsonPath("$.reservation_id")
-                          .optional()
-                          .saveAs("reservationId")));
+                      status().in(201, 409),
+                      jsonPath("$.reservation_id").optional().saveAs("reservationId")));
 
   ChainBuilder release =
-      CoreDsl.doIf(session -> session.contains("reservationId"))
+      doIf(session -> session.contains("reservationId"))
           .then(
-              HttpDsl.http("release-load")
+              http("release-load")
                   .delete("/internal/v1/inventory/reservations/#{reservationId}")
-                  .check(HttpDsl.status().is(204)));
+                  .check(status().is(204)));
 
-  ScenarioBuilder warmUp =
-      CoreDsl.scenario("warm-up").exec(reserve).injectOpen(CoreDsl.constantUsersPerSec(20).during(20));
+  PopulationBuilder warmUp =
+      scenario("warm-up").exec(reserve).injectOpen(constantUsersPerSec(20).during(20));
 
-  ScenarioBuilder mixed =
-      CoreDsl
-          .scenario("reserve-delete")
+  PopulationBuilder mixed =
+      scenario("reserve-delete")
           .exec(reserve)
           .randomSwitch()
-          .on(
-              CoreDsl.percent(70).then(CoreDsl.pause(Duration.ZERO)),
-              CoreDsl.percent(30).then(release))
-          .injectOpen(CoreDsl.constantUsersPerSec(200).during(60));
+          .on(percent(70).then(pause(Duration.ZERO)), percent(30).then(release))
+          .injectOpen(constantUsersPerSec(200).during(60));
 
   {
     setUp(warmUp, mixed)
-        .protocols(http)
+        .protocols(httpProtocol)
         .assertions(
-            CoreDsl.global().failedRequests().count().is(0L),
-            CoreDsl.details("reserve-load").responseTime().percentile(95.0).lt(150),
-            CoreDsl.details("reserve-load").responseTime().percentile(99.0).lt(300));
+            global().failedRequests().count().is(0L),
+            details("reserve-load").responseTime().percentile(95.0).lt(150),
+            details("reserve-load").responseTime().percentile(99.0).lt(300));
   }
 }
