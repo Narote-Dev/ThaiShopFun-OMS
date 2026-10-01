@@ -590,24 +590,25 @@ class CheckoutT12AAcceptanceTest {
     StockFixture.Shop shop = fixture.shop("ACTIVE");
     UUID a = fixture.sku(shop, 30);
     UUID b = fixture.sku(shop, 30);
-    fixture.inTenant(
-        shop.tenant(),
-        () -> {
-          for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < 4; i++) {
+      int index = i;
+      fixture.inTenant(
+          shop.tenant(),
+          () -> {
             UUID group =
                 engine
                     .reserve(
-                        com.thaishopfun.oms.stock.StockOwner.checkout("exp-" + i),
+                        com.thaishopfun.oms.stock.StockOwner.checkout("exp-" + index),
                         List.of(com.thaishopfun.oms.stock.ReserveItem.of(a, 1)),
-                        "exp-" + i)
+                        "exp-" + index)
                     .reservationGroupId();
             jdbc.update(
                 "UPDATE stock_reservation SET expires_at = now() - interval '1 minute' "
                     + "WHERE reservation_group_id = ?",
                 group);
-          }
-          return null;
-        });
+            return null;
+          });
+    }
     ExecutorService pool = Executors.newFixedThreadPool(8);
     try {
       CountDownLatch start = new CountDownLatch(1);
