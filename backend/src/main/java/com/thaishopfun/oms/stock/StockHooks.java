@@ -8,5 +8,8 @@ package com.thaishopfun.oms.stock;
  */
 class StockHooks {
 
+  /** Called after the document is locked and validated, before inventory rows are locked. */
+  void beforeInventoryLock(String operation) {}
+
   void afterInventoryLocked(String operation) {}
 }

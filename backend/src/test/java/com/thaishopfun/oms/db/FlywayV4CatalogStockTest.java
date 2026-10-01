@@ -281,7 +281,7 @@ class FlywayV4CatalogStockTest {
         }
         // Change: migrate() also applies V6 (T08) and V7 (T10). V5 is unused (T07 shipped
         // without one).
-        assertThat(versions).containsExactly("1", "2", "3", "4", "6", "7");
+        assertThat(versions).containsExactly("1", "2", "3", "4", "6", "7", "8");
         assertThat(count(upgrade, "inbox_event")).isEqualTo(1);
         Graph graph = seedForTenant(upgrade, tenant);
         assertThat(countFor(upgrade, "inventory", graph.tenant())).isEqualTo(1);
@@ -1319,15 +1319,38 @@ class FlywayV4CatalogStockTest {
   private static void insertLedger(
       Connection connection, UUID id, UUID tenantId, UUID skuId, UUID warehouseId, String reason)
       throws SQLException {
+    long seq = nextLedgerSeq(connection, tenantId, skuId, warehouseId);
     insert(
         connection,
         "INSERT INTO inventory_ledger (id, tenant_id, sku_id, warehouse_id, delta_on_hand, "
-            + "delta_reserved, reason, actor) VALUES (?, ?, ?, ?, 10, 0, ?, 'test')",
+            + "delta_reserved, reason, actor, ledger_seq) VALUES (?, ?, ?, ?, 10, 0, ?, 'test', ?)",
         id,
         tenantId,
         skuId,
         warehouseId,
-        reason);
+        reason,
+        seq);
+  }
+
+  private static long nextLedgerSeq(
+      Connection connection, UUID tenantId, UUID skuId, UUID warehouseId) throws SQLException {
+    try (PreparedStatement ps =
+        connection.prepareStatement(
+            """
+            UPDATE inventory SET ledger_seq = ledger_seq + 1
+            WHERE tenant_id = ? AND sku_id = ? AND warehouse_id = ?
+            RETURNING ledger_seq
+            """)) {
+      ps.setObject(1, tenantId);
+      ps.setObject(2, skuId);
+      ps.setObject(3, warehouseId);
+      try (ResultSet rs = ps.executeQuery()) {
+        if (rs.next()) {
+          return rs.getLong(1);
+        }
+        return 1L;
+      }
+    }
   }
 
   private static void insertReservation(

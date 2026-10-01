@@ -1,5 +1,6 @@
 package com.thaishopfun.oms.stock;
 
+import com.thaishopfun.oms.auth.UuidV7;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -8,8 +9,10 @@ import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -26,6 +29,8 @@ import org.springframework.stereotype.Repository;
 class StockRepository {
 
   static final String REF_TYPE = "stock_reservation";
+  static final String REF_DOCUMENT_LINE = "stock_document_line";
+  static final String REF_RETURN_LINE = "return_line";
 
   record SkuWarehouse(UUID skuId, UUID warehouseId) {}
 
@@ -314,16 +319,151 @@ class StockRepository {
         });
   }
 
+  // Change: T08A on_hand writes for stock documents, voids, and return restocks.
+  /**
+   * {@code on_hand += delta} per row, only where the result stays at or above {@code reserved} (and
+   * so at or above 0). Stock documents, voids, and return restocks. Returns the rows updated.
+   */
+  int adjustOnHand(Map<UUID, Integer> deltaByInventoryId) {
+    return applyInventory(
+        """
+        UPDATE inventory AS i
+        SET on_hand = i.on_hand + d.qty,
+            stock_version = i.stock_version + 1,
+            updated_at = now()
+        FROM unnest(?::uuid[], ?::int[]) AS d (id, qty)
+        WHERE i.id = d.id
+          AND i.on_hand + d.qty >= i.reserved
+          AND i.on_hand + d.qty >= 0
+        """,
+        deltaByInventoryId);
+  }
+
+  /**
+   * Creates the missing {@code (sku, warehouse)} rows with {@code on_hand = reserved = 0}, in (sku,
+   * warehouse) order so two creators of overlapping sets cannot deadlock. Meant for its own short
+   * transaction before a post: the post then only locks rows that already exist.
+   */
+  void ensureInventory(UUID tenantId, Collection<SkuWarehouse> keys) {
+    if (keys.isEmpty()) {
+      return;
+    }
+    List<SkuWarehouse> sorted = new ArrayList<>(new LinkedHashSet<>(keys));
+    sorted.sort(
+        Comparator.comparing((SkuWarehouse key) -> key.skuId().toString())
+            .thenComparing(key -> key.warehouseId().toString()));
+    List<UUID> ids = new ArrayList<>();
+    List<UUID> skus = new ArrayList<>();
+    List<UUID> warehouses = new ArrayList<>();
+    for (SkuWarehouse key : sorted) {
+      ids.add(UuidV7.generate());
+      skus.add(key.skuId());
+      warehouses.add(key.warehouseId());
+    }
+    jdbc.update(
+        """
+        INSERT INTO inventory (id, tenant_id, sku_id, warehouse_id, on_hand, reserved)
+        SELECT k.id, ?, k.sku_id, k.warehouse_id, 0, 0
+        FROM unnest(?::uuid[], ?::uuid[], ?::uuid[]) WITH ORDINALITY
+          AS k (id, sku_id, warehouse_id, n)
+        ORDER BY k.n
+        ON CONFLICT (tenant_id, sku_id, warehouse_id) DO NOTHING
+        """,
+        ps -> {
+          ps.setObject(1, tenantId);
+          uuidArray(ps, 2, ids);
+          uuidArray(ps, 3, skus);
+          uuidArray(ps, 4, warehouses);
+        });
+  }
+
+  /** The (sku, warehouse) pairs among {@code keys} that already have any ledger entry. */
+  Set<SkuWarehouse> withLedger(Collection<SkuWarehouse> keys) {
+    Set<SkuWarehouse> found = new HashSet<>();
+    if (keys.isEmpty()) {
+      return found;
+    }
+    List<UUID> skus = new ArrayList<>();
+    List<UUID> warehouses = new ArrayList<>();
+    for (SkuWarehouse key : keys) {
+      skus.add(key.skuId());
+      warehouses.add(key.warehouseId());
+    }
+    jdbc.query(
+        """
+        SELECT k.sku_id, k.warehouse_id
+        FROM unnest(?::uuid[], ?::uuid[]) AS k (sku_id, warehouse_id)
+        WHERE EXISTS (
+          SELECT 1 FROM inventory_ledger AS l
+          WHERE l.sku_id = k.sku_id AND l.warehouse_id = k.warehouse_id
+        )
+        """,
+        ps -> {
+          uuidArray(ps, 1, skus);
+          uuidArray(ps, 2, warehouses);
+        },
+        (ResultSet rs) -> {
+          found.add(
+              new SkuWarehouse(
+                  rs.getObject("sku_id", UUID.class), rs.getObject("warehouse_id", UUID.class)));
+        });
+    return found;
+  }
+
+  // Change: T08A ref_type parameter; reservation callers keep the stock_reservation default.
+  /** Reservation entries: {@code ref_type = stock_reservation}. */
   void insertLedger(UUID tenantId, String reason, String actor, Collection<LedgerEntry> entries) {
+    insertLedger(tenantId, reason, REF_TYPE, actor, entries);
+  }
+
+  /**
+   * {@code refType} names what {@link LedgerEntry#refId()} points at: {@value #REF_TYPE}, {@value
+   * #REF_DOCUMENT_LINE}, or {@value #REF_RETURN_LINE}.
+   */
+  void insertLedger(
+      UUID tenantId, String reason, String refType, String actor, Collection<LedgerEntry> entries) {
     if (entries.isEmpty()) {
       return;
     }
+    // Step 1: Assign ledger_seq while the caller still holds each inventory row lock.
+    Map<UUID, Long> seqByEntryId = new LinkedHashMap<>();
+    LinkedHashMap<SkuWarehouse, List<LedgerEntry>> grouped = new LinkedHashMap<>();
+    for (LedgerEntry entry : entries) {
+      grouped
+          .computeIfAbsent(
+              new SkuWarehouse(entry.skuId(), entry.warehouseId()), k -> new ArrayList<>())
+          .add(entry);
+    }
+    for (Map.Entry<SkuWarehouse, List<LedgerEntry>> group : grouped.entrySet()) {
+      SkuWarehouse key = group.getKey();
+      List<LedgerEntry> lines = group.getValue();
+      int count = lines.size();
+      Long endSeq =
+          jdbc.queryForObject(
+              """
+              UPDATE inventory
+              SET ledger_seq = ledger_seq + ?
+              WHERE tenant_id = ? AND sku_id = ? AND warehouse_id = ?
+              RETURNING ledger_seq
+              """,
+              Long.class,
+              count,
+              tenantId,
+              key.skuId(),
+              key.warehouseId());
+      long startSeq = endSeq - count + 1;
+      for (int i = 0; i < count; i++) {
+        seqByEntryId.put(lines.get(i).id(), startSeq + i);
+      }
+    }
+    // Step 2: Append ledger rows with their commit-order sequence.
     List<UUID> ids = new ArrayList<>();
     List<UUID> skus = new ArrayList<>();
     List<UUID> warehouses = new ArrayList<>();
     List<Integer> onHand = new ArrayList<>();
     List<Integer> reserved = new ArrayList<>();
     List<UUID> refs = new ArrayList<>();
+    List<Long> seqs = new ArrayList<>();
     for (LedgerEntry entry : entries) {
       ids.add(entry.id());
       skus.add(entry.skuId());
@@ -331,20 +471,22 @@ class StockRepository {
       onHand.add(entry.deltaOnHand());
       reserved.add(entry.deltaReserved());
       refs.add(entry.refId());
+      seqs.add(seqByEntryId.get(entry.id()));
     }
     jdbc.update(
         """
         INSERT INTO inventory_ledger
           (id, tenant_id, sku_id, warehouse_id, delta_on_hand, delta_reserved, reason,
-           ref_type, ref_id, actor)
-        SELECT l.id, ?, l.sku_id, l.warehouse_id, l.d_on_hand, l.d_reserved, ?, ?, l.ref_id, ?
-        FROM unnest(?::uuid[], ?::uuid[], ?::uuid[], ?::int[], ?::int[], ?::uuid[])
-          AS l (id, sku_id, warehouse_id, d_on_hand, d_reserved, ref_id)
+           ref_type, ref_id, actor, ledger_seq)
+        SELECT l.id, ?, l.sku_id, l.warehouse_id, l.d_on_hand, l.d_reserved, ?, ?, l.ref_id, ?,
+               l.ledger_seq
+        FROM unnest(?::uuid[], ?::uuid[], ?::uuid[], ?::int[], ?::int[], ?::uuid[], ?::int8[])
+          AS l (id, sku_id, warehouse_id, d_on_hand, d_reserved, ref_id, ledger_seq)
         """,
         ps -> {
           ps.setObject(1, tenantId);
           ps.setString(2, reason);
-          ps.setString(3, REF_TYPE);
+          ps.setString(3, refType);
           ps.setString(4, actor);
           uuidArray(ps, 5, ids);
           uuidArray(ps, 6, skus);
@@ -352,6 +494,7 @@ class StockRepository {
           intArray(ps, 8, onHand);
           intArray(ps, 9, reserved);
           uuidArray(ps, 10, refs);
+          longArray(ps, 11, seqs);
         });
   }
 
@@ -512,5 +655,10 @@ class StockRepository {
   private static void intArray(PreparedStatement ps, int index, Collection<Integer> values)
       throws SQLException {
     ps.setArray(index, ps.getConnection().createArrayOf("int4", values.toArray(new Integer[0])));
+  }
+
+  private static void longArray(PreparedStatement ps, int index, Collection<Long> values)
+      throws SQLException {
+    ps.setArray(index, ps.getConnection().createArrayOf("int8", values.toArray(new Long[0])));
   }
 }

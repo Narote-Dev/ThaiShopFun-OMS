@@ -81,6 +81,8 @@ class StockTestConfig {
 
     private final JdbcTemplate jdbc;
     private final AtomicReference<Fault> next = new AtomicReference<>();
+    private final AtomicReference<Runnable> beforeInventoryLock = new AtomicReference<>();
+    private final AtomicReference<Runnable> atInventoryLock = new AtomicReference<>();
     private final java.util.concurrent.atomic.AtomicInteger fired =
         new java.util.concurrent.atomic.AtomicInteger();
 
@@ -92,8 +94,22 @@ class StockTestConfig {
       next.set(fault);
     }
 
+    /** Runs once on the next write, before inventory rows are locked. */
+    void atNextBeforeInventoryLock(Runnable action) {
+      beforeInventoryLock.set(action);
+    }
+
+    /**
+     * Runs once on the next write, after inventory rows are locked and before any injected fault.
+     */
+    void atNextInventoryLock(Runnable action) {
+      atInventoryLock.set(action);
+    }
+
     void reset() {
       next.set(null);
+      beforeInventoryLock.set(null);
+      atInventoryLock.set(null);
     }
 
     int fired() {
@@ -101,7 +117,19 @@ class StockTestConfig {
     }
 
     @Override
+    void beforeInventoryLock(String operation) {
+      Runnable pause = beforeInventoryLock.getAndSet(null);
+      if (pause != null) {
+        pause.run();
+      }
+    }
+
+    @Override
     void afterInventoryLocked(String operation) {
+      Runnable pause = atInventoryLock.getAndSet(null);
+      if (pause != null) {
+        pause.run();
+      }
       Fault fault = next.getAndSet(null);
       if (fault == null) {
         return;

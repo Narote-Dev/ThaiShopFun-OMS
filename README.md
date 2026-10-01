@@ -81,6 +81,8 @@ The outbox publisher polls `outbox_event` with `claim_outbox_batch` (at-least-on
 
 Catalog and warehouses (T07): products, SKUs, bundle components, warehouses, and CSV import under `/api/v1`, with the pages `#/catalog/skus`, `#/catalog/products`, `#/catalog/import`, and `#/warehouses`. Endpoints, error codes, the CSV format, and the audit actions are in [`docs/api/catalog.md`](docs/api/catalog.md). No migration: T07 runs on the V4 tables.
 
+Stock documents and per-SKU history (T08A): drafts and posting for opening balance, receive, adjustment, count, and write-off under `/api/v1/stock-documents`, plus `GET /api/v1/skus/{id}/stock-history`. UI routes `#/stock/documents`, `#/stock/documents/:id`, and `#/catalog/skus/:id/history` (T04 shell nav links from the SKU list). Details are in [`docs/api/stock-documents.md`](docs/api/stock-documents.md). Flyway **V8** adds commit-consistent `inventory_ledger.ledger_seq` (history running totals order by sequence, not transaction start time). Voiding an OPENING still leaves ledger history on the row, so a new OPENING is refused (`422 OPENING_ALREADY_SET`); use an ADJUSTMENT instead.
+
 The process refuses to start if the runtime role is superuser or has `BYPASSRLS`, unless `oms.security.allow-rls-bypass=true` is set explicitly. That flag is off by default and is not set for local Docker. If `DATABASE_USERNAME` / `DATABASE_PASSWORD` are set, they win over the user embedded in a `postgresql://` URL. Flyway still uses that URL user.
 
 ## Working rules
