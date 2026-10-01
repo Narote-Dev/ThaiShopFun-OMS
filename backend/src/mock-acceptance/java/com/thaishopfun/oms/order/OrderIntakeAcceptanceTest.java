@@ -425,8 +425,7 @@ class OrderIntakeAcceptanceTest {
   }
 
   private HttpResponse<String> checkoutPost(
-      String checkoutId, String shopId, String listingSku, int qty)
-      throws Exception {
+      String checkoutId, String shopId, String listingSku, int qty) throws Exception {
     ObjectNode body = JSON.createObjectNode();
     body.put("checkout_id", checkoutId);
     body.put("tsf_shop_id", shopId);
