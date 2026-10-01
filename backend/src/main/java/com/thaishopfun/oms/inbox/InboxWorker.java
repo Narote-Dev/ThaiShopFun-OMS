@@ -1,6 +1,7 @@
 package com.thaishopfun.oms.inbox;
 
 import com.thaishopfun.oms.order.OrderOptimisticLockException;
+import com.thaishopfun.oms.order.ReconciliationIssueRepository;
 import com.thaishopfun.oms.stock.StockBusyException;
 import com.thaishopfun.oms.stock.StockConflictException;
 import com.thaishopfun.oms.stock.StockRetry;
@@ -76,6 +77,7 @@ public class InboxWorker {
   private final InboxProperties properties;
   private final InboxHandlerRegistry registry;
   private final InboxEntitlementPolicy policy;
+  private final ReconciliationIssueRepository reconciliation;
   private final JdbcTemplate jdbc;
   private final TransactionTemplate claimTx;
   private final TransactionTemplate applyTx;
@@ -88,6 +90,7 @@ public class InboxWorker {
       InboxProperties properties,
       InboxHandlerRegistry registry,
       InboxEntitlementPolicy policy,
+      ReconciliationIssueRepository reconciliation,
       JdbcTemplate jdbc,
       PlatformTransactionManager transactions,
       JsonMapper json,
@@ -95,6 +98,7 @@ public class InboxWorker {
     this.properties = properties;
     this.registry = registry;
     this.policy = policy;
+    this.reconciliation = reconciliation;
     this.jdbc = jdbc;
     this.claimTx = new TransactionTemplate(transactions);
     // Step 1: TransactionTemplate takes whole seconds and truncates. Ceil so 1.1s is 2s, not 1s.
@@ -206,12 +210,13 @@ public class InboxWorker {
           Instant received = row.receivedAt();
           if (received != null
               && received.isBefore(
-                  jdbc
-                      .queryForObject("SELECT now()", OffsetDateTime.class)
+                  jdbc.queryForObject("SELECT now()", OffsetDateTime.class)
                       .toInstant()
                       .minus(properties.getMaxDefer()))) {
             upsertOrderEventWithoutOrder(row);
-            recordFailure(new Claimed(row.id(), row.tenantId(), claimed.leaseUntil()), new RuntimeException("ORDER_EVENT_WITHOUT_ORDER"));
+            recordFailure(
+                new Claimed(row.id(), row.tenantId(), claimed.leaseUntil()),
+                new RuntimeException("ORDER_EVENT_WITHOUT_ORDER"));
             return;
           }
           pushBack(row, defer.delay() == null ? properties.getDeferDelay() : defer.delay());
@@ -219,26 +224,12 @@ public class InboxWorker {
   }
 
   private void upsertOrderEventWithoutOrder(InboxRow row) {
-    int updated =
-        jdbc.update(
-            """
-            UPDATE reconciliation_issue
-            SET details = ?::jsonb, updated_at = now()
-            WHERE tenant_id = ? AND rule = 'ORDER_EVENT_WITHOUT_ORDER' AND order_id IS NULL
-              AND status <> 'RESOLVED'
-            """,
-            "{\"inbox_event_id\":\"" + row.id() + "\"}",
-            row.tenantId());
-    if (updated == 0) {
-      jdbc.update(
-          """
-          INSERT INTO reconciliation_issue (id, tenant_id, run_id, rule, order_id, details, status)
-          VALUES (?, ?, ?, 'ORDER_EVENT_WITHOUT_ORDER', NULL, ?::jsonb, 'OPEN')
-          """,
-          UUID.randomUUID(),
-          row.tenantId(),
-          row.id(),
-          "{\"inbox_event_id\":\"" + row.id() + "\"}");
+    TenantContext.set(row.tenantId(), null);
+    try {
+      reconciliation.upsertOpenWithoutOrder(
+          row.id(), "ORDER_EVENT_WITHOUT_ORDER", "{\"inbox_event_id\":\"" + row.id() + "\"}");
+    } finally {
+      TenantContext.clear();
     }
   }
 

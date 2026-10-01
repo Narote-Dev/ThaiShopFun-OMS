@@ -18,6 +18,7 @@ import com.thaishopfun.oms.inbox.InboxHandlerRegistry;
 import com.thaishopfun.oms.inbox.InboxIngestService;
 import com.thaishopfun.oms.inbox.InboxProperties;
 import com.thaishopfun.oms.inbox.InboxWorker;
+import com.thaishopfun.oms.order.ReconciliationIssueRepository;
 import com.thaishopfun.oms.outbox.ChaosOutboxHooks;
 import com.thaishopfun.oms.outbox.OutboxAppender;
 import com.thaishopfun.oms.outbox.OutboxCrash;
@@ -191,6 +192,7 @@ class DeliveryChaosTest {
   @Autowired private InboxProperties inboxProperties;
   @Autowired private InboxHandlerRegistry registry;
   @Autowired private InboxEntitlementPolicy policy;
+  @Autowired private ReconciliationIssueRepository reconciliation;
   @Autowired private JdbcTemplate jdbc;
   @Autowired private PlatformTransactionManager transactions;
   @Autowired private JsonMapper jsonMapper;
@@ -784,7 +786,14 @@ class DeliveryChaosTest {
 
   private InboxWorker freshInboxWorker() {
     return new InboxWorker(
-        inboxProperties, registry, policy, jdbc, transactions, jsonMapper, meters);
+        inboxProperties,
+        registry,
+        policy,
+        reconciliation,
+        jdbc,
+        transactions,
+        jsonMapper,
+        meters);
   }
 
   private static final String INBOUND_ID_PATTERN = "chaos-in-" + SEED + "-%";

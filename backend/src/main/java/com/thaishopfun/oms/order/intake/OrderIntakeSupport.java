@@ -2,8 +2,8 @@ package com.thaishopfun.oms.order.intake;
 
 import com.thaishopfun.oms.auth.UuidV7;
 import com.thaishopfun.oms.inbox.InboxDeferException;
-import com.thaishopfun.oms.inbox.InboxProperties;
 import com.thaishopfun.oms.inbox.InboxMessage;
+import com.thaishopfun.oms.inbox.InboxProperties;
 import com.thaishopfun.oms.inbox.NonRetryableInboxException;
 import com.thaishopfun.oms.order.ChannelAccountLookup;
 import com.thaishopfun.oms.order.ChannelAccountLookup.TsfAccount;
@@ -32,11 +32,9 @@ import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.math.BigDecimal;
 import java.time.Clock;
-import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -161,7 +159,8 @@ public class OrderIntakeSupport {
       holdExpires = payload.paymentExpiresAt().plus(orderProperties.getUnpaidHoldGrace());
     }
 
-    List<ReserveItem> reserveItems = mapped.stream().filter(LineMapping::mapped).map(LineMapping::reserveItem).toList();
+    List<ReserveItem> reserveItems =
+        mapped.stream().filter(LineMapping::mapped).map(LineMapping::reserveItem).toList();
     boolean hasUnmapped = mapped.stream().anyMatch(line -> !line.mapped());
     List<Shortfall> stockShortfalls = List.of();
     if (stockEnforced && !reserveItems.isEmpty()) {
@@ -199,7 +198,6 @@ public class OrderIntakeSupport {
       current = applyHold(current, holdReason, holdNote);
     }
     maybeReadyToPick(orders.findById(orderId).orElseThrow(), account.mode(), reserveItems, now);
-    hooks.afterOutbox();
   }
 
   void handlePaid(InboxMessage message) {
@@ -226,7 +224,6 @@ public class OrderIntakeSupport {
       }
     }
     maybeReadyToPick(orders.findById(order.id()).orElseThrow(), account.mode(), items, now);
-    hooks.afterOutbox();
   }
 
   void handleCancelled(InboxMessage message) {
@@ -242,10 +239,10 @@ public class OrderIntakeSupport {
       return;
     }
     if (stockEnforced(account.mode())) {
-      engine.release(
-          StockOwner.order(order.id().toString()), "order.release:" + message.eventId());
+      engine.release(StockOwner.order(order.id().toString()), "order.release:" + message.eventId());
     }
-    stateMachine.applyOrderStatus(order, "CANCELLED", "TSF cancel", "TSF", guard(account.mode(), order, List.of()));
+    stateMachine.applyOrderStatus(
+        order, "CANCELLED", "TSF cancel", "TSF", guard(account.mode(), order, List.of()));
     hooks.afterOutbox();
   }
 
@@ -269,9 +266,11 @@ public class OrderIntakeSupport {
     GuardContext guard = guard(mode, order, mappedItems);
     try {
       TransitionResult result =
-          stateMachine.applyFulfillmentStatus(order, "READY_TO_PICK", "stock ready", "SYSTEM", guard);
+          stateMachine.applyFulfillmentStatus(
+              order, "READY_TO_PICK", "stock ready", "SYSTEM", guard);
       if (result.fulfillmentChanged()) {
         emitStatusChanged(result.order());
+        hooks.afterOutbox();
       }
     } catch (RuntimeException ignored) {
       // Guards block READY_TO_PICK until payment/hold/reservation allow it.
@@ -293,9 +292,7 @@ public class OrderIntakeSupport {
 
   private GuardContext guard(String mode, SalesOrder order, List<ReserveItem> mappedItems) {
     boolean enforced = stockEnforced(mode);
-    boolean covers =
-        !enforced
-            || coverage.covers(order.id(), mappedItems, clock.instant());
+    boolean covers = !enforced || coverage.covers(order.id(), mappedItems, clock.instant());
     return new GuardContext(enforced, covers, clock.instant());
   }
 
@@ -303,7 +300,8 @@ public class OrderIntakeSupport {
     return "ACTIVE".equals(mode) || "SHADOW".equals(mode) || "CONTROL".equals(mode);
   }
 
-  private List<LineMapping> insertLines(UUID orderId, UUID channelAccountId, List<CreatedLine> payloadLines) {
+  private List<LineMapping> insertLines(
+      UUID orderId, UUID channelAccountId, List<CreatedLine> payloadLines) {
     List<LineMapping> mapped = new ArrayList<>();
     for (CreatedLine line : payloadLines) {
       UUID skuId = lookupSku(channelAccountId, line.listingSkuId());
@@ -320,7 +318,9 @@ public class OrderIntakeSupport {
           BigDecimal.ZERO,
           line.unitPrice().multiply(BigDecimal.valueOf(line.qty())));
       boolean stockControl = listingStockControl(channelAccountId, line.listingSkuId());
-      mapped.add(new LineMapping(lineId, skuId, line.qty(), line.listingSkuId(), stockControl, skuId != null));
+      mapped.add(
+          new LineMapping(
+              lineId, skuId, line.qty(), line.listingSkuId(), stockControl, skuId != null));
     }
     return mapped;
   }
@@ -362,7 +362,8 @@ public class OrderIntakeSupport {
         .toList();
   }
 
-  private void recordOversell(TsfAccount account, List<LineMapping> mapped, List<Shortfall> shortfalls) {
+  private void recordOversell(
+      TsfAccount account, List<LineMapping> mapped, List<Shortfall> shortfalls) {
     if (!"ACTIVE".equals(account.mode()) && !"CONTROL".equals(account.mode())) {
       return;
     }
@@ -388,7 +389,11 @@ public class OrderIntakeSupport {
             "order",
             order.externalOrderId(),
             "order.status_changed",
-            Map.of("order_id", order.externalOrderId(), "fulfillment_status", order.fulfillmentStatus()),
+            Map.of(
+                "order_id",
+                order.externalOrderId(),
+                "fulfillment_status",
+                order.fulfillmentStatus()),
             order.version()));
   }
 
