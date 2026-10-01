@@ -98,6 +98,10 @@ public final class AuthTestSupport {
         POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
   }
 
+  public static Connection app() throws SQLException {
+    return DriverManager.getConnection(POSTGRES.getJdbcUrl(), "oms_app", APP_PASSWORD);
+  }
+
   public static String userToken(
       String userId, String shopId, String status, Instant membershipExpiry, long entVer) {
     return token(

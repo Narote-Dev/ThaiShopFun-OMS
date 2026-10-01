@@ -569,6 +569,32 @@ class StockRepository {
         owner.ref());
   }
 
+  /**
+   * Other owners' ACTIVE CHECKOUT rows past {@code now} that touch one of {@code skuIds}. Used to
+   * inline-expire stale holds on the reserve path (T12A P2).
+   */
+  List<ReservationRow> expiredActiveCheckoutForSkus(
+      StockOwner excludeOwner, Collection<UUID> skuIds, Instant now, int limit) {
+    if (skuIds.isEmpty() || limit <= 0) {
+      return List.of();
+    }
+    return jdbc.query(
+        "SELECT "
+            + RESERVATION_COLUMNS
+            + " FROM stock_reservation "
+            + "WHERE status = 'ACTIVE' AND owner_type = 'CHECKOUT' AND expires_at <= ? "
+            + "AND sku_id = ANY (?) AND NOT (owner_type = ? AND owner_ref = ?) "
+            + "ORDER BY expires_at, id LIMIT ?",
+        ps -> {
+          ps.setObject(1, OffsetDateTime.ofInstant(now, ZoneOffset.UTC));
+          uuidArray(ps, 2, skuIds);
+          ps.setString(3, excludeOwner.type().name());
+          ps.setString(4, excludeOwner.ref());
+          ps.setInt(5, limit);
+        },
+        (rs, row) -> reservationRow(rs));
+  }
+
   /** Unlocked candidates for the expiry job. Re-checked after the inventory lock. */
   List<ReservationRow> expiredActive(Instant now, int limit) {
     return jdbc.query(

@@ -99,7 +99,7 @@ class FlywayV1RlsTest {
           assertThat(history.getBoolean("success")).isTrue();
           versions.add(history.getString("version"));
         }
-        assertThat(versions).containsExactly("1", "2", "3", "4", "6", "7", "8");
+        assertThat(versions).containsExactly("1", "2", "3", "4", "6", "7", "8", "9");
       }
 
       // Step 2: Every foundation table exists.

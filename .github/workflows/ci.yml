@@ -75,6 +75,27 @@ jobs:
         working-directory: mock-tsf
         run: ./mvnw -B verify
 
+  perf:
+    name: Checkout reserve perf
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+          cache-dependency-path: backend/pom.xml
+      - name: Compile Gatling simulation
+        working-directory: backend
+        run: ./mvnw -B -Pperf test-compile
+      - name: Upload Gatling sources
+        uses: actions/upload-artifact@v4
+        with:
+          name: gatling-checkout-reserve
+          if-no-files-found: warn
+          path: backend/target/test-classes/com/thaishopfun/oms/perf/
+
   contracts:
     name: Contract examples
     runs-on: ubuntu-latest

@@ -1,7 +1,7 @@
 # 4. API Contract กับ ThaiShopFun (Draft v0.2)
 
 > URL/domain เป็น placeholder: `{TSF_AUTH}`, `{TSF_API}`, `{OMS_API}`
-> ตัวอย่างในไฟล์นี้เป็นตัวอธิบาย **source of truth คือ spec ใน repo `tsf-oms-contracts`** (ดู 4.9)
+> ตัวอย่างในไฟล์นี้เป็นตัวอธิบาย **source of truth คือ in-repo `contracts/` สำหรับตอนนี้** (อาจย้ายไป `tsf-oms-contracts` ภายหลังแบบเดิม; ดู 4.9)
 
 ## หลักการ (ตัดสินใจแล้ว)
 | เรื่อง | ตัดสินใจ | เหตุผล |
@@ -212,7 +212,7 @@ Error format ทุก endpoint:
 Error codes ที่ใช้กับ entitlement และ membership: `ENTITLEMENT_INACTIVE`, `ENTITLEMENT_GRACE`, `ENTITLEMENT_STALE`, `MEMBERSHIP_REVOKED`. `401` จาก token ใช้ message เดียว (`Invalid or expired token`) ไม่ว่า claim ไหนพัง.
 
 ## 4.9 Contract Governance
-- repo แยก **`tsf-oms-contracts`** (ตัดสินใจแล้ว: เป็นกลาง ทั้ง 2 repo pin tag เดียวกัน)
+- **in-repo `contracts/`** เป็น source of truth สำหรับตอนนี้ (อาจย้ายไป repo แยก **`tsf-oms-contracts`** ภายหลังแบบเดิม; ทั้ง 2 repo pin tag เดียวกันเมื่อแยกแล้ว)
   - `openapi/oms-internal.yaml` (reservation, events receiver), `openapi/tsf-internal.yaml` (4.7)
   - `asyncapi/tsf-oms-events.yaml` + `schemas/*.json` (JSON Schema ต่อ event_type + version)
   - `examples/` ตัวอย่าง JSON ที่ validate ผ่าน schema

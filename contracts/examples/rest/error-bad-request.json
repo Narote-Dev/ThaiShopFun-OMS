@@ -1,0 +1,5 @@
+{
+  "error": "BAD_REQUEST",
+  "message": "Idempotency-Key must equal checkout_id",
+  "trace_id": "01J9Z3K7Q8X2V4M6N0P1R3S5T7"
+}

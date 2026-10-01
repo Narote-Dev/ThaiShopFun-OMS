@@ -4,8 +4,8 @@ info:
   version: 0.2.0
   description: |
     Section 4.3. TSF calls these routes with a client-credentials token whose
-    audience is oms-internal. OMS does not implement them yet (T12A). The mock
-    only calls them and returns OMS's response.
+    audience is oms-internal. The mock forwards requests to OMS and returns
+    OMS's response unchanged.
 servers:
   - url: "{OMS_API}"
     variables:
@@ -19,6 +19,7 @@ paths:
         - name: Idempotency-Key
           in: header
           required: true
+          description: Must equal checkout_id in the body.
           schema:
             type: string
       requestBody:
@@ -29,13 +30,25 @@ paths:
               $ref: ../schemas/rest/reservation-request.json
       responses:
         "201":
-          description: Reserved
+          description: Reserved or unenforced (SHADOW / observe / unmapped listing).
           content:
             application/json:
               schema:
                 $ref: ../schemas/rest/reservation-created.json
+        "400":
+          description: Invalid request (including Idempotency-Key ≠ checkout_id).
+          content:
+            application/json:
+              schema:
+                $ref: ../schemas/rest/error.json
+        "401":
+          description: Missing or invalid service token.
+          content:
+            application/json:
+              schema:
+                $ref: ../schemas/rest/error.json
         "409":
-          description: Out of stock, or the idempotency key was reused with a different body
+          description: Out of stock, or the idempotency key was reused with a different body.
           content:
             application/json:
               schema:
@@ -53,7 +66,9 @@ paths:
             type: string
       responses:
         "204":
-          description: Released. Repeating the delete is also 204.
+          description: |
+            Released. Repeating the delete is also 204, including when the id is
+            unknown, malformed, already released, expired, consumed, or held nothing.
 components:
   securitySchemes:
     omsInternal:

@@ -9,6 +9,8 @@ import com.thaishopfun.oms.stock.StockRepository.ReservationRow;
 import com.thaishopfun.oms.stock.StockRepository.SkuInfo;
 import com.thaishopfun.oms.stock.StockRepository.SkuWarehouse;
 import com.thaishopfun.oms.tenant.TenantContext;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -24,6 +26,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.StringJoiner;
 import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 
@@ -32,12 +36,13 @@ import org.springframework.stereotype.Service;
  *
  * <p>Lock order, the same for every write: the idempotency key row, then at most one owner advisory
  * lock (reserve, transfer target, and owner-targeted release/consume/unpack), then inventory rows
- * in ascending {@code inventory.id}, then reservation rows. Status is re-checked after the
- * reservation rows are locked, because another transaction or the expiry job may have moved them.
- * Stock document post and void ({@link StockMovements}) extend it: the key row, then the {@code
- * stock_document} row {@code FOR UPDATE}, then inventory in id order, and no reservation rows. No
- * other engine write locks {@code stock_document}, and line writers take only the document {@code
- * FOR SHARE} without inventory locks, so the extra step cannot form a cycle.
+ * in ascending {@code inventory.id} (including any stale CHECKOUT rows this reserve inlines as
+ * EXPIRED), then reservation rows. Status is re-checked after the reservation rows are locked,
+ * because another transaction or the expiry job may have moved them. Stock document post and void
+ * ({@link StockMovements}) extend it: the key row, then the {@code stock_document} row {@code FOR
+ * UPDATE}, then inventory in id order, and no reservation rows. No other engine write locks {@code
+ * stock_document}, and line writers take only the document {@code FOR SHARE} without inventory
+ * locks, so the extra step cannot form a cycle.
  *
  * <p>Every call runs at READ COMMITTED inside the {@link TenantContext} tenant. With no transaction
  * open, the engine opens its own and retries it whole on deadlock or serialization failure. Inside
@@ -55,8 +60,12 @@ public class ReservationEngine {
   static final String SCOPE_UNPACK = "stock.unpack";
 
   static final String EXPIRY_ACTOR = "system:expiry";
+  public static final String INLINE_EXPIRED_METRIC = "oms.stock.inline_expired";
+
+  private static final Logger log = LoggerFactory.getLogger(ReservationEngine.class);
 
   private static final int MAX_ITEMS = 500;
+  private static final int MAX_INLINE_EXPIRE = 200;
 
   private final StockTransactions transactions;
   private final StockIdempotency idempotency;
@@ -65,6 +74,7 @@ public class ReservationEngine {
   private final StockProperties properties;
   private final ApplicationEventPublisher events;
   private final Clock clock;
+  private final Counter inlineExpired;
 
   ReservationEngine(
       StockTransactions transactions,
@@ -73,7 +83,8 @@ public class ReservationEngine {
       StockHooks hooks,
       StockProperties properties,
       ApplicationEventPublisher events,
-      Clock clock) {
+      Clock clock,
+      MeterRegistry meters) {
     this.transactions = transactions;
     this.idempotency = idempotency;
     this.repository = repository;
@@ -81,6 +92,7 @@ public class ReservationEngine {
     this.properties = properties;
     this.events = events;
     this.clock = clock;
+    this.inlineExpired = Counter.builder(INLINE_EXPIRED_METRIC).register(meters);
   }
 
   /** {@link #reserve(StockOwner, List, String, Duration)} with the default TTL. */
@@ -214,16 +226,8 @@ public class ReservationEngine {
       return idempotency.replay(stored, ReserveResult.class);
     }
 
-    // Step 2: One ACTIVE group per owner. The owner lock makes this check race-free.
+    // Step 2: Owner lock, then resolve SKUs before any inventory lock.
     repository.lockOwner(tenantId, owner);
-    if (repository.ownerHasActive(owner)) {
-      return fail(
-          tenantId,
-          SCOPE_RESERVE,
-          key,
-          StockError.OWNER_ALREADY_RESERVED,
-          "owner " + ownerString(owner) + " already has an ACTIVE reservation");
-    }
 
     // Step 3: Resolve the default warehouse only if some item needs it.
     UUID defaultWarehouse = null;
@@ -259,9 +263,41 @@ public class ReservationEngine {
     }
     Map<SkuWarehouse, Need> needs = explode(items, skus, defaultWarehouse);
 
-    // Step 5: Lock the inventory rows in id order, then check every component under the lock.
-    Map<SkuWarehouse, InventoryRow> inventory = repository.lockInventory(needs.keySet());
+    // Step 5: Inline-expire stale CHECKOUT holds that still count in reserved (T12A P2).
+    Instant now = clock.instant();
+    Set<UUID> needSkuIds = new LinkedHashSet<>();
+    needs.keySet().forEach(sw -> needSkuIds.add(sw.skuId()));
+    List<ReservationRow> inlineCandidates = new ArrayList<>();
+    inlineCandidates.addAll(repository.activeByOwner(owner));
+    inlineCandidates.addAll(
+        repository.expiredActiveCheckoutForSkus(owner, needSkuIds, now, MAX_INLINE_EXPIRE));
+    Set<SkuWarehouse> inventoryKeys = new LinkedHashSet<>(needs.keySet());
+    inlineCandidates.forEach(row -> inventoryKeys.add(row.key())); // reservation sku/warehouse
+    Map<SkuWarehouse, InventoryRow> inventory = repository.lockInventory(inventoryKeys);
     hooks.afterInventoryLocked(SCOPE_RESERVE);
+    if (!inlineCandidates.isEmpty()) {
+      List<UUID> inlineIds = ids(inlineCandidates);
+      List<ReservationRow> lockedInline = repository.lockReservations(inlineIds);
+      List<ReservationRow> toExpire =
+          lockedInline.stream()
+              .filter(ReservationRow::active)
+              .filter(row -> row.expiredAt(now))
+              .toList();
+      if (!toExpire.isEmpty()) {
+        settle(tenantId, toExpire, inventory, Settle.EXPIRE, EXPIRY_ACTOR);
+        inlineExpired.increment(toExpire.size());
+      }
+    }
+    if (repository.ownerHasActive(owner)) {
+      return fail(
+          tenantId,
+          SCOPE_RESERVE,
+          key,
+          StockError.OWNER_ALREADY_RESERVED,
+          "owner " + ownerString(owner) + " already has an ACTIVE reservation");
+    }
+
+    // Step 6: Check every component under the lock.
     List<Shortfall> shortfalls = new ArrayList<>();
     for (Map.Entry<SkuWarehouse, Need> entry : needs.entrySet()) {
       InventoryRow row = inventory.get(entry.getKey());
@@ -278,13 +314,13 @@ public class ReservationEngine {
       }
     }
     if (!shortfalls.isEmpty()) {
-      // Step 6: All-or-nothing. Nothing was written; the answer is stored for replays.
+      // Step 7: All-or-nothing. Nothing was written; the answer is stored for replays.
       ReserveResult result = ReserveResult.outOfStock(owner, shortfalls);
       idempotency.complete(tenantId, SCOPE_RESERVE, key, StockError.OUT_OF_STOCK.status(), result);
       return Outcome.success(result);
     }
 
-    // Step 7: Conditional UPDATE. Under the lock it cannot miss; if it does, retry the whole tx.
+    // Step 8: Conditional UPDATE. Under the lock it cannot miss; if it does, retry the whole tx.
     Map<UUID, Integer> byInventory = new LinkedHashMap<>();
     for (Map.Entry<SkuWarehouse, Need> entry : needs.entrySet()) {
       byInventory.merge(inventory.get(entry.getKey()).id(), entry.getValue().qty, Integer::sum);
@@ -295,7 +331,7 @@ public class ReservationEngine {
           "reserve updated " + updated + " of " + byInventory.size() + " inventory rows");
     }
 
-    // Step 8: One reservation row and one RESERVE ledger row per component.
+    // Step 9: One reservation row and one RESERVE ledger row per component.
     UUID groupId = UuidV7.generate();
     Instant expiresAt =
         owner.type() == OwnerType.CHECKOUT
@@ -326,7 +362,7 @@ public class ReservationEngine {
     repository.insertReservations(tenantId, owner, groupId, expiresAt, lines);
     repository.insertLedger(tenantId, "RESERVE", actor(), ledger);
 
-    // Step 9: Tell listeners after commit, then store the answer.
+    // Step 10: Tell listeners after commit, then store the answer.
     publishChanged(tenantId, lines);
     ReserveResult result = ReserveResult.success(groupId, owner, expiresAt, List.copyOf(lines));
     idempotency.complete(tenantId, SCOPE_RESERVE, key, 201, result);
@@ -500,6 +536,14 @@ public class ReservationEngine {
             .filter(ReservationRow::active)
             .filter(row -> owner == null || row.ownedBy(owner))
             .toList();
+    if (groupId != null && settle == Settle.RELEASE && !kept.isEmpty()) {
+      if (kept.stream().anyMatch(row -> row.ownerType() == OwnerType.ORDER)) {
+        log.info("release skipped: reservation {} is held for an order", groupId);
+        ReservationChange none = new ReservationChange(List.of());
+        idempotency.complete(tenantId, scope, key, 204, none);
+        return Outcome.success(none);
+      }
+    }
     if (kept.isEmpty()) {
       // Step 4: Release is idempotent by state (4.3 DELETE -> 204). Ship/unpack need ACTIVE rows.
       if (settle == Settle.RELEASE) {

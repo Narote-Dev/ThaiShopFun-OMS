@@ -17,19 +17,19 @@ import org.springframework.transaction.support.TransactionTemplate;
  * (T07 owns the real catalog services). Opening stock always gets an {@code OPENING_BALANCE} ledger
  * row, so the ledger-sum invariant holds from the start.
  */
-final class StockFixture {
+public final class StockFixture {
 
-  record Shop(UUID tenant, UUID product, UUID warehouse) {}
+  public record Shop(UUID tenant, UUID product, UUID warehouse) {}
 
   private final JdbcTemplate jdbc;
   private final TransactionTemplate tx;
 
-  StockFixture(JdbcTemplate jdbc, PlatformTransactionManager transactions) {
+  public StockFixture(JdbcTemplate jdbc, PlatformTransactionManager transactions) {
     this.jdbc = jdbc;
     this.tx = new TransactionTemplate(transactions);
   }
 
-  <T> T inTenant(UUID tenantId, Supplier<T> work) {
+  public <T> T inTenant(UUID tenantId, Supplier<T> work) {
     TenantContext.set(tenantId, null);
     try {
       return tx.execute(status -> work.get());
@@ -48,7 +48,7 @@ final class StockFixture {
   }
 
   /** A tenant with one product and a default warehouse. */
-  Shop shop(String entitlementStatus) {
+  public Shop shop(String entitlementStatus) {
     return shop(entitlementStatus, true);
   }
 
@@ -96,7 +96,7 @@ final class StockFixture {
   }
 
   /** A plain SKU with an inventory row in the shop's warehouse and opening stock. */
-  UUID sku(Shop shop, int onHand) {
+  public UUID sku(Shop shop, int onHand) {
     UUID sku = skuWithoutStock(shop);
     stock(shop, sku, shop.warehouse(), onHand);
     return sku;
@@ -175,6 +175,54 @@ final class StockFixture {
         });
   }
 
+  public String tsfShopId(Shop shop) {
+    return inTenant(
+        shop.tenant(),
+        () ->
+            jdbc.queryForObject(
+                "SELECT tsf_shop_id FROM tenant WHERE id = ?", String.class, shop.tenant()));
+  }
+
+  void setTsfShopId(Shop shop, String tsfShopId) {
+    inTenant(
+        shop.tenant(),
+        () ->
+            jdbc.update(
+                "UPDATE tenant SET tsf_shop_id = ? WHERE id = ?", tsfShopId, shop.tenant()));
+  }
+
+  public UUID channelAccount(Shop shop, String mode, String status) {
+    UUID account = UuidV7.generate();
+    inTenant(
+        shop.tenant(),
+        () ->
+            jdbc.update(
+                "INSERT INTO channel_account (id, tenant_id, channel, external_shop_id, status, mode) "
+                    + "VALUES (?, ?, 'TSF', ?, ?, ?)",
+                account,
+                shop.tenant(),
+                "ext-" + account,
+                status,
+                mode));
+    return account;
+  }
+
+  public void channelListing(
+      Shop shop, UUID channelAccountId, String externalSkuId, UUID skuId, boolean stockControl) {
+    inTenant(
+        shop.tenant(),
+        () ->
+            jdbc.update(
+                "INSERT INTO channel_listing (id, tenant_id, channel_account_id, sku_id, "
+                    + "external_sku_id, stock_control) VALUES (?, ?, ?, ?, ?, ?)",
+                UuidV7.generate(),
+                shop.tenant(),
+                channelAccountId,
+                skuId,
+                externalSkuId,
+                stockControl));
+  }
+
   UUID listing(Shop shop, UUID sku, int safetyBuffer) {
     UUID account = UuidV7.generate();
     UUID listing = UuidV7.generate();
@@ -200,7 +248,7 @@ final class StockFixture {
     return listing;
   }
 
-  int reserved(Shop shop, UUID sku) {
+  public int reserved(Shop shop, UUID sku) {
     return inventoryValue(shop, sku, "reserved");
   }
 

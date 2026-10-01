@@ -500,5 +500,50 @@ class MockTsfAcceptanceTest {
     throw new IllegalStateException("missing " + name);
   }
 
+  @Test
+  void checkoutControlForwardsToOmsWithValidSchema() throws Exception {
+    String shopId = "shop-checkout-" + UUID.randomUUID();
+    ObjectNode membership = membership(UUID.randomUUID().toString(), shopId, 1);
+    HttpResponse<String> provision =
+        HTTP.send(
+            HttpRequest.newBuilder(mockControl("/control/events/send"))
+                .header("Content-Type", "application/json")
+                .POST(
+                    HttpRequest.BodyPublishers.ofString(
+                        JSON.createObjectNode().set("event", membership).toString()))
+                .build(),
+            HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+    assertThat(provision.statusCode()).isEqualTo(200);
+    String request =
+        "{\"checkout_id\":\"chk_accept\",\"tsf_shop_id\":\""
+            + shopId
+            + "\",\"items\":[{\"listing_sku_id\":\"L-1\",\"qty\":1}]}";
+    HttpResponse<String> reserve =
+        HTTP.send(
+            HttpRequest.newBuilder(mockControl("/control/checkout/reservations"))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(request))
+                .build(),
+            HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+    assertThat(reserve.statusCode()).isEqualTo(200);
+    JsonNode reserveBody = JSON.readTree(reserve.body());
+    assertThat(reserveBody.path("response_schema_valid").asBoolean()).isTrue();
+    assertThat(reserveBody.path("oms_status").asInt()).isEqualTo(201);
+    String reservationId =
+        JSON.readTree(reserveBody.path("oms_body").asString()).path("reservation_id").asString();
+    HttpResponse<String> release =
+        HTTP.send(
+            HttpRequest.newBuilder(mockControl("/control/checkout/reservations/" + reservationId))
+                .DELETE()
+                .build(),
+            HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+    assertThat(release.statusCode()).isEqualTo(200);
+    assertThat(JSON.readTree(release.body()).path("response_schema_valid").asBoolean()).isTrue();
+  }
+
+  private URI mockControl(String path) {
+    return URI.create("http://127.0.0.1:" + mockPort() + path);
+  }
+
   private record HttpResult(int status, String body) {}
 }

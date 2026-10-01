@@ -238,6 +238,22 @@ class ReservationEngineTest extends StockTestBase {
   }
 
   @Test
+  void expiredCheckoutHoldIsInlinedBeforeReserve() {
+    Shop shop = fixture.shop("ACTIVE");
+    UUID sku = fixture.sku(shop, 10);
+    StockOwner owner = checkout();
+    clock.advance(Duration.ZERO);
+    as(shop, () -> engine.reserve(owner, List.of(ReserveItem.of(sku, 10)), key()));
+    clock.advance(Duration.ofMinutes(20));
+    var result =
+        as(shop, () -> engine.reserve(owner, List.of(ReserveItem.of(sku, 5)), key() + "-new"));
+    assertThat(result.reserved()).isTrue();
+    assertThat(fixture.reservations(shop, "EXPIRED")).isEqualTo(1);
+    assertThat(fixture.reservations(shop, "ACTIVE")).isEqualTo(1);
+    fixture.assertInvariants(shop);
+  }
+
+  @Test
   void ownerWithActiveRowsCannotReserveAgainWithAnotherKey() {
     Shop shop = fixture.shop("ACTIVE");
     UUID a = fixture.sku(shop, 10);

@@ -23,6 +23,7 @@ Versions are taken in merge order as the next free number. One migration per PR.
 | V6 | T08 expired-reservation tenant claim function |
 | V7 | T10 order-side schema |
 | V8 | T08A commit-consistent `inventory_ledger.ledger_seq` |
+| V9 | T12A reservation-group tenant lookup |
 
 ## สรุปจำนวน
 | Phase | Cursor | Codex | รวม |
@@ -101,9 +102,9 @@ flowchart LR
 - repo `oms`: `backend/` (Spring Boot 4.1, Java 17, Maven wrapper), `frontend/` (Vite + React + TS), `docker-compose.yml` (Postgres 16+), GitHub Actions, deploy staging (Railway) อัตโนมัติจาก `main`
 - AC: `./mvnw verify` + `npm ci && npm run build && npm test` ผ่านใน CI · `/actuator/health` = UP บน staging · README รัน local ใน 3 คำสั่ง · Spotless/ESLint บังคับ
 
-**T01C · Codex · deps: —** Contracts repo
-- repo `tsf-oms-contracts`: OpenAPI 3.1 (OMS internal + TSF internal), AsyncAPI 3 + JSON Schema ทุก event ใน 04, examples, CI (Spectral lint, validate examples, `oasdiff` breaking check), publish เป็น tag + package
-- AC: ตัวอย่างทุกตัวใน 04-api-contract validate ผ่าน · PR ที่ลบ field required → CI fail ว่า breaking · OMS CI ดึง spec ด้วย tag ได้
+**T01C · Codex · deps: —** Contracts (in-repo)
+- in-repo `contracts/`: OpenAPI 3.1 (OMS internal + TSF internal), AsyncAPI 3 + JSON Schema ทุก event ใน 04, examples, CI (Spectral lint, validate examples, `oasdiff` breaking check); อาจย้ายไป `tsf-oms-contracts` ภายหลังแบบเดิม
+- AC: ตัวอย่างทุกตัวใน 04-api-contract validate ผ่าน · PR ที่ลบ field required → CI fail ว่า breaking · OMS CI ใช้ spec ใน repo ได้
 
 **T02 · Codex · deps: T01** Flyway V1 + RLS + roles
 - `tenant`, `app_user`, `tenant_membership`, `audit_log`, `idempotency_key`, `inbox_event`, `outbox_event`; roles `oms_migrator / oms_app (NOBYPASSRLS) / oms_maint`; ENABLE + **FORCE RLS**; functions `SECURITY DEFINER`: `list_active_tenant_ids`, `resolve_tenant`, `claim_inbox_batch`, `claim_outbox_batch`
@@ -156,7 +157,7 @@ flowchart LR
 **T08 · Cursor · deps: T06** Reservation engine
 - `reserve(owner, items)` all-or-nothing, `transferOwner(CHECKOUT→ORDER)`, `release`, `consume`, `unpack`; แตก bundle + รวมจำนวนต่อ SKU + **lock ตาม SKU id เรียงลำดับ**; expiry job 1 นาที; คำนวณ `physical_available`, `channel_exposed`, bundle availability `min(floor(avail/qty))`; component เปลี่ยน → ส่ง internal `StockChanged` ของ bundle ที่เกี่ยวด้วย
 - AC: 50 thread จองของ 10 ชิ้น → สำเร็จ 10 พอดี · transfer ไม่เปลี่ยน `reserved` · หมดอายุคืนภายใน 2 นาที + ledger `RELEASE` · bundle ขาดลูก 1 ตัว = ไม่จองทั้งชุด · component เปลี่ยนแล้วมี `StockChanged` ของทุก bundle ที่ใช้มัน
-- Lock order (every engine write, `ReservationEngine`): `idempotency_key` row (insert, first statement) → at most one owner advisory lock `pg_advisory_xact_lock(hashtextextended('stock.owner' ‖ tenant ‖ owner_type ‖ owner_ref, 8))` (reserve, transfer target, owner-targeted release/consume/unpack) → `inventory` rows `ORDER BY id FOR UPDATE` → `stock_reservation` rows `ORDER BY id FOR UPDATE`, status re-checked under the lock. A caller that joins the engine inside its own transaction must take no stock locks before it and retry its whole transaction on 40P01/40001. Stock document post/void (T08A, `StockMovements`) own their transaction and lock `idempotency_key` row (`stock.document.post` / `stock.document.void`, key = document id) → `stock_document` row `FOR UPDATE` (then its lines) → `inventory` rows `ORDER BY id FOR UPDATE` → no reservation rows; missing `inventory` rows are created first in a separate short transaction. No other engine write locks `stock_document`, and line writers hold only the document `FOR SHARE` without inventory locks, so no cycle is possible
+- Lock order (every engine write, `ReservationEngine`): `idempotency_key` row (insert, first statement) → at most one owner advisory lock `pg_advisory_xact_lock(hashtextextended('stock.owner' ‖ tenant ‖ owner_type ‖ owner_ref, 8))` (reserve, transfer target, owner-targeted release/consume/unpack) → `inventory` rows `ORDER BY id FOR UPDATE` (on reserve, the union of rows needed for this request plus any stale ACTIVE CHECKOUT rows being inlined to EXPIRED) → `stock_reservation` rows `ORDER BY id FOR UPDATE`, status re-checked under the lock. A caller that joins the engine inside its own transaction must take no stock locks before it and retry its whole transaction on 40P01/40001. Stock document post/void (T08A, `StockMovements`) own their transaction and lock `idempotency_key` row (`stock.document.post` / `stock.document.void`, key = document id) → `stock_document` row `FOR UPDATE` (then its lines) → `inventory` rows `ORDER BY id FOR UPDATE` → no reservation rows; missing `inventory` rows are created first in a separate short transaction. No other engine write locks `stock_document`, and line writers hold only the document `FOR SHARE` without inventory locks, so no cycle is possible
 
 **T08A · Cursor · deps: T08, T07** Stock operations + history UI
 - เอกสาร Opening balance, Receive, Adjustment (บังคับ reason), Count (จำ `system_qty_at_start`), Write-off; DRAFT → POSTED (ห้ามแก้หลัง post, ยกเลิกด้วย VOID + เอกสารกลับรายการ); return restock hook; หน้า stock history ต่อ SKU (กรอง reason/วันที่, ลิงก์ไปเอกสาร/ออเดอร์)
