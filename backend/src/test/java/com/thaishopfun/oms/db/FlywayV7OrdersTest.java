@@ -215,7 +215,7 @@ class FlywayV7OrdersTest {
           .migrate();
       try (Connection upgrade =
           DriverManager.getConnection(url, postgres.getUsername(), postgres.getPassword())) {
-        assertThat(versions(upgrade)).containsExactly("1", "2", "3", "4", "6", "7", "8", "9");
+        assertThat(versions(upgrade)).containsExactly("1", "2", "3", "4", "6", "7", "8", "9", "10");
         for (String table :
             List.of(
                 "tenant",
