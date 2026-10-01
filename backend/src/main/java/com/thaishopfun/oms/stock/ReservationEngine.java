@@ -101,8 +101,8 @@ public class ReservationEngine {
   }
 
   /**
-   * CHECKOUT→ORDER hand-off in one engine write: inline-expire stale checkout rows, transfer
-   * ACTIVE CHECKOUT rows to the ORDER owner (setting {@code expires_at}), trim surplus, then
+   * CHECKOUT→ORDER hand-off in one engine write: inline-expire stale checkout rows, transfer ACTIVE
+   * CHECKOUT rows to the ORDER owner (setting {@code expires_at}), trim surplus, then
    * all-or-nothing reserve any remaining component need. On {@link AdoptResult.Status#SHORT}, rows
    * already transferred stay under the ORDER owner and nothing new is reserved.
    *
@@ -139,7 +139,9 @@ public class ReservationEngine {
                 + "|"
                 + canonicalReserve(orderOwner, null, sorted));
     Outcome<AdoptResult> outcome =
-        transactions.write(SCOPE_ADOPT, () -> doAdoptForOrder(checkoutGroupId, orderOwner, sorted, expiresAt, key, hash));
+        transactions.write(
+            SCOPE_ADOPT,
+            () -> doAdoptForOrder(checkoutGroupId, orderOwner, sorted, expiresAt, key, hash));
     return outcome.unwrap();
   }
 
@@ -159,7 +161,9 @@ public class ReservationEngine {
         Comparator.comparing((ReserveItem item) -> item.skuId().toString())
             .thenComparing(item -> String.valueOf(item.warehouseId()))
             .thenComparingInt(ReserveItem::qty));
-    String hash = StockIdempotency.sha256("ensure|" + ownerKey(owner) + "|" + canonicalReserve(owner, null, sorted));
+    String hash =
+        StockIdempotency.sha256(
+            "ensure|" + ownerKey(owner) + "|" + canonicalReserve(owner, null, sorted));
     Outcome<EnsureHoldResult> outcome =
         transactions.write(
             SCOPE_ENSURE_ORDER_HOLD, () -> doEnsureOrderHold(owner, sorted, key, hash));
@@ -785,17 +789,18 @@ public class ReservationEngine {
         checkout = List.of();
       }
       if (!checkout.isEmpty()) {
-        int moved =
-            repository.transferOwnerWithExpiry(ids(checkout), orderOwner, expiresAt);
+        int moved = repository.transferOwnerWithExpiry(ids(checkout), orderOwner, expiresAt);
         if (moved != checkout.size()) {
-          throw new StockConflictException("adopt transfer moved " + moved + " of " + checkout.size());
+          throw new StockConflictException(
+              "adopt transfer moved " + moved + " of " + checkout.size());
         }
         transferredQty = checkout.stream().mapToInt(ReservationRow::qty).sum();
       }
     }
 
     List<ReservationRow> owned = repository.activeByOwner(orderOwner);
-    owned = repository.lockReservations(ids(owned)).stream().filter(ReservationRow::active).toList();
+    owned =
+        repository.lockReservations(ids(owned)).stream().filter(ReservationRow::active).toList();
     Map<SkuWarehouse, Integer> held = new LinkedHashMap<>();
     for (ReservationRow row : owned) {
       held.merge(row.key(), row.qty(), Integer::sum);
@@ -822,7 +827,8 @@ public class ReservationEngine {
       settle(tenantId, toRelease, inventory, Settle.RELEASE, actor());
       repository.reloadLockedInventory(inventory);
       owned = repository.activeByOwner(orderOwner);
-      owned = repository.lockReservations(ids(owned)).stream().filter(ReservationRow::active).toList();
+      owned =
+          repository.lockReservations(ids(owned)).stream().filter(ReservationRow::active).toList();
       held.clear();
       for (ReservationRow row : owned) {
         held.merge(row.key(), row.qty(), Integer::sum);
@@ -860,8 +866,7 @@ public class ReservationEngine {
       }
       if (!shortfalls.isEmpty()) {
         AdoptResult result =
-            AdoptResult.shortfall(
-                groupId, transferredQty, releasedQty, List.copyOf(shortfalls));
+            AdoptResult.shortfall(groupId, transferredQty, releasedQty, List.copyOf(shortfalls));
         idempotency.complete(tenantId, SCOPE_ADOPT, key, StockError.OUT_OF_STOCK.status(), result);
         return Outcome.success(result);
       }
@@ -902,8 +907,7 @@ public class ReservationEngine {
       groupId = newGroup;
     }
 
-    AdoptResult result =
-        AdoptResult.adopted(groupId, transferredQty, newlyReserved, releasedQty);
+    AdoptResult result = AdoptResult.adopted(groupId, transferredQty, newlyReserved, releasedQty);
     idempotency.complete(tenantId, SCOPE_ADOPT, key, 201, result);
     return Outcome.success(result);
   }
@@ -944,16 +948,14 @@ public class ReservationEngine {
     if (!active.isEmpty()) {
       List<ReservationRow> locked =
           repository.lockReservations(ids(active)).stream().filter(ReservationRow::active).toList();
-      List<ReservationRow> unexpired =
-          locked.stream().filter(row -> !row.expiredAt(now)).toList();
+      List<ReservationRow> unexpired = locked.stream().filter(row -> !row.expiredAt(now)).toList();
       if (!unexpired.isEmpty()) {
         repository.clearActiveExpiry(owner);
         EnsureHoldResult result = EnsureHoldResult.ok();
         idempotency.complete(tenantId, SCOPE_ENSURE_ORDER_HOLD, key, 200, result);
         return Outcome.success(result);
       }
-      List<ReservationRow> expired =
-          locked.stream().filter(row -> row.expiredAt(now)).toList();
+      List<ReservationRow> expired = locked.stream().filter(row -> row.expiredAt(now)).toList();
       if (!expired.isEmpty()) {
         settle(tenantId, expired, inventory, Settle.EXPIRE, EXPIRY_ACTOR);
         repository.reloadLockedInventory(inventory);
@@ -977,7 +979,8 @@ public class ReservationEngine {
     }
     if (!shortfalls.isEmpty()) {
       EnsureHoldResult result = EnsureHoldResult.shortfall(List.copyOf(shortfalls));
-      idempotency.complete(tenantId, SCOPE_ENSURE_ORDER_HOLD, key, StockError.OUT_OF_STOCK.status(), result);
+      idempotency.complete(
+          tenantId, SCOPE_ENSURE_ORDER_HOLD, key, StockError.OUT_OF_STOCK.status(), result);
       return Outcome.success(result);
     }
 

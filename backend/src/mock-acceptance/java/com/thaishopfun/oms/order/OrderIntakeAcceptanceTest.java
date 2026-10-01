@@ -140,8 +140,7 @@ class OrderIntakeAcceptanceTest {
     String reservationId = JSON.readTree(checkout.body()).path("reservation_id").asString();
 
     String externalOrderId = "TSF-COD-" + UUID.randomUUID();
-    ObjectNode created =
-        orderCreated(externalOrderId, shopId, reservationId, "COD", "L-cod", 2, 1);
+    ObjectNode created = orderCreated(externalOrderId, shopId, reservationId, "COD", "L-cod", 2, 1);
     ingest(created);
 
     // Step 2: Inbox intake adopts the checkout hold and moves fulfillment to READY_TO_PICK.
@@ -178,7 +177,10 @@ class OrderIntakeAcceptanceTest {
                     HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8))
                 .body());
     long statusChanged =
-        received.path("events").valueStream().filter(n -> matchesStatusChanged(n, externalOrderId))
+        received
+            .path("events")
+            .valueStream()
+            .filter(n -> matchesStatusChanged(n, externalOrderId))
             .count();
     assertThat(statusChanged).isEqualTo(1);
   }
@@ -255,7 +257,8 @@ class OrderIntakeAcceptanceTest {
     assertThat(worker.processAvailable(10)).isEqualTo(1);
     assertThat(countSalesOrders(externalOrderId)).isZero();
     assertThat(outboxCount()).isZero();
-    assertThat(text("SELECT status FROM inbox_event WHERE event_id = ?", eventId)).isEqualTo("FAILED");
+    assertThat(text("SELECT status FROM inbox_event WHERE event_id = ?", eventId))
+        .isEqualTo("FAILED");
 
     // Step 2: Retry succeeds with the hook disabled.
     IntakeTestConfig.failAfterOutbox.set(false);
@@ -350,6 +353,81 @@ class OrderIntakeAcceptanceTest {
                         Long.class)))
         .isZero();
     fixture.assertInvariants(shop);
+  }
+
+  @Test
+  void observeModeCodReachesReadyToPickWithoutReservation() throws Exception {
+    StockFixture.Shop shop = fixture.shop("ACTIVE");
+    String shopId = fixture.tsfShopId(shop);
+    UUID account = fixture.tsfChannelAccount(shop, "OBSERVE", "CONNECTED");
+    UUID sku = fixture.sku(shop, 3);
+    fixture.channelListing(shop, account, "L-obs", sku, false);
+
+    String externalOrderId = "TSF-OB-" + UUID.randomUUID();
+    ingest(
+        orderCreated(externalOrderId, shopId, UUID.randomUUID().toString(), "COD", "L-obs", 1, 1));
+
+    // Step 1: No engine rows; COD still reaches READY_TO_PICK when stock is not enforced.
+    assertThat(worker.processAvailable(10)).isEqualTo(1);
+    assertThat(
+            fixture.inTenant(
+                shop.tenant(),
+                () ->
+                    jdbc.queryForObject(
+                        "SELECT fulfillment_status FROM sales_order WHERE external_order_id = ?",
+                        String.class,
+                        externalOrderId)))
+        .isEqualTo("READY_TO_PICK");
+    assertThat(
+            fixture.inTenant(
+                shop.tenant(),
+                () -> jdbc.queryForObject("SELECT count(*) FROM stock_reservation", Long.class)))
+        .isZero();
+  }
+
+  @Test
+  void unmappedSkuHoldWinsOverStockShortageInHoldNote() throws Exception {
+    StockFixture.Shop shop = fixture.shop("ACTIVE");
+    String shopId = fixture.tsfShopId(shop);
+    UUID account = fixture.tsfChannelAccount(shop, "ACTIVE", "CONNECTED");
+    UUID sku = fixture.sku(shop, 0);
+    fixture.channelListing(shop, account, "L-mapped", sku, true);
+
+    String externalOrderId = "TSF-UM-" + UUID.randomUUID();
+    ObjectNode created =
+        orderCreated(
+            externalOrderId, shopId, UUID.randomUUID().toString(), "COD", "L-mapped", 1, 1);
+    ArrayNode lines = (ArrayNode) created.path("data").path("lines");
+    ObjectNode unmapped = JSON.createObjectNode();
+    unmapped.put("line_id", "L2");
+    unmapped.put("listing_sku_id", "L-unmapped");
+    unmapped.put("seller_sku", "X");
+    unmapped.put("name", "Unknown");
+    unmapped.put("qty", 1);
+    unmapped.put("unit_price", 10);
+    lines.add(unmapped);
+    ingest(created);
+
+    // Step 1: SKU_NOT_MAPPED is the hold; shortage detail is recorded in hold_note.
+    assertThat(worker.processAvailable(10)).isEqualTo(1);
+    assertThat(
+            fixture.inTenant(
+                shop.tenant(),
+                () ->
+                    jdbc.queryForObject(
+                        "SELECT hold_reason FROM sales_order WHERE external_order_id = ?",
+                        String.class,
+                        externalOrderId)))
+        .isEqualTo("SKU_NOT_MAPPED");
+    String note =
+        fixture.inTenant(
+            shop.tenant(),
+            () ->
+                jdbc.queryForObject(
+                    "SELECT hold_note FROM sales_order WHERE external_order_id = ?",
+                    String.class,
+                    externalOrderId));
+    assertThat(note).isNotBlank();
   }
 
   private HttpResponse<String> checkoutPost(

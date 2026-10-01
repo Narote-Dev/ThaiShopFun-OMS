@@ -786,14 +786,7 @@ class DeliveryChaosTest {
 
   private InboxWorker freshInboxWorker() {
     return new InboxWorker(
-        inboxProperties,
-        registry,
-        policy,
-        reconciliation,
-        jdbc,
-        transactions,
-        jsonMapper,
-        meters);
+        inboxProperties, registry, policy, reconciliation, jdbc, transactions, jsonMapper, meters);
   }
 
   private static final String INBOUND_ID_PATTERN = "chaos-in-" + SEED + "-%";

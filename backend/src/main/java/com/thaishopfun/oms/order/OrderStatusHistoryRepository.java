@@ -16,7 +16,12 @@ public class OrderStatusHistoryRepository {
   }
 
   public void append(
-      UUID orderId, String dimension, String fromValue, String toValue, String reason, String actor) {
+      UUID orderId,
+      String dimension,
+      String fromValue,
+      String toValue,
+      String reason,
+      String actor) {
     UUID tenantId = TenantContext.requireTenantId();
     jdbc.update(
         """

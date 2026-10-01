@@ -11,9 +11,9 @@ import org.springframework.stereotype.Service;
  * Single entry point for the three order status dimensions plus {@code hold_reason}.
  *
  * <p>When {@code stockEnforced} is false (OBSERVE or DISCONNECTED channel modes), {@code
- * READY_TO_PICK} does <strong>not</strong> require an ACTIVE ORDER reservation — there is no stock
- * hand-off in those modes, so fulfillment stays {@code UNFULFILLED} until mapping and stock modes
- * allow picking.
+ * READY_TO_PICK} does <strong>not</strong> require an ACTIVE ORDER reservation. COD and paid orders
+ * can reach {@code READY_TO_PICK} on payment and hold guards alone because OMS does not control
+ * stock in those modes.
  */
 @Service
 public class OrderStateMachine {
@@ -26,16 +26,9 @@ public class OrderStateMachine {
   private static final Map<String, Set<String>> ALLOWED =
       Map.of(
           "ORDER", Set.of("ACTIVE", "CANCELLED", "COMPLETED"),
-          "PAYMENT",
-              Set.of("PENDING", "PAID", "COD_PENDING", "PARTIALLY_REFUNDED", "REFUNDED"),
+          "PAYMENT", Set.of("PENDING", "PAID", "COD_PENDING", "PARTIALLY_REFUNDED", "REFUNDED"),
           "FULFILLMENT",
-              Set.of(
-                  "UNFULFILLED",
-                  "READY_TO_PICK",
-                  "PICKING",
-                  "PACKED",
-                  "SHIPPED",
-                  "DELIVERED"),
+              Set.of("UNFULFILLED", "READY_TO_PICK", "PICKING", "PACKED", "SHIPPED", "DELIVERED"),
           "HOLD",
               Set.of(
                   "NONE",
@@ -88,7 +81,8 @@ public class OrderStateMachine {
     if (!"NONE".equals(order.holdReason()) && !to.equals(order.fulfillmentStatus())) {
       throw new OrderStateException("hold blocks fulfillment changes");
     }
-    return persist(order, "FULFILLMENT", order.fulfillmentStatus(), to, reason, actor, null, null, null);
+    return persist(
+        order, "FULFILLMENT", order.fulfillmentStatus(), to, reason, actor, null, null, null);
   }
 
   public TransitionResult applyHoldReason(

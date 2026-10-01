@@ -29,9 +29,7 @@ public class ChannelAccountLookup {
             """,
             (rs, row) ->
                 new TsfAccount(
-                    rs.getObject("id", UUID.class),
-                    rs.getString("mode"),
-                    rs.getString("status")),
+                    rs.getObject("id", UUID.class), rs.getString("mode"), rs.getString("status")),
             externalShopId);
     return rows.isEmpty() ? Optional.empty() : Optional.of(rows.get(0));
   }

@@ -21,8 +21,7 @@ public record AdoptResult(
     return status == Status.ADOPTED;
   }
 
-  static AdoptResult adopted(
-      UUID groupId, int transferred, int newlyReserved, int released) {
+  static AdoptResult adopted(UUID groupId, int transferred, int newlyReserved, int released) {
     return new AdoptResult(
         Status.ADOPTED, groupId, transferred, newlyReserved, released, List.of());
   }

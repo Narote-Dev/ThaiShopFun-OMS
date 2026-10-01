@@ -94,8 +94,7 @@ class OrderStateMachineTest {
                 as(
                     shop,
                     () ->
-                        stateMachine.applyOrderStatus(
-                            order, "CANCELLED", "test", "TEST", guards)))
+                        stateMachine.applyOrderStatus(order, "CANCELLED", "test", "TEST", guards)))
         .isInstanceOf(OrderStateException.class)
         .hasMessageContaining("cannot cancel after shipped");
     assertThat(historyCount(shop, order.id())).isZero();
