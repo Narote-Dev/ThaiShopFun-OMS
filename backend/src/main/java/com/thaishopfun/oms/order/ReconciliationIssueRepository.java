@@ -2,6 +2,8 @@ package com.thaishopfun.oms.order;
 
 import com.thaishopfun.oms.auth.UuidV7;
 import com.thaishopfun.oms.tenant.TenantContext;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
 import java.util.UUID;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -59,10 +61,17 @@ public class ReconciliationIssueRepository {
    */
   public void upsertOpenWithoutOrder(UUID inboxEventId, String rule, String externalOrderId) {
     UUID tenantId = TenantContext.requireTenantId();
-    jdbc.update(
-        "SELECT pg_advisory_xact_lock(hashtext(?::text), hashtext(?::text))",
-        tenantId.toString(),
-        rule);
+    jdbc.execute(
+        (Connection connection) -> {
+          try (PreparedStatement statement =
+              connection.prepareStatement(
+                  "SELECT pg_advisory_xact_lock(hashtext(?::text), hashtext(?::text))")) {
+            statement.setString(1, tenantId.toString());
+            statement.setString(2, rule);
+            statement.execute();
+          }
+          return null;
+        });
     ObjectNode event = json.createObjectNode();
     event.put("inbox_event_id", inboxEventId.toString());
     if (externalOrderId != null && !externalOrderId.isBlank()) {
@@ -74,7 +83,6 @@ public class ReconciliationIssueRepository {
     initial.set("events", events);
     initial.put("count", 1);
     String initialJson = json.writeValueAsString(initial);
-    String newEventId = inboxEventId.toString();
 
     jdbc.update(
         """
@@ -82,77 +90,57 @@ public class ReconciliationIssueRepository {
         VALUES (?, ?, ?, ?, NULL, ?::jsonb, 'OPEN')
         ON CONFLICT (tenant_id, rule, order_id) WHERE (status <> 'RESOLVED')
         DO UPDATE SET
-          details = CASE
-            WHEN EXISTS (
-              SELECT 1
-              FROM jsonb_array_elements(
-                COALESCE(reconciliation_issue.details->'events', '[]'::jsonb)
-              ) AS existing(value)
-              WHERE existing.value->>'inbox_event_id' = ?
-            ) THEN reconciliation_issue.details
-            ELSE jsonb_set(
-              jsonb_set(
-                reconciliation_issue.details,
-                '{events}',
-                (
-                  SELECT COALESCE(jsonb_agg(value ORDER BY min_ord), '[]'::jsonb)
+          details = jsonb_set(
+            jsonb_set(
+              reconciliation_issue.details,
+              '{events}',
+              (
+                SELECT COALESCE(jsonb_agg(value ORDER BY min_ord), '[]'::jsonb)
+                FROM (
+                  SELECT value, MIN(ord) AS min_ord
                   FROM (
-                    SELECT value, MIN(ord) AS min_ord
-                    FROM (
-                      SELECT value, ord
-                      FROM jsonb_array_elements(
-                        COALESCE(reconciliation_issue.details->'events', '[]'::jsonb)
-                        || COALESCE(EXCLUDED.details->'events', '[]'::jsonb)
-                      ) WITH ORDINALITY AS t(value, ord)
-                    ) merged
-                    GROUP BY value->>'inbox_event_id'
-                  ) deduped
-                ),
-                true
-              ),
-              '{count}',
-              to_jsonb(
-                LEAST(
-                  ?,
-                  jsonb_array_length(
-                    (
-                      SELECT COALESCE(jsonb_agg(value ORDER BY min_ord), '[]'::jsonb)
-                      FROM (
-                        SELECT value, MIN(ord) AS min_ord
-                        FROM (
-                          SELECT value, ord
-                          FROM jsonb_array_elements(
-                            COALESCE(reconciliation_issue.details->'events', '[]'::jsonb)
-                            || COALESCE(EXCLUDED.details->'events', '[]'::jsonb)
-                          ) WITH ORDINALITY AS t(value, ord)
-                        ) merged
-                        GROUP BY value->>'inbox_event_id'
-                      ) deduped
-                    )
-                  )
-                )
+                    SELECT value, ord
+                    FROM jsonb_array_elements(
+                      COALESCE(reconciliation_issue.details->'events', '[]'::jsonb)
+                      || COALESCE(EXCLUDED.details->'events', '[]'::jsonb)
+                    ) WITH ORDINALITY AS t(value, ord)
+                  ) merged
+                  GROUP BY value->>'inbox_event_id'
+                ) deduped
               ),
               true
-            )
-          END,
-          updated_at = CASE
-            WHEN EXISTS (
-              SELECT 1
-              FROM jsonb_array_elements(
-                COALESCE(reconciliation_issue.details->'events', '[]'::jsonb)
-              ) AS existing(value)
-              WHERE existing.value->>'inbox_event_id' = ?
-            ) THEN reconciliation_issue.updated_at
-            ELSE now()
-          END
+            ),
+            '{count}',
+            to_jsonb(
+              LEAST(
+                ?,
+                jsonb_array_length(
+                  (
+                    SELECT COALESCE(jsonb_agg(value ORDER BY min_ord), '[]'::jsonb)
+                    FROM (
+                      SELECT value, MIN(ord) AS min_ord
+                      FROM (
+                        SELECT value, ord
+                        FROM jsonb_array_elements(
+                          COALESCE(reconciliation_issue.details->'events', '[]'::jsonb)
+                          || COALESCE(EXCLUDED.details->'events', '[]'::jsonb)
+                        ) WITH ORDINALITY AS t(value, ord)
+                      ) merged
+                      GROUP BY value->>'inbox_event_id'
+                    ) deduped
+                  )
+                )
+              )
+            ),
+            true
+          ),
+          updated_at = now()
         """,
         UuidV7.generate(),
         tenantId,
         inboxEventId,
         rule,
         initialJson,
-        newEventId,
-        MAX_EVENTS,
-        newEventId);
+        MAX_EVENTS);
   }
 }
