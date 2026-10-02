@@ -37,6 +37,7 @@ import java.util.Arrays;
 import java.util.HexFormat;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -73,6 +74,7 @@ import tools.jackson.databind.node.ObjectNode;
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
     properties = {"spring.main.allow-bean-definition-overriding=true"})
 @Import(OrderIntakeT12ScenariosAcceptanceTest.IntakeTestConfig.class)
+@Timeout(value = 5, unit = TimeUnit.MINUTES)
 class OrderIntakeT12ScenariosAcceptanceTest {
 
   private static final String ISSUER = OrderIntakeMockRuntime.issuer();
