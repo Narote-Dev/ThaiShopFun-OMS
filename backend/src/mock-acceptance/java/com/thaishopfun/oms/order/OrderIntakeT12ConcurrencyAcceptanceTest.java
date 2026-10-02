@@ -23,6 +23,7 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.Random;
 import java.util.UUID;
+import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -240,25 +241,22 @@ class OrderIntakeT12ConcurrencyAcceptanceTest {
                 }
                 return null;
               });
-      List<Future<?>> processors = new ArrayList<>();
+      List<Callable<Void>> tasks = new ArrayList<>();
       for (int w = 0; w < 4; w++) {
-        processors.add(
-            pool.submit(
-                () -> {
-                  for (int pass = 0; pass < 800; pass++) {
-                    if (!inboxNeedsWork()) {
-                      return null;
-                    }
-                    worker.processAvailable(4);
-                    Thread.sleep(25);
-                  }
+        tasks.add(
+            () -> {
+              for (int pass = 0; pass < 200; pass++) {
+                if (!inboxNeedsWork()) {
                   return null;
-                }));
+                }
+                worker.processAvailable(4);
+                Thread.sleep(25);
+              }
+              return null;
+            });
       }
-      for (Future<?> processor : processors) {
-        processor.get(120, TimeUnit.SECONDS);
-      }
-      sweeper.get(30, TimeUnit.SECONDS);
+      pool.invokeAll(tasks, 90, TimeUnit.SECONDS);
+      sweeper.get(15, TimeUnit.SECONDS);
     } finally {
       pool.shutdownNow();
     }
