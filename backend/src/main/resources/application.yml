@@ -110,6 +110,7 @@ oms:
   channel:
     tsf:
       max-retry-after: 60s
+      call-time-budget: 10s
       http-timeout: 10s
       rate-limit-per-second: 10
       rate-limit-wait: 10s

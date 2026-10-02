@@ -34,6 +34,7 @@ public class TsfHttpTransport {
   private final JsonMapper json;
   private final Clock clock;
   private final ChannelProperties channelProperties;
+  private final HttpClient httpClient;
 
   public TsfHttpTransport(
       TsfProperties properties,
@@ -41,11 +42,29 @@ public class TsfHttpTransport {
       JsonMapper json,
       Clock clock,
       ChannelProperties channelProperties) {
+    this(properties, tokens, json, clock, channelProperties, defaultHttpClient());
+  }
+
+  TsfHttpTransport(
+      TsfProperties properties,
+      TsfTokenProvider tokens,
+      JsonMapper json,
+      Clock clock,
+      ChannelProperties channelProperties,
+      HttpClient httpClient) {
     this.properties = properties;
     this.tokens = tokens;
     this.json = json;
     this.clock = clock;
     this.channelProperties = channelProperties;
+    this.httpClient = httpClient;
+  }
+
+  private static HttpClient defaultHttpClient() {
+    return HttpClient.newBuilder()
+        .connectTimeout(Duration.ofSeconds(10))
+        .followRedirects(HttpClient.Redirect.NEVER)
+        .build();
   }
 
   public HttpResult get(String path, Instant deadline) {
@@ -69,13 +88,14 @@ public class TsfHttpTransport {
       String body,
       Map<String, String> extraHeaders,
       boolean retriedAuth) {
+    String accessToken = tokens.accessToken(deadline);
     Duration httpTimeout =
         ChannelCallBudget.transportTimeout(
             clock, channelProperties.getTsf().getHttpTimeout(), deadline);
     HttpRequest.Builder builder =
         HttpRequest.newBuilder(uri)
             .timeout(httpTimeout)
-            .header("Authorization", "Bearer " + tokens.accessToken(deadline));
+            .header("Authorization", "Bearer " + accessToken);
     for (Map.Entry<String, String> header : extraHeaders.entrySet()) {
       builder.header(header.getKey(), header.getValue());
     }
@@ -88,7 +108,7 @@ public class TsfHttpTransport {
     }
     try {
       HttpResponse<byte[]> response =
-          httpClient().send(builder.build(), HttpResponse.BodyHandlers.ofByteArray());
+          httpClient.send(builder.build(), HttpResponse.BodyHandlers.ofByteArray());
       if (response.statusCode() == 401 && !retriedAuth) {
         tokens.invalidateAndRefresh(deadline);
         return sendOnce(method, uri, deadline, body, extraHeaders, true);
@@ -180,13 +200,6 @@ public class TsfHttpTransport {
         return null;
       }
     }
-  }
-
-  private static HttpClient httpClient() {
-    return HttpClient.newBuilder()
-        .connectTimeout(Duration.ofSeconds(10))
-        .followRedirects(HttpClient.Redirect.NEVER)
-        .build();
   }
 
   private String normalizeBase() {

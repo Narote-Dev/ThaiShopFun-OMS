@@ -580,6 +580,40 @@ class ChannelResilienceTest {
   }
 
   @Test
+  void tokenThenHttpDelayRespectOneSecondCallBudget() throws Exception {
+    long delayMs = 800;
+    HttpServer server = delayedTokenAndOrderServer(delayMs, delayMs);
+    servers.add(server);
+    ChannelProperties properties = properties();
+    properties.getTsf().setCallTimeBudget(Duration.ofSeconds(1));
+    properties.getTsf().setHttpTimeout(Duration.ofSeconds(10));
+    properties.getTsf().setRetryMaxAttempts(1);
+    TsfChannelAdapter adapter =
+        tsfAdapter(server.getAddress().getPort(), properties, new RecordingSleeper());
+    Instant start = Instant.now();
+    assertThatThrownBy(() -> adapter.getOrder(accountRef(), "TSF-DELAY"))
+        .isInstanceOf(ChannelUnavailableException.class);
+    assertThat(Duration.between(start, Instant.now())).isLessThanOrEqualTo(Duration.ofMillis(1300));
+  }
+
+  @Test
+  void alwaysSlowStubWithLongHttpTimeoutFinishesWithinOneSecondBudget() throws Exception {
+    AtomicInteger hits = new AtomicInteger();
+    HttpServer server = slowOrderServer(hits, 6000, true);
+    servers.add(server);
+    ChannelProperties properties = properties();
+    properties.getTsf().setCallTimeBudget(Duration.ofSeconds(1));
+    properties.getTsf().setHttpTimeout(Duration.ofSeconds(10));
+    properties.getTsf().setRetryMaxAttempts(3);
+    Instant start = Instant.now();
+    TsfChannelAdapter adapter =
+        tsfAdapter(server.getAddress().getPort(), properties, new RecordingSleeper());
+    assertThatThrownBy(() -> adapter.getOrder(accountRef(), "TSF-SLOW"))
+        .isInstanceOf(ChannelUnavailableException.class);
+    assertThat(Duration.between(start, Instant.now())).isLessThanOrEqualTo(Duration.ofMillis(1500));
+  }
+
+  @Test
   void retryAfterSleepDoesNotHoldBulkheadPermit() throws Exception {
     AtomicInteger bhHits = new AtomicInteger();
     AtomicInteger fastHits = new AtomicInteger();
@@ -692,6 +726,60 @@ class ChannelResilienceTest {
     } finally {
       pool.shutdownNow();
     }
+  }
+
+  private HttpServer delayedTokenAndOrderServer(long tokenDelayMs, long orderDelayMs)
+      throws Exception {
+    HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    server.createContext(
+        "/token",
+        exchange ->
+            respondAfterDelay(
+                exchange,
+                tokenDelayMs,
+                """
+                {"access_token":"test-token","expires_in":3600}
+                """,
+                200));
+    server.createContext(
+        "/internal/v1/orders/TSF-DELAY",
+        exchange ->
+            respondAfterDelay(
+                exchange,
+                orderDelayMs,
+                """
+                {"order_id":"TSF-DELAY","reservation_id":"rsv","payment_method":"PREPAID",\
+                "currency":"THB","lines":[],"updated_at":"2026-01-01T00:00:00Z",\
+                "aggregate_version":1}
+                """,
+                200));
+    server.start();
+    return server;
+  }
+
+  private static void respondAfterDelay(
+      com.sun.net.httpserver.HttpExchange exchange, long delayMs, String jsonBody, int status) {
+    Thread delayed =
+        new Thread(
+            () -> {
+              try {
+                Thread.sleep(delayMs);
+                byte[] body = jsonBody.getBytes(StandardCharsets.UTF_8);
+                exchange.getResponseHeaders().set("Content-Type", "application/json");
+                exchange.sendResponseHeaders(status, body.length);
+                exchange.getResponseBody().write(body);
+                exchange.close();
+              } catch (Exception ignored) {
+                try {
+                  exchange.close();
+                } catch (Exception ignoredClose) {
+                  // ignore
+                }
+              }
+            },
+            "delayed-stub");
+    delayed.setDaemon(true);
+    delayed.start();
   }
 
   private HttpServer slowOrderServer(AtomicInteger hits, long delayMs, boolean alwaysSlow)

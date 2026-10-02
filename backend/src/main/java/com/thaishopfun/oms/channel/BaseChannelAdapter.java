@@ -309,7 +309,12 @@ public abstract class BaseChannelAdapter implements ChannelAdapter {
         if (!clock.instant().isBefore(waitUntil)) {
           throw BulkheadFullException.createBulkheadFullException(bulkhead);
         }
-        sleeper.sleep(BULKHEAD_POLL_INTERVAL);
+        try {
+          sleeper.sleep(BULKHEAD_POLL_INTERVAL);
+        } catch (InterruptedException ex) {
+          Thread.currentThread().interrupt();
+          throw ex;
+        }
       }
     } finally {
       metrics.leaveBulkheadWait(channel());
@@ -318,6 +323,10 @@ public abstract class BaseChannelAdapter implements ChannelAdapter {
 
   private void awaitRateLimiter(RateLimiter rateLimiter, Instant deadline)
       throws InterruptedException {
+    Duration allowed =
+        ChannelCallBudget.minDuration(
+            rateLimiter.getRateLimiterConfig().getTimeoutDuration(),
+            ChannelCallBudget.remaining(clock, deadline));
     long waitNanos = rateLimiter.reservePermission();
     if (waitNanos < 0) {
       throw new ChannelRateLimitedException("Rate limit denied for " + channel(), null);
@@ -326,15 +335,16 @@ public abstract class BaseChannelAdapter implements ChannelAdapter {
       return;
     }
     Duration wait = Duration.ofNanos(waitNanos);
-    Duration allowed =
-        ChannelCallBudget.minDuration(
-            rateLimiter.getRateLimiterConfig().getTimeoutDuration(),
-            ChannelCallBudget.remaining(clock, deadline));
     if (wait.compareTo(allowed) > 0) {
       throw new ChannelRateLimitedException(
           "Rate limit wait exceeds budget for " + channel(), null);
     }
-    sleeper.sleep(wait);
+    try {
+      sleeper.sleep(wait);
+    } catch (InterruptedException ex) {
+      Thread.currentThread().interrupt();
+      throw ex;
+    }
   }
 
   private void sleepBeforeRetry(Instant deadline, Duration sleep, ChannelRateLimitedException rate)
