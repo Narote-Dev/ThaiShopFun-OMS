@@ -509,6 +509,17 @@ class OrderIntakeT12ScenariosAcceptanceTest {
                         externalOrderId)))
         .isEqualTo("CANCELLED");
     assertThat(fixture.reserved(shop, sku)).isZero();
+    assertThat(
+            fixture.inTenant(
+                shop.tenant(),
+                () ->
+                    jdbc.queryForObject(
+                        """
+                        SELECT count(*) FROM stock_reservation
+                        WHERE owner_type = 'CHECKOUT' AND status = 'ACTIVE'
+                        """,
+                        Long.class)))
+        .isZero();
   }
 
   @Test
