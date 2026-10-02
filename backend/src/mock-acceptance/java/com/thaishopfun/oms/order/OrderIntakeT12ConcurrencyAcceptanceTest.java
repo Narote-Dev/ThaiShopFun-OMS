@@ -23,13 +23,11 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.Random;
 import java.util.UUID;
-import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import org.junit.jupiter.api.AfterEach;
@@ -189,36 +187,32 @@ class OrderIntakeT12ConcurrencyAcceptanceTest {
 
     OrderIntakeFaultTestConfig.injectDeadlockOnce.set(true);
 
-    AtomicInteger passes = new AtomicInteger();
-    AtomicBoolean ingestDone = new AtomicBoolean(false);
+    AtomicBoolean running = new AtomicBoolean(true);
     ExecutorService pool = Executors.newFixedThreadPool(5);
     try {
       Future<?> sweeper =
           pool.submit(
               () -> {
-                while (!ingestDone.get() || inboxNeedsWork()) {
+                for (int pass = 0; pass < 240; pass++) {
+                  if (!running.get() && !inboxNeedsWork()) {
+                    return null;
+                  }
                   expiryJob.runOnce();
-                  Thread.sleep(20);
+                  Thread.sleep(25);
                 }
                 return null;
               });
-      List<Callable<Void>> workers = new ArrayList<>();
+      List<Future<?>> processors = new ArrayList<>();
       for (int w = 0; w < 4; w++) {
-        workers.add(
-            () -> {
-              while (!ingestDone.get() || inboxNeedsWork()) {
-                if (passes.incrementAndGet() > 8000) {
-                  break;
-                }
-                worker.processAvailable(4);
-                Thread.sleep(10);
-              }
-              return null;
-            });
-      }
-      List<Future<Void>> workerFutures = new ArrayList<>();
-      for (Callable<Void> task : workers) {
-        workerFutures.add(pool.submit(task));
+        processors.add(
+            pool.submit(
+                () -> {
+                  while (running.get() || inboxNeedsWork()) {
+                    worker.processAvailable(4);
+                    Thread.sleep(50);
+                  }
+                  return null;
+                }));
       }
 
       for (Op op : ops) {
@@ -259,11 +253,11 @@ class OrderIntakeT12ConcurrencyAcceptanceTest {
             }
           }
         }
+        worker.processAvailable(4);
       }
-      ingestDone.set(true);
-
-      for (Future<Void> f : workerFutures) {
-        f.get(180, TimeUnit.SECONDS);
+      running.set(false);
+      for (Future<?> processor : processors) {
+        processor.get(120, TimeUnit.SECONDS);
       }
       sweeper.get(30, TimeUnit.SECONDS);
     } finally {
