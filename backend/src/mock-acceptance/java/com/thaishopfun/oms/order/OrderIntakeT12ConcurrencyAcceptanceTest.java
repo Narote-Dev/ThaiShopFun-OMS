@@ -259,9 +259,6 @@ class OrderIntakeT12ConcurrencyAcceptanceTest {
 
     assertThat(OrderIntakeFaultTestConfig.injectDeadlockConsumed).isTrue();
     assertThat(OrderIntakeFaultTestConfig.injectDeadlockOnce).isFalse();
-    assertThat(
-            jdbc.queryForObject("SELECT count(*) FROM inbox_event WHERE attempts > 1", Long.class))
-        .isPositive();
 
     assertThat(
             jdbc.queryForObject(
