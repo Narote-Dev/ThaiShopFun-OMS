@@ -130,7 +130,7 @@ class OrderIntakeT12ConcurrencyAcceptanceTest {
       shops.add(new ShopCtx(shop, shopId, account, skuA, skuB));
     }
 
-    List<ObjectNode> pendingEvents = new ArrayList<>();
+    List<ObjectNode> followUpEvents = new ArrayList<>();
     int expectedActiveUnits = 0;
     for (int i = 0; i < 50; i++) {
       ShopCtx ctx = shops.get(i % 10);
@@ -143,7 +143,7 @@ class OrderIntakeT12ConcurrencyAcceptanceTest {
               "chk-" + i, ctx.shopId(), reverseLines ? "L-b" : "L-a", reverseLines ? "L-a" : "L-b");
       String reservationId = checkout.path("reservation_id").asString();
 
-      pendingEvents.add(
+      ingest(
           OrderIntakeScenarioSupport.orderCreatedTwoLines(
               JSON,
               externalOrderId,
@@ -156,18 +156,19 @@ class OrderIntakeT12ConcurrencyAcceptanceTest {
               1,
               1));
       if (cancel) {
-        pendingEvents.add(
+        followUpEvents.add(
             OrderIntakeScenarioSupport.orderCancelled(JSON, externalOrderId, ctx.shopId(), 2));
       } else {
-        pendingEvents.add(
+        followUpEvents.add(
             OrderIntakeScenarioSupport.orderPaid(JSON, externalOrderId, ctx.shopId(), 2));
         expectedActiveUnits += 2;
       }
     }
 
-    Collections.shuffle(pendingEvents);
+    drainInbox();
+    Collections.shuffle(followUpEvents);
     OrderIntakeFaultTestConfig.injectDeadlockOnce.set(true);
-    for (ObjectNode event : pendingEvents) {
+    for (ObjectNode event : followUpEvents) {
       ingest(event);
     }
 
@@ -210,6 +211,8 @@ class OrderIntakeT12ConcurrencyAcceptanceTest {
       pool.shutdownNow();
     }
 
+    drainInbox();
+
     assertThat(
             jdbc.queryForObject(
                 "SELECT count(*) FROM inbox_event WHERE status NOT IN ('PROCESSED')", Long.class))
@@ -245,6 +248,19 @@ class OrderIntakeT12ConcurrencyAcceptanceTest {
     }
 
     assertThat(expectedActiveUnits).isGreaterThan(0);
+  }
+
+  private void drainInbox() throws InterruptedException {
+    for (int pass = 0; pass < 200; pass++) {
+      if (worker.processAvailable(20) == 0
+          && jdbc.queryForObject(
+                  "SELECT count(*) FROM inbox_event WHERE status IN ('RECEIVED', 'FAILED')",
+                  Long.class)
+              == 0) {
+        return;
+      }
+      Thread.sleep(25);
+    }
   }
 
   private JsonNode checkoutTwoLines(

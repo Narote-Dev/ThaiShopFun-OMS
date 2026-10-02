@@ -73,7 +73,7 @@ public class ReconciliationIssueRepository {
     jdbc.update(
         """
         INSERT INTO reconciliation_issue (id, tenant_id, run_id, rule, order_id, details, status)
-        VALUES (?, ?, NULL, ?, NULL, ?::jsonb, 'OPEN')
+        VALUES (?, ?, ?, ?, NULL, ?::jsonb, 'OPEN')
         ON CONFLICT (tenant_id, rule, order_id) WHERE (status <> 'RESOLVED')
         DO UPDATE SET
           details = jsonb_set(
@@ -102,6 +102,7 @@ public class ReconciliationIssueRepository {
         """,
         UuidV7.generate(),
         tenantId,
+        inboxEventId,
         rule,
         initialJson,
         MAX_EVENTS);

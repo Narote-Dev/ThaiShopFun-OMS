@@ -1016,8 +1016,8 @@ class OrderIntakeT12ScenariosAcceptanceTest {
                         JOIN sales_order o ON o.id = h.order_id
                         WHERE o.external_order_id = ?
                           AND h.dimension = 'PAYMENT'
-                          AND h.from_status = 'PENDING'
-                          AND h.to_status = 'PAID'
+                          AND h.from_value = 'PENDING'
+                          AND h.to_value = 'PAID'
                         """,
                         Long.class,
                         externalOrderId)))

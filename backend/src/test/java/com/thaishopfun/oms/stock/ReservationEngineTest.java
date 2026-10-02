@@ -685,13 +685,21 @@ class ReservationEngineTest extends StockTestBase {
     Shop shop = fixture.shop("ACTIVE");
     UUID sku = fixture.sku(shop, 10);
     String orderRef = "ord-ensure-" + UUID.randomUUID();
-    StockOwner owner = StockOwner.order(orderRef);
-    as(
-        shop,
-        () -> engine.reserve(owner, List.of(ReserveItem.of(sku, 1)), key(), Duration.ofMinutes(5)));
+    StockOwner checkoutOwner = checkout();
+    ReserveResult checkoutHold =
+        as(
+            shop,
+            () ->
+                engine.reserve(
+                    checkoutOwner, List.of(ReserveItem.of(sku, 1)), key(), Duration.ofMinutes(5)));
+    as(shop, () -> engine.transferOwner(checkoutHold.reservationGroupId(), orderRef, key()));
     clock.advance(Duration.ofMinutes(6));
     EnsureHoldResult held =
-        as(shop, () -> engine.ensureOrderHold(owner, List.of(ReserveItem.of(sku, 3)), key()));
+        as(
+            shop,
+            () ->
+                engine.ensureOrderHold(
+                    StockOwner.order(orderRef), List.of(ReserveItem.of(sku, 3)), key()));
     assertThat(held.held()).isTrue();
     assertThat(fixture.reserved(shop, sku)).isEqualTo(3);
     fixture.assertInvariants(shop);
