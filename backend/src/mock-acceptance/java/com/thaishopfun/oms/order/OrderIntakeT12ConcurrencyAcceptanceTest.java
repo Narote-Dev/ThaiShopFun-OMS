@@ -286,6 +286,21 @@ class OrderIntakeT12ConcurrencyAcceptanceTest {
     assertThat(salesOrders).isEqualTo(50);
     assertThat(outOfStockOrders).isGreaterThan(0);
 
+    long expiredCheckouts = 0;
+    for (ShopCtx ctx : shops) {
+      expiredCheckouts +=
+          fixture.inTenant(
+              ctx.shop().tenant(),
+              () ->
+                  jdbc.queryForObject(
+                      """
+                      SELECT count(*) FROM stock_reservation
+                      WHERE owner_type = 'CHECKOUT' AND status = 'EXPIRED'
+                      """,
+                      Long.class));
+    }
+    assertThat(expiredCheckouts).isGreaterThanOrEqualTo(1);
+
     for (ShopCtx ctx : shops) {
       fixture.inTenant(
           ctx.shop().tenant(),

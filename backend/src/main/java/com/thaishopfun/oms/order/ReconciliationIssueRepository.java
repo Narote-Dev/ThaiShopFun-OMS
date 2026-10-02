@@ -58,6 +58,10 @@ public class ReconciliationIssueRepository {
    * One open shop-level issue per (tenant, rule) when {@code order_id} is unknown. Appends inbox
    * events into {@code details.events} (cap {@value MAX_EVENTS}) on conflict, deduped by {@code
    * inbox_event_id}.
+   *
+   * <p>When more than {@value MAX_EVENTS} distinct events exist, {@code details.events} keeps the
+   * {@value MAX_EVENTS} most recently appended (highest merge ordinal); {@code details.count}
+   * remains the full distinct total.
    */
   public void upsertOpenWithoutOrder(UUID inboxEventId, String rule, String externalOrderId) {
     UUID tenantId = TenantContext.requireTenantId();
@@ -90,54 +94,39 @@ public class ReconciliationIssueRepository {
         VALUES (?, ?, ?, ?, NULL, ?::jsonb, 'OPEN')
         ON CONFLICT (tenant_id, rule, order_id) WHERE (status <> 'RESOLVED')
         DO UPDATE SET
-          details = jsonb_set(
-            jsonb_set(
-              reconciliation_issue.details,
-              '{events}',
+          details = (
+            WITH merged AS (
+              SELECT value, ord
+              FROM jsonb_array_elements(
+                COALESCE(reconciliation_issue.details->'events', '[]'::jsonb)
+                || COALESCE(EXCLUDED.details->'events', '[]'::jsonb)
+              ) WITH ORDINALITY AS t(value, ord)
+            ),
+            deduped AS (
+              SELECT (array_agg(m.value ORDER BY m.ord))[1] AS value, MIN(m.ord) AS min_ord
+              FROM merged m
+              GROUP BY m.value->>'inbox_event_id'
+            ),
+            capped AS (
+              SELECT d.value, d.min_ord
+              FROM deduped d
+              ORDER BY d.min_ord DESC
+              LIMIT """
+            + MAX_EVENTS
+            + """
+            ),
+            distinct_count AS (
+              SELECT count(*)::int AS cnt FROM deduped
+            )
+            SELECT jsonb_build_object(
+              'events',
               COALESCE(
-                (
-                  SELECT jsonb_agg(picked.value ORDER BY picked.min_ord)
-                  FROM (
-                    SELECT (array_agg(u.value ORDER BY u.ord))[1] AS value, MIN(u.ord) AS min_ord
-                    FROM (
-                      SELECT value, ord
-                      FROM jsonb_array_elements(
-                        COALESCE(reconciliation_issue.details->'events', '[]'::jsonb)
-                        || COALESCE(EXCLUDED.details->'events', '[]'::jsonb)
-                      ) WITH ORDINALITY AS t(value, ord)
-                    ) u
-                    GROUP BY u.value->>'inbox_event_id'
-                  ) picked
-                ),
+                (SELECT jsonb_agg(c.value ORDER BY c.min_ord) FROM capped c),
                 '[]'::jsonb
               ),
-              true
-            ),
-            '{count}',
-            to_jsonb(
-              COALESCE(
-                (
-                  SELECT jsonb_array_length(
-                    (
-                      SELECT jsonb_agg(picked.value ORDER BY picked.min_ord)
-                      FROM (
-                        SELECT (array_agg(u.value ORDER BY u.ord))[1] AS value, MIN(u.ord) AS min_ord
-                        FROM (
-                          SELECT value, ord
-                          FROM jsonb_array_elements(
-                            COALESCE(reconciliation_issue.details->'events', '[]'::jsonb)
-                            || COALESCE(EXCLUDED.details->'events', '[]'::jsonb)
-                          ) WITH ORDINALITY AS t(value, ord)
-                        ) u
-                        GROUP BY u.value->>'inbox_event_id'
-                      ) picked
-                    )
-                  )
-                ),
-                0
-              )
-            ),
-            true
+              'count',
+              (SELECT cnt FROM distinct_count)
+            )
           ),
           updated_at = now()
         """,

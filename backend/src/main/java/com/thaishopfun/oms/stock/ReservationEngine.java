@@ -860,22 +860,23 @@ public class ReservationEngine {
       }
     }
 
-    List<ReserveItem> deficitItems = new ArrayList<>();
+    Map<SkuWarehouse, Need> deficitNeeds = new LinkedHashMap<>();
     for (Map.Entry<SkuWarehouse, Need> entry : needs.entrySet()) {
       int have = held.getOrDefault(entry.getKey(), 0);
       int needQty = entry.getValue().qty;
       if (have >= needQty) {
         continue;
       }
-      deficitItems.add(
-          new ReserveItem(entry.getKey().skuId(), needQty - have, entry.getKey().warehouseId()));
+      Need deficit = new Need();
+      deficit.qty = needQty - have;
+      deficit.requestedBy.addAll(entry.getValue().requestedBy);
+      deficitNeeds.put(entry.getKey(), deficit);
     }
 
     int newlyReserved = 0;
     List<ReservedLine> changedForEvent = new ArrayList<>();
-    if (!deficitItems.isEmpty()) {
+    if (!deficitNeeds.isEmpty()) {
       Map<UUID, Integer> byInventory = new LinkedHashMap<>();
-      Map<SkuWarehouse, Need> deficitNeeds = explode(deficitItems, skus, defaultWarehouse);
       for (Map.Entry<SkuWarehouse, Need> entry : deficitNeeds.entrySet()) {
         byInventory.merge(inventory.get(entry.getKey()).id(), entry.getValue().qty, Integer::sum);
       }
@@ -996,11 +997,12 @@ public class ReservationEngine {
       for (ReservationRow row : live) {
         held.merge(row.key(), row.qty(), Integer::sum);
       }
-      boolean fullyCovers =
+      boolean exactCoverage =
           !live.isEmpty()
+              && held.keySet().equals(needs.keySet())
               && needs.entrySet().stream()
-                  .allMatch(e -> held.getOrDefault(e.getKey(), 0) >= e.getValue().qty);
-      if (fullyCovers && !live.isEmpty()) {
+                  .allMatch(e -> held.get(e.getKey()).intValue() == e.getValue().qty);
+      if (exactCoverage) {
         repository.clearActiveExpiry(owner);
         EnsureHoldResult result = EnsureHoldResult.ok();
         idempotency.complete(tenantId, SCOPE_ENSURE_ORDER_HOLD, key, 200, result);

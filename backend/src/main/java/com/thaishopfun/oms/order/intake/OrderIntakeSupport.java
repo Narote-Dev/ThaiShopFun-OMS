@@ -235,7 +235,7 @@ public class OrderIntakeSupport {
       if (held.held()) {
         order = orders.findById(order.id()).orElseThrow();
         if ("OUT_OF_STOCK".equals(order.holdReason())) {
-          order = applyHold(order, "NONE", "");
+          order = applyHold(order, "NONE", null);
         }
       } else {
         order = applyHold(order, "OUT_OF_STOCK", shortfallNote(held.shortfalls()));

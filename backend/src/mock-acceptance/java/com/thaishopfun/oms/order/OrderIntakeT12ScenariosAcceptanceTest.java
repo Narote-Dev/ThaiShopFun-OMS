@@ -128,6 +128,7 @@ class OrderIntakeT12ScenariosAcceptanceTest {
   @Autowired PlatformTransactionManager transactions;
   @Autowired MeterRegistry meters;
   @Autowired OrderRecipientRepository recipients;
+  @Autowired ReconciliationIssueRepository reconciliation;
 
   StockFixture fixture;
   private final ListAppender<ILoggingEvent> intakeLogs = new ListAppender<>();
@@ -947,6 +948,41 @@ class OrderIntakeT12ScenariosAcceptanceTest {
   }
 
   @Test
+  void orphanIssueCapsStoredEventsAt100ButCountIsDistinctTotal() {
+    StockFixture.Shop shop = fixture.shop("ACTIVE");
+    String rule = "ORDER_EVENT_WITHOUT_ORDER";
+    fixture.inTenant(
+        shop.tenant(),
+        () -> {
+          for (int i = 0; i < 100; i++) {
+            reconciliation.upsertOpenWithoutOrder(UuidV7.generate(), rule, "TSF-CAP-" + i);
+          }
+          UUID newest = UuidV7.generate();
+          reconciliation.upsertOpenWithoutOrder(newest, rule, "TSF-CAP-NEW");
+          JsonNode details =
+              JSON.readTree(
+                  jdbc.queryForObject(
+                      """
+                      SELECT details::text FROM reconciliation_issue
+                      WHERE rule = ? AND status = 'OPEN' AND order_id IS NULL
+                      """,
+                      String.class,
+                      rule));
+          assertThat(details.path("events").size()).isEqualTo(100);
+          assertThat(details.path("count").asInt()).isEqualTo(101);
+          boolean includesNewest = false;
+          for (JsonNode event : details.path("events")) {
+            if (newest.toString().equals(event.path("inbox_event_id").asString())) {
+              includesNewest = true;
+              break;
+            }
+          }
+          assertThat(includesNewest).isTrue();
+          return null;
+        });
+  }
+
+  @Test
   void concurrentOrphanPaidsAppendOneIssueAtomically() throws Exception {
     StockFixture.Shop shop = fixture.shop("ACTIVE");
     String shopId = fixture.tsfShopId(shop);
@@ -1295,6 +1331,70 @@ class OrderIntakeT12ScenariosAcceptanceTest {
   }
 
   @Test
+  void codBundleWithoutCheckoutFreshReservesAndReadyToPick() throws Exception {
+    StockFixture.Shop shop = fixture.shop("ACTIVE");
+    String shopId = fixture.tsfShopId(shop);
+    UUID account = fixture.tsfChannelAccount(shop, "ACTIVE", "CONNECTED");
+    UUID compA = fixture.sku(shop, 10);
+    UUID compB = fixture.sku(shop, 10);
+    UUID bundle = fixture.bundle(shop, Map.of(compA, 1, compB, 2));
+    fixture.channelListing(shop, account, "L-bnd-cod", bundle, true);
+
+    String externalOrderId = "TSF-BND-NC-" + UUID.randomUUID();
+    ingest(
+        orderCreated(
+            externalOrderId,
+            shopId,
+            UuidV7.generate().toString(),
+            "COD",
+            "L-bnd-cod",
+            1,
+            1));
+    assertThat(worker.processAvailable(10)).isEqualTo(1);
+    assertThat(fixture.reserved(shop, compA)).isEqualTo(1);
+    assertThat(fixture.reserved(shop, compB)).isEqualTo(2);
+    assertThat(
+            fixture.inTenant(
+                shop.tenant(),
+                () ->
+                    jdbc.queryForObject(
+                        "SELECT fulfillment_status FROM sales_order WHERE external_order_id = ?",
+                        String.class,
+                        externalOrderId)))
+        .isEqualTo("READY_TO_PICK");
+    assertNoActiveCheckoutReservations(shop);
+    fixture.assertInvariants(shop);
+  }
+
+  @Test
+  void bundleCheckoutPartialQtyReservesComponentDeficit() throws Exception {
+    StockFixture.Shop shop = fixture.shop("ACTIVE");
+    String shopId = fixture.tsfShopId(shop);
+    UUID account = fixture.tsfChannelAccount(shop, "ACTIVE", "CONNECTED");
+    UUID compA = fixture.sku(shop, 10);
+    UUID compB = fixture.sku(shop, 10);
+    UUID bundle = fixture.bundle(shop, Map.of(compA, 1, compB, 2));
+    fixture.channelListing(shop, account, "L-bnd-part", bundle, true);
+
+    JsonNode checkout = checkoutViaControl("chk-bnd-part", shopId, "L-bnd-part", 1);
+    String externalOrderId = "TSF-BND-P-" + UUID.randomUUID();
+    ingest(
+        orderCreated(
+            externalOrderId,
+            shopId,
+            checkout.path("reservation_id").asString(),
+            "COD",
+            "L-bnd-part",
+            2,
+            1));
+    assertThat(worker.processAvailable(10)).isEqualTo(1);
+    assertThat(fixture.reserved(shop, compA)).isEqualTo(2);
+    assertThat(fixture.reserved(shop, compB)).isEqualTo(4);
+    assertNoActiveCheckoutReservations(shop);
+    fixture.assertInvariants(shop);
+  }
+
+  @Test
   void createdShortRestockPaidClearsOutOfStockHoldAndReachesReadyToPick() throws Exception {
     StockFixture.Shop shop = fixture.shop("ACTIVE");
     String shopId = fixture.tsfShopId(shop);
@@ -1341,7 +1441,7 @@ class OrderIntakeT12ScenariosAcceptanceTest {
                         "SELECT hold_note FROM sales_order WHERE external_order_id = ?",
                         String.class,
                         externalOrderId)))
-        .isEmpty();
+        .isNull();
     fixture.assertInvariants(shop);
   }
 
@@ -1382,6 +1482,31 @@ class OrderIntakeT12ScenariosAcceptanceTest {
             1));
     assertThat(worker.processAvailable(10)).isEqualTo(1);
     assertThat(oversellMetric("SHADOW") - shadowBefore).isZero();
+  }
+
+  @Test
+  void multiLineShortfallIncrementsOversellMetricOncePerOrder() throws Exception {
+    StockFixture.Shop shop = fixture.shop("ACTIVE");
+    String shopId = fixture.tsfShopId(shop);
+    UUID account = fixture.tsfChannelAccount(shop, "ACTIVE", "CONNECTED");
+    UUID skuA = fixture.sku(shop, 1);
+    UUID skuB = fixture.sku(shop, 1);
+    fixture.channelListing(shop, account, "L-ml-a", skuA, true);
+    fixture.channelListing(shop, account, "L-ml-b", skuB, true);
+    double before = oversellMetric("ACTIVE");
+    ingest(
+        orderCreatedTwoLines(
+            "TSF-ML-OV-" + UUID.randomUUID(),
+            shopId,
+            UuidV7.generate().toString(),
+            "COD",
+            "L-ml-a",
+            "L-ml-b",
+            3,
+            3,
+            1));
+    assertThat(worker.processAvailable(10)).isEqualTo(1);
+    assertThat(oversellMetric("ACTIVE") - before).isEqualTo(1.0d);
   }
 
   @Test
