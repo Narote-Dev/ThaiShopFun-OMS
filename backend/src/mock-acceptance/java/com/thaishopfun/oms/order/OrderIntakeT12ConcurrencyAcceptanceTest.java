@@ -26,6 +26,7 @@ import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -101,6 +102,11 @@ class OrderIntakeT12ConcurrencyAcceptanceTest {
               + "idempotency_key, reconciliation_issue, shadow_diff CASCADE");
       statement.execute("SET session_replication_role = DEFAULT");
     }
+  }
+
+  @AfterAll
+  static void stopMockTsf() {
+    OrderIntakeMockRuntime.stopMock();
   }
 
   @AfterEach
