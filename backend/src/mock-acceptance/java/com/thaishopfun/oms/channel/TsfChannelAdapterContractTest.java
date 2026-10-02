@@ -129,6 +129,8 @@ class TsfChannelAdapterContractTest {
   @Test
   void mockControlFaultsRetryAfterFiveSecondsRealClock() throws Exception {
     String path = "/internal/v1/orders/TSF-240929-000124";
+    java.util.concurrent.atomic.AtomicInteger orderHits =
+        new java.util.concurrent.atomic.AtomicInteger();
     HttpResponse<String> armed =
         HTTP.send(
             HttpRequest.newBuilder(mockUri("/control/faults"))
@@ -144,6 +146,23 @@ class TsfChannelAdapterContractTest {
     assertThat(armed.statusCode()).isEqualTo(200);
     ChannelAccountRef account =
         new ChannelAccountRef(UuidV7.generate(), UuidV7.generate(), "shop_grace");
+    com.thaishopfun.oms.channel.tsf.TsfHttpTransport countingTransport =
+        new com.thaishopfun.oms.channel.tsf.TsfHttpTransport(
+            tsfProperties,
+            new com.thaishopfun.oms.channel.tsf.TsfTokenProvider(
+                tsfProperties, channelProperties, json, java.time.Clock.systemUTC()),
+            json,
+            java.time.Clock.systemUTC(),
+            channelProperties) {
+          @Override
+          public com.thaishopfun.oms.channel.tsf.TsfHttpTransport.HttpResult get(
+              String pathArg, java.time.Instant deadline) {
+            if (pathArg.startsWith("/orders/TSF-240929-000124")) {
+              orderHits.incrementAndGet();
+            }
+            return super.get(pathArg, deadline);
+          }
+        };
     TsfChannelAdapter realSleepAdapter =
         new TsfChannelAdapter(
             resilience,
@@ -151,29 +170,16 @@ class TsfChannelAdapterContractTest {
             channelMetrics,
             new SystemSleeper(),
             java.time.Clock.systemUTC(),
-            new com.thaishopfun.oms.channel.tsf.TsfHttpTransport(
-                tsfProperties,
-                new com.thaishopfun.oms.channel.tsf.TsfTokenProvider(
-                    tsfProperties, json, java.time.Clock.systemUTC()),
-                json,
-                java.time.Clock.systemUTC()),
+            countingTransport,
             json);
 
-    // Step 1: Armed 429 fault is honored once; real sleep waits at least Retry-After seconds.
     Instant start = Instant.now();
     realSleepAdapter.getOrder(account, "TSF-240929-000124");
     assertThat(Duration.between(start, Instant.now()).compareTo(Duration.ofSeconds(5)))
         .isGreaterThanOrEqualTo(0);
-    assertThat(
-            meterRegistry
-                .find("oms.channel.retries")
-                .tag("channel", "TSF")
-                .tag("reason", "retry_after")
-                .counter()
-                .count())
-        .isEqualTo(1.0);
-    // Step 2: With the fault consumed, a follow-up call succeeds on the first attempt.
+    assertThat(orderHits).hasValue(2);
     realSleepAdapter.getOrder(account, "TSF-240929-000124");
+    assertThat(orderHits).hasValue(3);
   }
 
   @Test
@@ -194,18 +200,23 @@ class TsfChannelAdapterContractTest {
 
   @Test
   void listListingsCursorPagesAtLeastTwice() {
+    int previousLimit = channelProperties.getTsf().getListingsPageLimit();
     channelProperties.getTsf().setListingsPageLimit(1);
-    ChannelAccountRef active =
-        new ChannelAccountRef(UuidV7.generate(), UuidV7.generate(), "shop_active");
-    String cursor = null;
-    int pages = 0;
-    do {
-      ListingPage page = adapter.listListings(active, cursor);
-      assertThat(page.listings()).isNotEmpty();
-      cursor = page.nextCursor();
-      pages++;
-    } while (cursor != null && !cursor.isBlank());
-    assertThat(pages).isGreaterThanOrEqualTo(2);
+    try {
+      ChannelAccountRef active =
+          new ChannelAccountRef(UuidV7.generate(), UuidV7.generate(), "shop_active");
+      String cursor = null;
+      int pages = 0;
+      do {
+        ListingPage page = adapter.listListings(active, cursor);
+        assertThat(page.listings()).isNotEmpty();
+        cursor = page.nextCursor();
+        pages++;
+      } while (cursor != null && !cursor.isBlank());
+      assertThat(pages).isGreaterThanOrEqualTo(2);
+    } finally {
+      channelProperties.getTsf().setListingsPageLimit(previousLimit);
+    }
   }
 
   @Test

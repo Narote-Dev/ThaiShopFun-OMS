@@ -27,7 +27,13 @@ public class ChannelProperties {
   public static class TsfChannelSettings {
 
     private Duration maxRetryAfter = Duration.ofSeconds(60);
+
+    /** Total wall-time budget for one adapter invocation (waits, HTTP, token, backoff). */
+    private Duration callTimeBudget = Duration.ofSeconds(10);
+
+    /** Per HTTP/token request timeout cap (also bounded by remaining call budget). */
     private Duration httpTimeout = Duration.ofSeconds(10);
+
     private int rateLimitPerSecond = 10;
     private Duration rateLimitWait = Duration.ofSeconds(10);
     private int retryMaxAttempts = 4;
@@ -48,6 +54,14 @@ public class ChannelProperties {
 
     public void setMaxRetryAfter(Duration maxRetryAfter) {
       this.maxRetryAfter = maxRetryAfter;
+    }
+
+    public Duration getCallTimeBudget() {
+      return callTimeBudget;
+    }
+
+    public void setCallTimeBudget(Duration callTimeBudget) {
+      this.callTimeBudget = callTimeBudget;
     }
 
     public Duration getHttpTimeout() {

@@ -60,8 +60,7 @@ public class TsfChannelAdapter extends BaseChannelAdapter {
 
   @Override
   protected OrderPage doListOrders(
-      ChannelAccountRef account, Instant updatedSince, String cursor, int limit) {
-    // Step 1: Page orders for the shop using externalShopId in the path.
+      ChannelAccountRef account, Instant updatedSince, String cursor, int limit, Instant deadline) {
     StringBuilder path =
         new StringBuilder("/shops/")
             .append(encodePathSegment(account.externalShopId()))
@@ -73,27 +72,29 @@ public class TsfChannelAdapter extends BaseChannelAdapter {
     if (cursor != null && !cursor.isBlank()) {
       path.append("&cursor=").append(encodeQueryParam(cursor));
     }
-    TsfHttpTransport.HttpResult result = transport.get(path.toString(), httpTimeout());
+    TsfHttpTransport.HttpResult result = transport.get(path.toString(), deadline);
     return json.readValue(result.body(), OrderPage.class);
   }
 
   @Override
-  protected OrderDetail doGetOrder(ChannelAccountRef account, String externalOrderId) {
+  protected OrderDetail doGetOrder(
+      ChannelAccountRef account, String externalOrderId, Instant deadline) {
     TsfHttpTransport.HttpResult result =
-        transport.get("/orders/" + encodePathSegment(externalOrderId), httpTimeout());
+        transport.get("/orders/" + encodePathSegment(externalOrderId), deadline);
     return json.readValue(result.body(), OrderDetail.class);
   }
 
   @Override
-  protected PaymentStatus doGetPaymentStatus(ChannelAccountRef account, String externalOrderId) {
+  protected PaymentStatus doGetPaymentStatus(
+      ChannelAccountRef account, String externalOrderId, Instant deadline) {
     TsfHttpTransport.HttpResult result =
         transport.get(
-            "/orders/" + encodePathSegment(externalOrderId) + "/payment-status", httpTimeout());
+            "/orders/" + encodePathSegment(externalOrderId) + "/payment-status", deadline);
     return json.readValue(result.body(), PaymentStatus.class);
   }
 
   @Override
-  protected ListingPage doListListings(ChannelAccountRef account, String cursor) {
+  protected ListingPage doListListings(ChannelAccountRef account, String cursor, Instant deadline) {
     StringBuilder path =
         new StringBuilder("/shops/")
             .append(encodePathSegment(account.externalShopId()))
@@ -102,7 +103,7 @@ public class TsfChannelAdapter extends BaseChannelAdapter {
     if (cursor != null && !cursor.isBlank()) {
       path.append("&cursor=").append(encodeQueryParam(cursor));
     }
-    TsfHttpTransport.HttpResult result = transport.get(path.toString(), httpTimeout());
+    TsfHttpTransport.HttpResult result = transport.get(path.toString(), deadline);
     return json.readValue(result.body(), ListingPage.class);
   }
 
@@ -111,23 +112,25 @@ public class TsfChannelAdapter extends BaseChannelAdapter {
       ChannelAccountRef account,
       String externalOrderId,
       String idempotencyKey,
-      ShipmentRequest request) {
+      ShipmentRequest request,
+      Instant deadline) {
     Map<String, Object> body = new LinkedHashMap<>();
     body.put("carrier", request.carrier());
     String jsonBody = json.writeValueAsString(body);
     TsfHttpTransport.HttpResult result =
         transport.post(
             "/orders/" + encodePathSegment(externalOrderId) + "/shipments",
-            httpTimeout(),
+            deadline,
             jsonBody,
             Map.of("Idempotency-Key", idempotencyKey));
     return json.readValue(result.body(), Shipment.class);
   }
 
   @Override
-  protected LabelContent doGetLabel(ChannelAccountRef account, String shipmentId) {
+  protected LabelContent doGetLabel(
+      ChannelAccountRef account, String shipmentId, Instant deadline) {
     TsfHttpTransport.HttpResult result =
-        transport.get("/shipments/" + encodePathSegment(shipmentId) + "/label", httpTimeout());
+        transport.get("/shipments/" + encodePathSegment(shipmentId) + "/label", deadline);
     return new LabelContent(result.body());
   }
 
@@ -136,12 +139,13 @@ public class TsfChannelAdapter extends BaseChannelAdapter {
       ChannelAccountRef account,
       String externalOrderId,
       String idempotencyKey,
-      CancelRequest request) {
+      CancelRequest request,
+      Instant deadline) {
     String jsonBody = json.writeValueAsString(request);
     TsfHttpTransport.HttpResult result =
         transport.post(
             "/orders/" + encodePathSegment(externalOrderId) + "/cancel-requests",
-            httpTimeout(),
+            deadline,
             jsonBody,
             Map.of("Idempotency-Key", idempotencyKey));
     return json.readValue(result.body(), CancelResponse.class);

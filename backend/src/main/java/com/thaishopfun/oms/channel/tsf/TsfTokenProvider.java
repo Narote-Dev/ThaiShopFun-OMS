@@ -1,5 +1,7 @@
 package com.thaishopfun.oms.channel.tsf;
 
+import com.thaishopfun.oms.channel.ChannelCallBudget;
+import com.thaishopfun.oms.channel.ChannelProperties;
 import com.thaishopfun.oms.channel.TsfProperties;
 import com.thaishopfun.oms.channel.exception.ChannelClientException;
 import com.thaishopfun.oms.channel.exception.ChannelUnavailableException;
@@ -13,6 +15,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReentrantLock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -24,9 +27,10 @@ import tools.jackson.databind.json.JsonMapper;
 public class TsfTokenProvider {
 
   private static final Logger log = LoggerFactory.getLogger(TsfTokenProvider.class);
-  private static final Duration TOKEN_HTTP_TIMEOUT = Duration.ofSeconds(10);
+  private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(10);
 
   private final TsfProperties properties;
+  private final ChannelProperties channelProperties;
   private final JsonMapper json;
   private final Clock clock;
   private final HttpClient client;
@@ -34,16 +38,17 @@ public class TsfTokenProvider {
 
   private volatile CachedToken cached;
 
-  public TsfTokenProvider(TsfProperties properties, JsonMapper json, Clock clock) {
+  public TsfTokenProvider(
+      TsfProperties properties, ChannelProperties channelProperties, JsonMapper json, Clock clock) {
     this.properties = properties;
+    this.channelProperties = channelProperties;
     this.json = json;
     this.clock = clock;
-    this.client = HttpClient.newBuilder().connectTimeout(TOKEN_HTTP_TIMEOUT).build();
+    this.client = HttpClient.newBuilder().connectTimeout(CONNECT_TIMEOUT).build();
   }
 
   @PostConstruct
   void validateOnStartup() {
-    // Step 1: Fail fast when TSF API is configured but the client secret is missing.
     if (properties.apiConfigured()
         && (properties.getClientSecret() == null || properties.getClientSecret().isBlank())) {
       throw new IllegalStateException(
@@ -51,24 +56,29 @@ public class TsfTokenProvider {
     }
   }
 
-  public String accessToken() {
-    return accessToken(TOKEN_HTTP_TIMEOUT);
-  }
-
-  public String accessToken(Duration timeout) {
+  public String accessToken(Instant deadline) {
     Instant now = clock.instant();
     CachedToken current = cached;
     if (current != null && current.validAt(now)) {
       return current.token();
     }
-    lock.lock();
+    Duration lockWait = ChannelCallBudget.remaining(clock, deadline);
+    try {
+      if (!lock.tryLock(lockWait.toMillis(), TimeUnit.MILLISECONDS)) {
+        throw new ChannelUnavailableException(
+            "Channel call budget exceeded waiting for token lock");
+      }
+    } catch (InterruptedException ex) {
+      Thread.currentThread().interrupt();
+      throw new ChannelUnavailableException("TSF token lock interrupted", ex);
+    }
     try {
       now = clock.instant();
       current = cached;
       if (current != null && current.validAt(now)) {
         return current.token();
       }
-      cached = fetchToken(timeout);
+      cached = fetchToken(deadline);
       return cached.token();
     } finally {
       lock.unlock();
@@ -76,16 +86,25 @@ public class TsfTokenProvider {
   }
 
   /** Called once on HTTP 401 from TSF internal API. */
-  public void invalidateAndRefresh() {
-    lock.lock();
+  public void invalidateAndRefresh(Instant deadline) {
+    Duration lockWait = ChannelCallBudget.remaining(clock, deadline);
     try {
-      cached = fetchToken(TOKEN_HTTP_TIMEOUT);
+      if (!lock.tryLock(lockWait.toMillis(), TimeUnit.MILLISECONDS)) {
+        throw new ChannelUnavailableException(
+            "Channel call budget exceeded waiting for token lock");
+      }
+    } catch (InterruptedException ex) {
+      Thread.currentThread().interrupt();
+      throw new ChannelUnavailableException("TSF token lock interrupted", ex);
+    }
+    try {
+      cached = fetchToken(deadline);
     } finally {
       lock.unlock();
     }
   }
 
-  private CachedToken fetchToken(Duration timeout) {
+  private CachedToken fetchToken(Instant deadline) {
     if (!properties.apiConfigured()) {
       throw new IllegalStateException("oms.tsf.base-url is not configured");
     }
@@ -102,7 +121,8 @@ public class TsfTokenProvider {
             + "&audience="
             + urlEncode(properties.getAudience());
     Duration requestTimeout =
-        timeout == null || timeout.isNegative() ? TOKEN_HTTP_TIMEOUT : timeout;
+        ChannelCallBudget.transportTimeout(
+            clock, channelProperties.getTsf().getHttpTimeout(), deadline);
     HttpRequest request =
         HttpRequest.newBuilder(URI.create(properties.getTokenUri()))
             .timeout(requestTimeout)

@@ -1,5 +1,7 @@
 package com.thaishopfun.oms.channel.tsf;
 
+import com.thaishopfun.oms.channel.ChannelCallBudget;
+import com.thaishopfun.oms.channel.ChannelProperties;
 import com.thaishopfun.oms.channel.TsfProperties;
 import com.thaishopfun.oms.channel.exception.ChannelClientException;
 import com.thaishopfun.oms.channel.exception.ChannelIdempotencyConflictException;
@@ -14,6 +16,7 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
@@ -30,46 +33,49 @@ public class TsfHttpTransport {
   private final TsfTokenProvider tokens;
   private final JsonMapper json;
   private final Clock clock;
-  private final HttpClient client;
+  private final ChannelProperties channelProperties;
 
   public TsfHttpTransport(
-      TsfProperties properties, TsfTokenProvider tokens, JsonMapper json, Clock clock) {
+      TsfProperties properties,
+      TsfTokenProvider tokens,
+      JsonMapper json,
+      Clock clock,
+      ChannelProperties channelProperties) {
     this.properties = properties;
     this.tokens = tokens;
     this.json = json;
     this.clock = clock;
-    this.client =
-        HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(10))
-            .followRedirects(HttpClient.Redirect.NEVER)
-            .build();
+    this.channelProperties = channelProperties;
   }
 
-  public HttpResult get(String path, Duration timeout) {
-    return exchange("GET", path, timeout, null, Map.of());
+  public HttpResult get(String path, Instant deadline) {
+    return exchange("GET", path, deadline, null, Map.of());
   }
 
-  public HttpResult post(String path, Duration timeout, String body, Map<String, String> headers) {
-    return exchange("POST", path, timeout, body, headers);
+  public HttpResult post(String path, Instant deadline, String body, Map<String, String> headers) {
+    return exchange("POST", path, deadline, body, headers);
   }
 
   private HttpResult exchange(
-      String method, String path, Duration timeout, String body, Map<String, String> extraHeaders) {
+      String method, String path, Instant deadline, String body, Map<String, String> extraHeaders) {
     URI uri = URI.create(normalizeBase() + path);
-    return sendOnce(method, uri, timeout, body, extraHeaders, false);
+    return sendOnce(method, uri, deadline, body, extraHeaders, false);
   }
 
   private HttpResult sendOnce(
       String method,
       URI uri,
-      Duration timeout,
+      Instant deadline,
       String body,
       Map<String, String> extraHeaders,
       boolean retriedAuth) {
+    Duration httpTimeout =
+        ChannelCallBudget.transportTimeout(
+            clock, channelProperties.getTsf().getHttpTimeout(), deadline);
     HttpRequest.Builder builder =
         HttpRequest.newBuilder(uri)
-            .timeout(timeout)
-            .header("Authorization", "Bearer " + tokens.accessToken(timeout));
+            .timeout(httpTimeout)
+            .header("Authorization", "Bearer " + tokens.accessToken(deadline));
     for (Map.Entry<String, String> header : extraHeaders.entrySet()) {
       builder.header(header.getKey(), header.getValue());
     }
@@ -82,10 +88,10 @@ public class TsfHttpTransport {
     }
     try {
       HttpResponse<byte[]> response =
-          client.send(builder.build(), HttpResponse.BodyHandlers.ofByteArray());
+          httpClient().send(builder.build(), HttpResponse.BodyHandlers.ofByteArray());
       if (response.statusCode() == 401 && !retriedAuth) {
-        tokens.invalidateAndRefresh();
-        return sendOnce(method, uri, timeout, body, extraHeaders, true);
+        tokens.invalidateAndRefresh(deadline);
+        return sendOnce(method, uri, deadline, body, extraHeaders, true);
       }
       return mapResponse(response);
     } catch (IOException ex) {
@@ -174,6 +180,13 @@ public class TsfHttpTransport {
         return null;
       }
     }
+  }
+
+  private static HttpClient httpClient() {
+    return HttpClient.newBuilder()
+        .connectTimeout(Duration.ofSeconds(10))
+        .followRedirects(HttpClient.Redirect.NEVER)
+        .build();
   }
 
   private String normalizeBase() {

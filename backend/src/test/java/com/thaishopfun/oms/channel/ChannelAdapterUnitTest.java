@@ -273,8 +273,10 @@ class ChannelAdapterUnitTest {
     TsfProperties tsf = tsfProperties(port);
     tsf.setClientSecret("super-secret-value");
     JsonMapper json = JsonMapper.builder().build();
-    TsfTokenProvider tokens = new TsfTokenProvider(tsf, json, Clock.systemUTC());
-    assertThatThrownBy(tokens::accessToken).isInstanceOf(ChannelClientException.class);
+    ChannelProperties channelProperties = properties();
+    TsfTokenProvider tokens = new TsfTokenProvider(tsf, channelProperties, json, Clock.systemUTC());
+    assertThatThrownBy(() -> tokens.accessToken(java.time.Instant.now().plusSeconds(30)))
+        .isInstanceOf(ChannelClientException.class);
     // Step 1: Warning logs must not echo the client secret or bearer token material.
     for (ILoggingEvent event : logs.list) {
       String formatted = event.getFormattedMessage();
@@ -547,8 +549,8 @@ class ChannelAdapterUnitTest {
     JsonMapper json = JsonMapper.builder().build();
     AccountResilienceRegistry resilience =
         new AccountResilienceRegistry(properties, new ChannelMetrics(meters));
-    TsfTokenProvider tokens = new TsfTokenProvider(tsf, json, clock);
-    TsfHttpTransport transport = new TsfHttpTransport(tsf, tokens, json, clock);
+    TsfTokenProvider tokens = new TsfTokenProvider(tsf, properties, json, clock);
+    TsfHttpTransport transport = new TsfHttpTransport(tsf, tokens, json, clock, properties);
     return new TsfChannelAdapter(
         resilience, properties, new ChannelMetrics(meters), sleeper, clock, transport, json);
   }

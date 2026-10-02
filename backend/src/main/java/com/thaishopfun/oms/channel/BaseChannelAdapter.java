@@ -16,35 +16,33 @@ import com.thaishopfun.oms.channel.exception.ChannelServerErrorException;
 import com.thaishopfun.oms.channel.exception.ChannelUnavailableException;
 import com.thaishopfun.oms.channel.exception.UnsupportedCapabilityException;
 import io.github.resilience4j.bulkhead.Bulkhead;
-import io.github.resilience4j.bulkhead.BulkheadConfig;
 import io.github.resilience4j.bulkhead.BulkheadFullException;
 import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.github.resilience4j.ratelimiter.RateLimiter;
-import io.github.resilience4j.ratelimiter.RequestNotPermitted;
 import io.micrometer.core.instrument.Timer;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.concurrent.Callable;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.BooleanSupplier;
 
 /**
- * Decorator order: capability check → retry loop. Each attempt runs bulkhead → rate limiter →
- * circuit breaker → HTTP, then releases the bulkhead permit before any retry sleep. Total wall time
- * for waits, HTTP, token fetch, and backoff is capped by {@link
- * ChannelProperties.TsfChannelSettings#getHttpTimeout()}.
+ * Decorator order: capability check → retry loop. Each attempt acquires the bulkhead (bounded
+ * wait), reserves rate-limiter capacity, runs circuit breaker → {@link ChannelDeadlineCall}, then
+ * releases the bulkhead before any retry sleep. The call {@link
+ * ChannelProperties.TsfChannelSettings#getCallTimeBudget() time budget} caps total wall time; each
+ * HTTP/token operation uses {@code min(http-timeout, remaining)}.
  */
 public abstract class BaseChannelAdapter implements ChannelAdapter {
+
+  private static final Duration BULKHEAD_POLL_INTERVAL = Duration.ofMillis(5);
 
   private final AccountResilienceRegistry resilience;
   private final ChannelProperties properties;
   private final ChannelMetrics metrics;
   private final Sleeper sleeper;
   private final Clock clock;
-
-  private Instant activeDeadline;
 
   protected BaseChannelAdapter(
       AccountResilienceRegistry resilience,
@@ -63,25 +61,31 @@ public abstract class BaseChannelAdapter implements ChannelAdapter {
   public final OrderPage listOrders(
       ChannelAccountRef account, Instant updatedSince, String cursor, int limit) {
     requireCapability("listOrders", capabilities()::supportsOrderPull);
-    return invoke(account, "listOrders", () -> doListOrders(account, updatedSince, cursor, limit));
+    return invoke(
+        account,
+        "listOrders",
+        deadline -> doListOrders(account, updatedSince, cursor, limit, deadline));
   }
 
   @Override
   public final OrderDetail getOrder(ChannelAccountRef account, String externalOrderId) {
     requireCapability("getOrder", capabilities()::supportsOrderPull);
-    return invoke(account, "getOrder", () -> doGetOrder(account, externalOrderId));
+    return invoke(account, "getOrder", deadline -> doGetOrder(account, externalOrderId, deadline));
   }
 
   @Override
   public final PaymentStatus getPaymentStatus(ChannelAccountRef account, String externalOrderId) {
     requireCapability("getPaymentStatus", capabilities()::supportsOrderPull);
-    return invoke(account, "getPaymentStatus", () -> doGetPaymentStatus(account, externalOrderId));
+    return invoke(
+        account,
+        "getPaymentStatus",
+        deadline -> doGetPaymentStatus(account, externalOrderId, deadline));
   }
 
   @Override
   public final ListingPage listListings(ChannelAccountRef account, String cursor) {
     requireCapability("listListings", capabilities()::supportsStockPush);
-    return invoke(account, "listListings", () -> doListListings(account, cursor));
+    return invoke(account, "listListings", deadline -> doListListings(account, cursor, deadline));
   }
 
   @Override
@@ -98,13 +102,13 @@ public abstract class BaseChannelAdapter implements ChannelAdapter {
     return invoke(
         account,
         "createShipment",
-        () -> doCreateShipment(account, externalOrderId, idempotencyKey, request));
+        deadline -> doCreateShipment(account, externalOrderId, idempotencyKey, request, deadline));
   }
 
   @Override
   public final LabelContent getLabel(ChannelAccountRef account, String shipmentId) {
     requireCapability("getLabel", capabilities()::supportsLabel);
-    return invoke(account, "getLabel", () -> doGetLabel(account, shipmentId));
+    return invoke(account, "getLabel", deadline -> doGetLabel(account, shipmentId, deadline));
   }
 
   @Override
@@ -118,35 +122,48 @@ public abstract class BaseChannelAdapter implements ChannelAdapter {
     return invoke(
         account,
         "requestCancel",
-        () -> doRequestCancel(account, externalOrderId, idempotencyKey, request));
+        deadline -> doRequestCancel(account, externalOrderId, idempotencyKey, request, deadline));
   }
 
   protected abstract OrderPage doListOrders(
-      ChannelAccountRef account, Instant updatedSince, String cursor, int limit);
+      ChannelAccountRef account, Instant updatedSince, String cursor, int limit, Instant deadline);
 
-  protected abstract OrderDetail doGetOrder(ChannelAccountRef account, String externalOrderId);
+  protected abstract OrderDetail doGetOrder(
+      ChannelAccountRef account, String externalOrderId, Instant deadline);
 
   protected abstract PaymentStatus doGetPaymentStatus(
-      ChannelAccountRef account, String externalOrderId);
+      ChannelAccountRef account, String externalOrderId, Instant deadline);
 
-  protected abstract ListingPage doListListings(ChannelAccountRef account, String cursor);
+  protected abstract ListingPage doListListings(
+      ChannelAccountRef account, String cursor, Instant deadline);
 
   protected abstract Shipment doCreateShipment(
       ChannelAccountRef account,
       String externalOrderId,
       String idempotencyKey,
-      ShipmentRequest request);
+      ShipmentRequest request,
+      Instant deadline);
 
-  protected abstract LabelContent doGetLabel(ChannelAccountRef account, String shipmentId);
+  protected abstract LabelContent doGetLabel(
+      ChannelAccountRef account, String shipmentId, Instant deadline);
 
   protected abstract CancelResponse doRequestCancel(
       ChannelAccountRef account,
       String externalOrderId,
       String idempotencyKey,
-      CancelRequest request);
+      CancelRequest request,
+      Instant deadline);
 
   protected ChannelProperties.TsfChannelSettings settings() {
     return properties.settingsFor(channel());
+  }
+
+  protected Duration transportTimeout(Instant deadline) {
+    return ChannelCallBudget.transportTimeout(clock, settings().getHttpTimeout(), deadline);
+  }
+
+  protected Clock clock() {
+    return clock;
   }
 
   private void requireCapability(String operation, BooleanSupplier supported) {
@@ -162,11 +179,11 @@ public abstract class BaseChannelAdapter implements ChannelAdapter {
     }
   }
 
-  private <T> T invoke(ChannelAccountRef account, String operation, Callable<T> httpCall) {
+  private <T> T invoke(
+      ChannelAccountRef account, String operation, ChannelDeadlineCall<T> httpCall) {
     Timer.Sample sample = metrics.startTimer();
     String outcome = "success";
-    Instant deadline = clock.instant().plus(settings().getHttpTimeout());
-    activeDeadline = deadline;
+    Instant deadline = clock.instant().plus(settings().getCallTimeBudget());
     try {
       return invokeWithRetry(account, operation, httpCall, deadline);
     } catch (BulkheadFullException ex) {
@@ -181,7 +198,7 @@ public abstract class BaseChannelAdapter implements ChannelAdapter {
       outcome = "client_error";
       throw ex;
     } catch (ChannelServerErrorException ex) {
-      outcome = "client_error";
+      outcome = "server_error";
       throw ex;
     } catch (ChannelRateLimitedException ex) {
       outcome = "rate_limited";
@@ -196,14 +213,16 @@ public abstract class BaseChannelAdapter implements ChannelAdapter {
       outcome = "error";
       throw new ChannelUnavailableException("Channel call failed for " + operation, ex);
     } finally {
-      activeDeadline = null;
       metrics.recordDuration(channel(), operation, sample);
       metrics.recordCall(channel(), operation, outcome);
     }
   }
 
   private <T> T invokeWithRetry(
-      ChannelAccountRef account, String operation, Callable<T> httpCall, Instant deadline)
+      ChannelAccountRef account,
+      String operation,
+      ChannelDeadlineCall<T> httpCall,
+      Instant deadline)
       throws Exception {
     ChannelProperties.TsfChannelSettings settings = settings();
     int maxAttempts = Math.max(1, settings.getRetryMaxAttempts());
@@ -262,57 +281,60 @@ public abstract class BaseChannelAdapter implements ChannelAdapter {
   private <T> T executeAttempt(
       ChannelAccountRef account,
       CircuitBreaker circuitBreaker,
-      Callable<T> httpCall,
+      ChannelDeadlineCall<T> httpCall,
       Instant deadline)
       throws Exception {
-    Duration remaining = remainingBudget(deadline);
     Bulkhead bulkhead = resilience.bulkhead(channel());
     RateLimiter rateLimiter = resilience.rateLimiter(channel(), account.channelAccountId());
-
-    Duration bulkheadWait =
-        minDuration(bulkhead.getBulkheadConfig().getMaxWaitDuration(), remaining);
-    BulkheadConfig bulkheadConfig = bulkhead.getBulkheadConfig();
-    boolean bulkheadConfigChanged = false;
-    synchronized (bulkhead) {
-      if (bulkheadWait.compareTo(bulkheadConfig.getMaxWaitDuration()) < 0) {
-        bulkhead.changeConfig(
-            BulkheadConfig.from(bulkheadConfig).maxWaitDuration(bulkheadWait).build());
-        bulkheadConfigChanged = true;
-      }
-      metrics.enterBulkheadWait(channel());
-      try {
-        bulkhead.acquirePermission();
-      } finally {
-        metrics.leaveBulkheadWait(channel());
-        if (bulkheadConfigChanged) {
-          bulkhead.changeConfig(bulkheadConfig);
-        }
-      }
+    acquireBulkhead(bulkhead, deadline);
+    try {
+      awaitRateLimiter(rateLimiter, deadline);
+      return CircuitBreaker.decorateCallable(circuitBreaker, () -> httpCall.call(deadline)).call();
+    } finally {
+      bulkhead.releasePermission();
     }
+  }
 
-    Duration rateWait =
-        minDuration(rateLimiter.getRateLimiterConfig().getTimeoutDuration(), remaining);
-    Duration previousRateTimeout = rateLimiter.getRateLimiterConfig().getTimeoutDuration();
-    boolean rateTimeoutChanged = false;
-    synchronized (rateLimiter) {
-      if (rateWait.compareTo(previousRateTimeout) < 0) {
-        rateLimiter.changeTimeoutDuration(rateWait);
-        rateTimeoutChanged = true;
-      }
-      try {
-        if (!rateLimiter.acquirePermission()) {
-          throw new ChannelRateLimitedException("Rate limit wait exceeded for " + channel(), null);
+  private void acquireBulkhead(Bulkhead bulkhead, Instant deadline) throws InterruptedException {
+    Duration maxWait = bulkhead.getBulkheadConfig().getMaxWaitDuration();
+    Instant waitUntil =
+        clock
+            .instant()
+            .plus(
+                ChannelCallBudget.minDuration(
+                    maxWait, ChannelCallBudget.remaining(clock, deadline)));
+    metrics.enterBulkheadWait(channel());
+    try {
+      while (!bulkhead.tryAcquirePermission()) {
+        if (!clock.instant().isBefore(waitUntil)) {
+          throw BulkheadFullException.createBulkheadFullException(bulkhead);
         }
-        return CircuitBreaker.decorateCallable(circuitBreaker, httpCall::call).call();
-      } catch (RequestNotPermitted ex) {
-        throw new ChannelRateLimitedException("Rate limit wait exceeded for " + channel(), null);
-      } finally {
-        if (rateTimeoutChanged) {
-          rateLimiter.changeTimeoutDuration(previousRateTimeout);
-        }
-        bulkhead.releasePermission();
+        sleeper.sleep(BULKHEAD_POLL_INTERVAL);
       }
+    } finally {
+      metrics.leaveBulkheadWait(channel());
     }
+  }
+
+  private void awaitRateLimiter(RateLimiter rateLimiter, Instant deadline)
+      throws InterruptedException {
+    long waitNanos = rateLimiter.reservePermission();
+    if (waitNanos < 0) {
+      throw new ChannelRateLimitedException("Rate limit denied for " + channel(), null);
+    }
+    if (waitNanos == 0) {
+      return;
+    }
+    Duration wait = Duration.ofNanos(waitNanos);
+    Duration allowed =
+        ChannelCallBudget.minDuration(
+            rateLimiter.getRateLimiterConfig().getTimeoutDuration(),
+            ChannelCallBudget.remaining(clock, deadline));
+    if (wait.compareTo(allowed) > 0) {
+      throw new ChannelRateLimitedException(
+          "Rate limit wait exceeds budget for " + channel(), null);
+    }
+    sleeper.sleep(wait);
   }
 
   private void sleepBeforeRetry(Instant deadline, Duration sleep, ChannelRateLimitedException rate)
@@ -327,14 +349,6 @@ public abstract class BaseChannelAdapter implements ChannelAdapter {
       Thread.currentThread().interrupt();
       throw ex;
     }
-  }
-
-  private Duration remainingBudget(Instant deadline) {
-    Duration remaining = Duration.between(clock.instant(), deadline);
-    if (remaining.isNegative() || remaining.isZero()) {
-      throw new ChannelUnavailableException("Channel call budget exceeded");
-    }
-    return remaining;
   }
 
   private void ensureBudget(
@@ -354,10 +368,6 @@ public abstract class BaseChannelAdapter implements ChannelAdapter {
     }
   }
 
-  private static Duration minDuration(Duration a, Duration b) {
-    return a.compareTo(b) <= 0 ? a : b;
-  }
-
   private Duration backoffDelay(
       ChannelProperties.TsfChannelSettings settings, int attempt, Duration floor) {
     long baseMs = settings.getRetryWaitBase().toMillis();
@@ -370,28 +380,5 @@ public abstract class BaseChannelAdapter implements ChannelAdapter {
       delay = floor;
     }
     return delay;
-  }
-
-  /** Remaining call budget capped by configured HTTP timeout (for transport and token). */
-  protected Duration transportTimeout() {
-    ChannelProperties.TsfChannelSettings settings = settings();
-    Duration configured = settings.getHttpTimeout();
-    Instant deadline = activeDeadline;
-    if (deadline == null) {
-      return configured;
-    }
-    Duration remaining = Duration.between(clock.instant(), deadline);
-    if (remaining.isNegative() || remaining.isZero()) {
-      throw new ChannelUnavailableException("Channel call budget exceeded");
-    }
-    return minDuration(configured, remaining);
-  }
-
-  protected Duration httpTimeout() {
-    return transportTimeout();
-  }
-
-  protected Clock clock() {
-    return clock;
   }
 }
