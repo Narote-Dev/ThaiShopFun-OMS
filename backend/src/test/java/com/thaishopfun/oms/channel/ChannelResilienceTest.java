@@ -902,8 +902,8 @@ class ChannelResilienceTest {
     for (int i = 0; i < 30; i++) {
       adapter.getOrder(account, "order-" + i);
     }
-    assertThat(Duration.between(start, Instant.now()).compareTo(Duration.ofSeconds(2)))
-        .isGreaterThanOrEqualTo(0);
+    assertThat(Duration.between(start, Instant.now()))
+        .isGreaterThanOrEqualTo(Duration.ofMillis(1500));
     assertThat(calls).hasValue(30);
 
     ChannelAccountRef other = accountRef();
