@@ -112,23 +112,20 @@ public class ReconciliationIssueRepository {
             ),
             '{count}',
             to_jsonb(
-              LEAST(
-                ?,
-                jsonb_array_length(
-                  (
-                    SELECT COALESCE(jsonb_agg(value ORDER BY min_ord), '[]'::jsonb)
+              jsonb_array_length(
+                (
+                  SELECT COALESCE(jsonb_agg(value ORDER BY min_ord), '[]'::jsonb)
+                  FROM (
+                    SELECT value, MIN(ord) AS min_ord
                     FROM (
-                      SELECT value, MIN(ord) AS min_ord
-                      FROM (
-                        SELECT value, ord
-                        FROM jsonb_array_elements(
-                          COALESCE(reconciliation_issue.details->'events', '[]'::jsonb)
-                          || COALESCE(EXCLUDED.details->'events', '[]'::jsonb)
-                        ) WITH ORDINALITY AS t(value, ord)
-                      ) merged
-                      GROUP BY value->>'inbox_event_id'
-                    ) deduped
-                  )
+                      SELECT value, ord
+                      FROM jsonb_array_elements(
+                        COALESCE(reconciliation_issue.details->'events', '[]'::jsonb)
+                        || COALESCE(EXCLUDED.details->'events', '[]'::jsonb)
+                      ) WITH ORDINALITY AS t(value, ord)
+                    ) merged
+                    GROUP BY value->>'inbox_event_id'
+                  ) deduped
                 )
               )
             ),
@@ -140,7 +137,6 @@ public class ReconciliationIssueRepository {
         tenantId,
         inboxEventId,
         rule,
-        initialJson,
-        MAX_EVENTS);
+        initialJson);
   }
 }
