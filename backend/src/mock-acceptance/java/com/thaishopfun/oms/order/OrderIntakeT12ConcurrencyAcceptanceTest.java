@@ -204,7 +204,7 @@ class OrderIntakeT12ConcurrencyAcceptanceTest {
           case CHECKOUT -> {
             JsonNode checkout =
                 checkoutTwoLines(
-                    "chk-" + op.orderIndex(),
+                    "chk-" + op.orderIndex() + "-" + UUID.randomUUID(),
                     ctx.shopId(),
                     plan.reverseLines() ? "L-b" : "L-a",
                     plan.reverseLines() ? "L-a" : "L-b");

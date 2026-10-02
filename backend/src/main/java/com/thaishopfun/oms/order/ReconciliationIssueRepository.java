@@ -2,9 +2,11 @@ package com.thaishopfun.oms.order;
 
 import com.thaishopfun.oms.auth.UuidV7;
 import com.thaishopfun.oms.tenant.TenantContext;
+import java.util.List;
 import java.util.UUID;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
@@ -54,7 +56,8 @@ public class ReconciliationIssueRepository {
 
   /**
    * One open shop-level issue per (tenant, rule) when {@code order_id} is unknown. Appends inbox
-   * events into {@code details.events} (cap {@value MAX_EVENTS}) on conflict.
+   * events into {@code details.events} (cap {@value MAX_EVENTS}) on conflict, deduped by {@code
+   * inbox_event_id}.
    */
   public void upsertOpenWithoutOrder(UUID inboxEventId, String rule, String externalOrderId) {
     UUID tenantId = TenantContext.requireTenantId();
@@ -63,66 +66,73 @@ public class ReconciliationIssueRepository {
     if (externalOrderId != null && !externalOrderId.isBlank()) {
       event.put("external_order_id", externalOrderId);
     }
-    ArrayNode events = json.createArrayNode();
-    events.add(event);
-    ObjectNode initial = json.createObjectNode();
-    initial.set("events", events);
-    initial.put("count", 1);
-    String initialJson = json.writeValueAsString(initial);
 
+    List<String> existingRows =
+        jdbc.query(
+            """
+            SELECT details::text FROM reconciliation_issue
+            WHERE tenant_id = ? AND rule = ? AND order_id IS NULL AND status <> 'RESOLVED'
+            LIMIT 1
+            """,
+            (rs, row) -> rs.getString(1),
+            tenantId,
+            rule);
+    String existingJson = existingRows.isEmpty() ? null : existingRows.get(0);
+    if (existingJson == null) {
+      ObjectNode initial = json.createObjectNode();
+      ArrayNode events = json.createArrayNode();
+      events.add(event);
+      initial.set("events", events);
+      initial.put("count", 1);
+      jdbc.update(
+          """
+          INSERT INTO reconciliation_issue (id, tenant_id, run_id, rule, order_id, details, status)
+          VALUES (?, ?, ?, ?, NULL, ?::jsonb, 'OPEN')
+          """,
+          UuidV7.generate(),
+          tenantId,
+          inboxEventId,
+          rule,
+          json.writeValueAsString(initial));
+      return;
+    }
+
+    ObjectNode details = (ObjectNode) json.readTree(existingJson);
+    ArrayNode events = (ArrayNode) details.path("events");
+    if (events == null || !events.isArray()) {
+      events = json.createArrayNode();
+      details.set("events", events);
+    }
+    if (containsEventId(events, inboxEventId.toString())) {
+      return;
+    }
+    ArrayNode merged = json.createArrayNode();
+    merged.add(event);
+    for (JsonNode existing : events) {
+      if (merged.size() >= MAX_EVENTS) {
+        break;
+      }
+      merged.add(existing);
+    }
+    details.set("events", merged);
+    details.put("count", merged.size());
     jdbc.update(
         """
-        INSERT INTO reconciliation_issue (id, tenant_id, run_id, rule, order_id, details, status)
-        VALUES (?, ?, ?, ?, NULL, ?::jsonb, 'OPEN')
-        ON CONFLICT (tenant_id, rule, order_id) WHERE (status <> 'RESOLVED')
-        DO UPDATE SET
-          details = jsonb_set(
-            jsonb_set(
-              reconciliation_issue.details,
-              '{events}',
-              (
-                SELECT COALESCE(jsonb_agg(value ORDER BY min_ord), '[]'::jsonb)
-                FROM (
-                  SELECT value, MIN(ord) AS min_ord
-                  FROM (
-                    SELECT value, ord
-                    FROM jsonb_array_elements(
-                      COALESCE(reconciliation_issue.details->'events', '[]'::jsonb)
-                      || COALESCE(EXCLUDED.details->'events', '[]'::jsonb)
-                    ) WITH ORDINALITY AS t(value, ord)
-                  ) merged
-                  GROUP BY value->>'inbox_event_id'
-                ) deduped
-              ),
-              true
-            ),
-            '{count}',
-            to_jsonb(
-              jsonb_array_length(
-                (
-                  SELECT COALESCE(jsonb_agg(value ORDER BY min_ord), '[]'::jsonb)
-                  FROM (
-                    SELECT value, MIN(ord) AS min_ord
-                    FROM (
-                      SELECT value, ord
-                      FROM jsonb_array_elements(
-                        COALESCE(reconciliation_issue.details->'events', '[]'::jsonb)
-                        || COALESCE(EXCLUDED.details->'events', '[]'::jsonb)
-                      ) WITH ORDINALITY AS t(value, ord)
-                    ) merged
-                    GROUP BY value->>'inbox_event_id'
-                  ) deduped
-                )
-              )
-            ),
-            true
-          ),
-          updated_at = now()
+        UPDATE reconciliation_issue
+        SET details = ?::jsonb, updated_at = now()
+        WHERE tenant_id = ? AND rule = ? AND order_id IS NULL AND status <> 'RESOLVED'
         """,
-        UuidV7.generate(),
+        json.writeValueAsString(details),
         tenantId,
-        inboxEventId,
-        rule,
-        initialJson);
+        rule);
+  }
+
+  private static boolean containsEventId(ArrayNode events, String inboxEventId) {
+    for (JsonNode node : events) {
+      if (inboxEventId.equals(node.path("inbox_event_id").asString(null))) {
+        return true;
+      }
+    }
+    return false;
   }
 }

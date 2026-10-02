@@ -170,8 +170,7 @@ public class OrderIntakeSupport {
       holdExpires = payload.paymentExpiresAt().plus(orderProperties.getUnpaidHoldGrace());
     }
 
-    List<ReserveItem> reserveItems =
-        mapped.stream().filter(LineMapping::mapped).map(LineMapping::reserveItem).toList();
+    List<ReserveItem> reserveItems = stockReserveItems(account, mapped);
     boolean hasUnmapped = mapped.stream().anyMatch(line -> !line.mapped());
     List<Shortfall> stockShortfalls = List.of();
     if (stockEnforced && !reserveItems.isEmpty()) {
@@ -186,6 +185,8 @@ public class OrderIntakeSupport {
               "order.adopt:" + message.eventId());
       if (!adopt.adopted()) {
         stockShortfalls = adopt.shortfalls();
+      } else if (groupId != null) {
+        engine.release(groupId, "order.release-checkout:" + message.eventId());
       }
     }
 
@@ -226,7 +227,7 @@ public class OrderIntakeSupport {
     }
     Instant paidAt = eventOccurredAt(message);
     order = applyPayment(order, "PAID", paidAt, account);
-    List<ReserveItem> items = mappedReserveItems(order.id());
+    List<ReserveItem> items = reserveItemsForOrder(order, account);
     if (stockEnforced(account) && !items.isEmpty()) {
       hooks.beforeEngineWrite();
       EnsureHoldResult held =
@@ -381,11 +382,30 @@ public class OrderIntakeSupport {
     return !flags.isEmpty() && flags.get(0);
   }
 
-  private List<ReserveItem> mappedReserveItems(UUID orderId) {
-    return lines.findByOrderId(orderId).stream()
+  private List<ReserveItem> stockReserveItems(TsfAccount account, List<LineMapping> mapped) {
+    return mapped.stream()
+        .filter(LineMapping::mapped)
+        .filter(line -> lineEnforcesStock(account, line.stockControl()))
+        .map(LineMapping::reserveItem)
+        .toList();
+  }
+
+  private List<ReserveItem> reserveItemsForOrder(SalesOrder order, TsfAccount account) {
+    return lines.findByOrderId(order.id()).stream()
         .filter(line -> line.skuId() != null)
+        .filter(
+            line ->
+                lineEnforcesStock(
+                    account, listingStockControl(order.channelAccountId(), line.externalSkuId())))
         .map(line -> ReserveItem.of(line.skuId(), line.qty()))
         .toList();
+  }
+
+  private static boolean lineEnforcesStock(TsfAccount account, boolean listingStockControl) {
+    if ("CONTROL".equals(account.mode())) {
+      return listingStockControl;
+    }
+    return true;
   }
 
   private void recordOversell(
