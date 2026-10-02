@@ -59,9 +59,8 @@ public class ReconciliationIssueRepository {
    */
   public void upsertOpenWithoutOrder(UUID inboxEventId, String rule, String externalOrderId) {
     UUID tenantId = TenantContext.requireTenantId();
-    jdbc.queryForObject(
+    jdbc.update(
         "SELECT pg_advisory_xact_lock(hashtext(?::text), hashtext(?::text))",
-        Long.class,
         tenantId.toString(),
         rule);
     ObjectNode event = json.createObjectNode();
@@ -75,6 +74,7 @@ public class ReconciliationIssueRepository {
     initial.set("events", events);
     initial.put("count", 1);
     String initialJson = json.writeValueAsString(initial);
+    String newEventId = inboxEventId.toString();
 
     jdbc.update(
         """
@@ -82,29 +82,18 @@ public class ReconciliationIssueRepository {
         VALUES (?, ?, ?, ?, NULL, ?::jsonb, 'OPEN')
         ON CONFLICT (tenant_id, rule, order_id) WHERE (status <> 'RESOLVED')
         DO UPDATE SET
-          details = jsonb_set(
-            jsonb_set(
-              reconciliation_issue.details,
-              '{events}',
-              (
-                SELECT COALESCE(jsonb_agg(value ORDER BY min_ord), '[]'::jsonb)
-                FROM (
-                  SELECT value, MIN(ord) AS min_ord
-                  FROM (
-                    SELECT value, ord
-                    FROM jsonb_array_elements(
-                      COALESCE(reconciliation_issue.details->'events', '[]'::jsonb)
-                      || COALESCE(EXCLUDED.details->'events', '[]'::jsonb)
-                    ) WITH ORDINALITY AS t(value, ord)
-                  ) merged
-                  GROUP BY value->>'inbox_event_id'
-                ) deduped
-              ),
-              true
-            ),
-            '{count}',
-            to_jsonb(
-              jsonb_array_length(
+          details = CASE
+            WHEN EXISTS (
+              SELECT 1
+              FROM jsonb_array_elements(
+                COALESCE(reconciliation_issue.details->'events', '[]'::jsonb)
+              ) AS existing(value)
+              WHERE existing.value->>'inbox_event_id' = ?
+            ) THEN reconciliation_issue.details
+            ELSE jsonb_set(
+              jsonb_set(
+                reconciliation_issue.details,
+                '{events}',
                 (
                   SELECT COALESCE(jsonb_agg(value ORDER BY min_ord), '[]'::jsonb)
                   FROM (
@@ -118,25 +107,52 @@ public class ReconciliationIssueRepository {
                     ) merged
                     GROUP BY value->>'inbox_event_id'
                   ) deduped
+                ),
+                true
+              ),
+              '{count}',
+              to_jsonb(
+                LEAST(
+                  ?,
+                  jsonb_array_length(
+                    (
+                      SELECT COALESCE(jsonb_agg(value ORDER BY min_ord), '[]'::jsonb)
+                      FROM (
+                        SELECT value, MIN(ord) AS min_ord
+                        FROM (
+                          SELECT value, ord
+                          FROM jsonb_array_elements(
+                            COALESCE(reconciliation_issue.details->'events', '[]'::jsonb)
+                            || COALESCE(EXCLUDED.details->'events', '[]'::jsonb)
+                          ) WITH ORDINALITY AS t(value, ord)
+                        ) merged
+                        GROUP BY value->>'inbox_event_id'
+                      ) deduped
+                    )
+                  )
                 )
-              )
-            ),
-            true
-          ),
-          updated_at = now()
-        WHERE NOT EXISTS (
-          SELECT 1
-          FROM jsonb_array_elements(
-            COALESCE(reconciliation_issue.details->'events', '[]'::jsonb)
-          ) AS existing(value)
-          WHERE existing.value->>'inbox_event_id' = ?::text
-        )
+              ),
+              true
+            )
+          END,
+          updated_at = CASE
+            WHEN EXISTS (
+              SELECT 1
+              FROM jsonb_array_elements(
+                COALESCE(reconciliation_issue.details->'events', '[]'::jsonb)
+              ) AS existing(value)
+              WHERE existing.value->>'inbox_event_id' = ?
+            ) THEN reconciliation_issue.updated_at
+            ELSE now()
+          END
         """,
         UuidV7.generate(),
         tenantId,
         inboxEventId,
         rule,
         initialJson,
-        inboxEventId.toString());
+        newEventId,
+        MAX_EVENTS,
+        newEventId);
   }
 }
