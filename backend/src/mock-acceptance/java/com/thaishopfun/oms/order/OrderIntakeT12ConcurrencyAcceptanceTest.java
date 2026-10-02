@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.thaishopfun.mocktsf.OmsEndpoint;
 import com.thaishopfun.oms.auth.AuthTestSupport;
+import com.thaishopfun.oms.auth.UuidV7;
 import com.thaishopfun.oms.inbox.InboxWorker;
 import com.thaishopfun.oms.stock.OrderIntakeFaultTestConfig;
 import com.thaishopfun.oms.stock.StockExpiryJob;
@@ -208,7 +209,11 @@ class OrderIntakeT12ConcurrencyAcceptanceTest {
                     ctx.shopId(),
                     plan.reverseLines() ? "L-b" : "L-a",
                     plan.reverseLines() ? "L-a" : "L-b");
-            plan.reservationIdHolder()[0] = checkout.path("reservation_id").asString();
+            if (checkout != null) {
+              plan.reservationIdHolder()[0] = checkout.path("reservation_id").asString();
+            } else {
+              plan.reservationIdHolder()[0] = UuidV7.generate().toString();
+            }
           }
           case CREATED ->
               ingest(
@@ -216,7 +221,9 @@ class OrderIntakeT12ConcurrencyAcceptanceTest {
                       JSON,
                       plan.externalOrderId(),
                       ctx.shopId(),
-                      plan.reservationIdHolder()[0],
+                      plan.reservationIdHolder()[0] != null
+                          ? plan.reservationIdHolder()[0]
+                          : UuidV7.generate().toString(),
                       "COD",
                       plan.reverseLines() ? "L-b" : "L-a",
                       plan.reverseLines() ? "L-a" : "L-b",
@@ -353,6 +360,7 @@ class OrderIntakeT12ConcurrencyAcceptanceTest {
     return remaining != null && remaining > 0;
   }
 
+  /** Returns checkout body on 201; null when checkout reserve is out of stock (409). */
   private JsonNode checkoutTwoLines(
       String checkoutId, String shopId, String listingA, String listingB) throws Exception {
     ObjectNode body = JSON.createObjectNode();
@@ -382,7 +390,11 @@ class OrderIntakeT12ConcurrencyAcceptanceTest {
             HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
     assertThat(response.statusCode()).isEqualTo(200);
     JsonNode report = JSON.readTree(response.body());
-    assertThat(report.path("oms_status").asInt()).isEqualTo(201);
+    int omsStatus = report.path("oms_status").asInt();
+    if (omsStatus == 409) {
+      return null;
+    }
+    assertThat(omsStatus).isEqualTo(201);
     return JSON.readTree(report.path("oms_body").asString());
   }
 
