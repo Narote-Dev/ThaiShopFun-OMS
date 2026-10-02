@@ -978,6 +978,34 @@ class OrderIntakeT12ScenariosAcceptanceTest {
             }
           }
           assertThat(includesNewest).isTrue();
+
+          UUID extraA = UuidV7.generate();
+          UUID extraB = UuidV7.generate();
+          reconciliation.upsertOpenWithoutOrder(extraA, rule, "TSF-CAP-A");
+          reconciliation.upsertOpenWithoutOrder(extraB, rule, "TSF-CAP-B");
+          details =
+              JSON.readTree(
+                  jdbc.queryForObject(
+                      """
+                      SELECT details::text FROM reconciliation_issue
+                      WHERE rule = ? AND status = 'OPEN' AND order_id IS NULL
+                      """,
+                      String.class,
+                      rule));
+          assertThat(details.path("events").size()).isEqualTo(100);
+          assertThat(details.path("count").asInt()).isEqualTo(103);
+
+          reconciliation.upsertOpenWithoutOrder(newest, rule, "TSF-CAP-REPLAY");
+          details =
+              JSON.readTree(
+                  jdbc.queryForObject(
+                      """
+                      SELECT details::text FROM reconciliation_issue
+                      WHERE rule = ? AND status = 'OPEN' AND order_id IS NULL
+                      """,
+                      String.class,
+                      rule));
+          assertThat(details.path("count").asInt()).isEqualTo(103);
           return null;
         });
   }
@@ -1385,6 +1413,93 @@ class OrderIntakeT12ScenariosAcceptanceTest {
     assertThat(fixture.reserved(shop, compA)).isEqualTo(2);
     assertThat(fixture.reserved(shop, compB)).isEqualTo(4);
     assertNoActiveCheckoutReservations(shop);
+    fixture.assertInvariants(shop);
+  }
+
+  @Test
+  void componentlessBundleHeldUntilComponentsAddedThenPaidReserves() throws Exception {
+    StockFixture.Shop shop = fixture.shop("ACTIVE");
+    String shopId = fixture.tsfShopId(shop);
+    UUID account = fixture.tsfChannelAccount(shop, "ACTIVE", "CONNECTED");
+    UUID componentless = fixture.componentlessBundle(shop);
+    UUID component = fixture.sku(shop, 10);
+    fixture.channelListing(shop, account, "L-empty-bnd", componentless, true);
+
+    String externalOrderId = "TSF-EBND-" + UUID.randomUUID();
+    ingest(
+        orderCreated(
+            externalOrderId, shopId, UuidV7.generate().toString(), "COD", "L-empty-bnd", 1, 1));
+    assertThat(worker.processAvailable(10)).isEqualTo(1);
+    assertThat(
+            fixture.inTenant(
+                shop.tenant(),
+                () ->
+                    jdbc.queryForObject(
+                        "SELECT hold_reason FROM sales_order WHERE external_order_id = ?",
+                        String.class,
+                        externalOrderId)))
+        .isEqualTo("OUT_OF_STOCK");
+    assertThat(
+            fixture.inTenant(
+                shop.tenant(),
+                () ->
+                    jdbc.queryForObject(
+                        "SELECT hold_note FROM sales_order WHERE external_order_id = ?",
+                        String.class,
+                        externalOrderId)))
+        .isEqualTo(OrderIntakeSupport.BUNDLE_WITHOUT_COMPONENTS_NOTE);
+    assertThat(
+            fixture.inTenant(
+                shop.tenant(),
+                () ->
+                    jdbc.queryForObject(
+                        """
+                        SELECT fulfillment_status FROM sales_order WHERE external_order_id = ?
+                        """,
+                        String.class,
+                        externalOrderId)))
+        .isEqualTo("UNFULFILLED");
+    assertThat(
+            fixture.inTenant(
+                shop.tenant(),
+                () ->
+                    jdbc.queryForObject(
+                        """
+                        SELECT count(*) FROM stock_reservation
+                        WHERE owner_type = 'ORDER' AND status = 'ACTIVE'
+                        """,
+                        Long.class)))
+        .isZero();
+
+    fixture.inTenant(
+        shop.tenant(),
+        () -> {
+          jdbc.update(
+              """
+              INSERT INTO sku_bundle_component (tenant_id, bundle_sku_id, component_sku_id, qty)
+              VALUES (?, ?, ?, 1)
+              """,
+              shop.tenant(),
+              componentless,
+              component);
+          return null;
+        });
+
+    ingest(orderPaid(externalOrderId, shopId, 2));
+    assertThat(worker.processAvailable(10)).isEqualTo(1);
+    assertThat(fixture.reserved(shop, component)).isEqualTo(1);
+    assertThat(
+            fixture.inTenant(
+                shop.tenant(),
+                () ->
+                    jdbc.queryForObject(
+                        """
+                        SELECT fulfillment_status FROM sales_order
+                        WHERE external_order_id = ? AND hold_reason = 'NONE'
+                        """,
+                        String.class,
+                        externalOrderId)))
+        .isEqualTo("READY_TO_PICK");
     fixture.assertInvariants(shop);
   }
 

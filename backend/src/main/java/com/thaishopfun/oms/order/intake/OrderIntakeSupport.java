@@ -27,6 +27,7 @@ import com.thaishopfun.oms.outbox.OutboxDraft;
 import com.thaishopfun.oms.stock.AdoptResult;
 import com.thaishopfun.oms.stock.EnsureHoldResult;
 import com.thaishopfun.oms.stock.ReservationEngine;
+import com.thaishopfun.oms.stock.ReserveDemandPlanner;
 import com.thaishopfun.oms.stock.ReserveItem;
 import com.thaishopfun.oms.stock.Shortfall;
 import com.thaishopfun.oms.stock.StockOwner;
@@ -56,6 +57,7 @@ public class OrderIntakeSupport {
 
   static final String TSF_CHANNEL_ACCOUNT_MISSING = "TSF_CHANNEL_ACCOUNT_MISSING";
   public static final String BUSINESS_OVERSELL_METRIC = "oms.order.business_oversell";
+  static final String BUNDLE_WITHOUT_COMPONENTS_NOTE = "bundle has no components";
 
   private final ChannelAccountLookup channels;
   private final SalesOrderRepository orders;
@@ -63,6 +65,7 @@ public class OrderIntakeSupport {
   private final OrderRecipientRepository recipients;
   private final OrderStateMachine stateMachine;
   private final OrderReservationCoverage coverage;
+  private final ReserveDemandPlanner demandPlanner;
   private final ReservationEngine engine;
   private final ReconciliationIssueRepository reconciliation;
   private final ShadowDiffRepository shadowDiff;
@@ -82,6 +85,7 @@ public class OrderIntakeSupport {
       OrderRecipientRepository recipients,
       OrderStateMachine stateMachine,
       OrderReservationCoverage coverage,
+      ReserveDemandPlanner demandPlanner,
       ReservationEngine engine,
       ReconciliationIssueRepository reconciliation,
       ShadowDiffRepository shadowDiff,
@@ -99,6 +103,7 @@ public class OrderIntakeSupport {
     this.recipients = recipients;
     this.stateMachine = stateMachine;
     this.coverage = coverage;
+    this.demandPlanner = demandPlanner;
     this.engine = engine;
     this.reconciliation = reconciliation;
     this.shadowDiff = shadowDiff;
@@ -173,8 +178,14 @@ public class OrderIntakeSupport {
     List<ReserveItem> reserveItems =
         mapped.stream().filter(LineMapping::mapped).map(LineMapping::reserveItem).toList();
     boolean hasUnmapped = mapped.stream().anyMatch(line -> !line.mapped());
+    boolean componentlessBundle =
+        stockEnforced
+            && !reserveItems.isEmpty()
+            && !demandPlanner
+                .componentlessBundleSkus(reserveItems.stream().map(ReserveItem::skuId).toList())
+                .isEmpty();
     List<Shortfall> stockShortfalls = List.of();
-    if (stockEnforced && !reserveItems.isEmpty()) {
+    if (stockEnforced && !reserveItems.isEmpty() && !componentlessBundle) {
       UUID groupId = parseUuid(payload.reservationId());
       hooks.beforeEngineWrite();
       AdoptResult adopt =
@@ -196,6 +207,9 @@ public class OrderIntakeSupport {
       if (!stockShortfalls.isEmpty()) {
         holdNote = shortfallNote(stockShortfalls);
       }
+    } else if (componentlessBundle) {
+      holdReason = "OUT_OF_STOCK";
+      holdNote = BUNDLE_WITHOUT_COMPONENTS_NOTE;
     } else if (!stockShortfalls.isEmpty()) {
       holdReason = "OUT_OF_STOCK";
       recordOversell(account, mapped, stockShortfalls);
@@ -415,7 +429,11 @@ public class OrderIntakeSupport {
     for (Shortfall sf : shortfalls) {
       ObjectNode entry = json.createObjectNode();
       mapped.stream()
-          .filter(line -> line.skuId() != null && line.skuId().equals(sf.skuId()))
+          .filter(
+              line ->
+                  line.skuId() != null
+                      && (line.skuId().equals(sf.skuId())
+                          || sf.requestedBy().contains(line.skuId())))
           .findFirst()
           .ifPresent(line -> entry.put("line_id", line.externalLineId()));
       entry.put("sku_id", sf.skuId().toString());

@@ -28,9 +28,13 @@ public class OrderReservationCoverage {
     if (mappedNeeds.isEmpty()) {
       return true;
     }
-    Map<UUID, Integer> need = demandPlanner.componentDemand(mappedNeeds);
+    ReserveDemandPlanner.ComponentDemandPlan plan = demandPlanner.componentDemandPlan(mappedNeeds);
+    if (!plan.componentlessBundleSkuIds().isEmpty()) {
+      return false;
+    }
+    Map<UUID, Integer> need = plan.demand();
     if (need.isEmpty()) {
-      return true;
+      return false;
     }
     OffsetDateTime cutoff = OffsetDateTime.ofInstant(now, ZoneOffset.UTC);
     List<Map<String, Object>> rows =

@@ -322,11 +322,12 @@ public class ReservationEngine {
     Set<UUID> itemSkuIds = new LinkedHashSet<>();
     items.forEach(item -> itemSkuIds.add(item.skuId()));
     Map<UUID, SkuInfo> skus = repository.skus(itemSkuIds);
+    Outcome<?> skuValidation = validateKnownSkus(tenantId, SCOPE_RESERVE, key, itemSkuIds, skus);
+    if (skuValidation != null) {
+      return skuValidation;
+    }
     for (UUID skuId : itemSkuIds) {
       SkuInfo sku = skus.get(skuId);
-      if (sku == null) {
-        return fail(tenantId, SCOPE_RESERVE, key, StockError.UNKNOWN_SKU, "unknown sku " + skuId);
-      }
       if (sku.bundle() && sku.components().isEmpty()) {
         return fail(
             tenantId,
@@ -744,6 +745,16 @@ public class ReservationEngine {
     Set<UUID> itemSkuIds = new LinkedHashSet<>();
     items.forEach(item -> itemSkuIds.add(item.skuId()));
     Map<UUID, SkuInfo> skus = repository.skus(itemSkuIds);
+    Outcome<?> skuValidation = validateKnownSkus(tenantId, SCOPE_ADOPT, key, itemSkuIds, skus);
+    if (skuValidation != null) {
+      return skuValidation;
+    }
+    List<Shortfall> componentless = componentlessBundleShortfalls(items, skus, defaultWarehouse);
+    if (!componentless.isEmpty()) {
+      AdoptResult result = AdoptResult.shortfall(checkoutGroupId, 0, 0, componentless);
+      idempotency.complete(tenantId, SCOPE_ADOPT, key, StockError.OUT_OF_STOCK.status(), result);
+      return Outcome.success(result);
+    }
     Map<SkuWarehouse, Need> needs = explode(items, skus, defaultWarehouse);
 
     int transferredQty = 0;
@@ -971,6 +982,18 @@ public class ReservationEngine {
     Set<UUID> itemSkuIds = new LinkedHashSet<>();
     items.forEach(item -> itemSkuIds.add(item.skuId()));
     Map<UUID, SkuInfo> skus = repository.skus(itemSkuIds);
+    Outcome<?> skuValidation =
+        validateKnownSkus(tenantId, SCOPE_ENSURE_ORDER_HOLD, key, itemSkuIds, skus);
+    if (skuValidation != null) {
+      return skuValidation;
+    }
+    List<Shortfall> componentless = componentlessBundleShortfalls(items, skus, defaultWarehouse);
+    if (!componentless.isEmpty()) {
+      EnsureHoldResult result = EnsureHoldResult.shortfall(componentless);
+      idempotency.complete(
+          tenantId, SCOPE_ENSURE_ORDER_HOLD, key, StockError.OUT_OF_STOCK.status(), result);
+      return Outcome.success(result);
+    }
     Map<SkuWarehouse, Need> needs = explode(items, skus, defaultWarehouse);
 
     List<ReservationRow> active = repository.activeByOwner(owner);
@@ -1137,6 +1160,30 @@ public class ReservationEngine {
     if (owner.type() != OwnerType.ORDER) {
       throw new IllegalArgumentException(operation + " applies to ORDER reservations only");
     }
+  }
+
+  private <T> Outcome<T> validateKnownSkus(
+      UUID tenantId, String scope, String key, Set<UUID> itemSkuIds, Map<UUID, SkuInfo> skus) {
+    for (UUID skuId : itemSkuIds) {
+      if (skus.get(skuId) == null) {
+        return fail(tenantId, scope, key, StockError.UNKNOWN_SKU, "unknown sku " + skuId);
+      }
+    }
+    return null;
+  }
+
+  private static List<Shortfall> componentlessBundleShortfalls(
+      List<ReserveItem> items, Map<UUID, SkuInfo> skus, UUID defaultWarehouse) {
+    List<Shortfall> shortfalls = new ArrayList<>();
+    for (ReserveItem item : items) {
+      SkuInfo sku = skus.get(item.skuId());
+      if (sku != null && sku.bundle() && sku.components().isEmpty()) {
+        UUID warehouseId = item.warehouseId() == null ? defaultWarehouse : item.warehouseId();
+        shortfalls.add(
+            new Shortfall(item.skuId(), warehouseId, item.qty(), 0, List.of(item.skuId())));
+      }
+    }
+    return shortfalls;
   }
 
   private static String canonicalReserve(StockOwner owner, Duration ttl, List<ReserveItem> items) {

@@ -116,8 +116,23 @@ public class ReconciliationIssueRepository {
             + MAX_EVENTS
             + """
             ),
-            distinct_count AS (
-              SELECT count(*)::int AS cnt FROM deduped
+            base_count AS (
+              SELECT COALESCE(
+                NULLIF(reconciliation_issue.details->>'count', '')::int,
+                jsonb_array_length(COALESCE(reconciliation_issue.details->'events', '[]'::jsonb))
+              ) AS cnt
+            ),
+            incoming AS (
+              SELECT EXCLUDED.details->'events'->0->>'inbox_event_id' AS inbox_event_id
+            ),
+            is_new AS (
+              SELECT NOT EXISTS (
+                SELECT 1
+                FROM jsonb_array_elements(
+                  COALESCE(reconciliation_issue.details->'events', '[]'::jsonb)
+                ) AS e(value)
+                WHERE e.value->>'inbox_event_id' = (SELECT inbox_event_id FROM incoming)
+              ) AS add_one
             )
             SELECT jsonb_build_object(
               'events',
@@ -126,7 +141,8 @@ public class ReconciliationIssueRepository {
                 '[]'::jsonb
               ),
               'count',
-              (SELECT cnt FROM distinct_count)
+              (SELECT cnt FROM base_count)
+              + CASE WHEN (SELECT add_one FROM is_new) THEN 1 ELSE 0 END
             )
           ),
           updated_at = now()
