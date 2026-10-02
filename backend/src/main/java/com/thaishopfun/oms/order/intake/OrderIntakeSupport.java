@@ -185,8 +185,6 @@ public class OrderIntakeSupport {
               "order.adopt:" + message.eventId());
       if (!adopt.adopted()) {
         stockShortfalls = adopt.shortfalls();
-      } else if (groupId != null) {
-        engine.release(groupId, "order.release-checkout:" + message.eventId());
       }
     }
 
