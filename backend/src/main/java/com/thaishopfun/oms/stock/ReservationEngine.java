@@ -322,7 +322,8 @@ public class ReservationEngine {
     Set<UUID> itemSkuIds = new LinkedHashSet<>();
     items.forEach(item -> itemSkuIds.add(item.skuId()));
     Map<UUID, SkuInfo> skus = repository.skus(itemSkuIds);
-    Outcome<?> skuValidation = validateKnownSkus(tenantId, SCOPE_RESERVE, key, itemSkuIds, skus);
+    Outcome<ReserveResult> skuValidation =
+        validateKnownSkus(tenantId, SCOPE_RESERVE, key, itemSkuIds, skus);
     if (skuValidation != null) {
       return skuValidation;
     }
@@ -745,7 +746,8 @@ public class ReservationEngine {
     Set<UUID> itemSkuIds = new LinkedHashSet<>();
     items.forEach(item -> itemSkuIds.add(item.skuId()));
     Map<UUID, SkuInfo> skus = repository.skus(itemSkuIds);
-    Outcome<?> skuValidation = validateKnownSkus(tenantId, SCOPE_ADOPT, key, itemSkuIds, skus);
+    Outcome<AdoptResult> skuValidation =
+        validateKnownSkus(tenantId, SCOPE_ADOPT, key, itemSkuIds, skus);
     if (skuValidation != null) {
       return skuValidation;
     }
@@ -982,7 +984,7 @@ public class ReservationEngine {
     Set<UUID> itemSkuIds = new LinkedHashSet<>();
     items.forEach(item -> itemSkuIds.add(item.skuId()));
     Map<UUID, SkuInfo> skus = repository.skus(itemSkuIds);
-    Outcome<?> skuValidation =
+    Outcome<EnsureHoldResult> skuValidation =
         validateKnownSkus(tenantId, SCOPE_ENSURE_ORDER_HOLD, key, itemSkuIds, skus);
     if (skuValidation != null) {
       return skuValidation;
