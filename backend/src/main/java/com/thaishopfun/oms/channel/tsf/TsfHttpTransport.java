@@ -26,6 +26,12 @@ import org.springframework.stereotype.Component;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
+/**
+ * TSF internal HTTP client. {@link HttpClient#connectTimeout} is capped by {@code min(10s,
+ * oms.channel.tsf.http-timeout)}; the JDK does not support per-request connect timeouts. Each call
+ * sets {@link HttpRequest#timeout} to {@code min(http-timeout, remaining budget)} for the full
+ * connect+transfer bound.
+ */
 @Component
 public class TsfHttpTransport {
 
@@ -47,9 +53,12 @@ public class TsfHttpTransport {
     this.json = json;
     this.clock = clock;
     this.channelProperties = channelProperties;
+    Duration connectTimeout =
+        ChannelCallBudget.minDuration(
+            Duration.ofSeconds(10), channelProperties.getTsf().getHttpTimeout());
     this.httpClient =
         HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(10))
+            .connectTimeout(connectTimeout)
             .followRedirects(HttpClient.Redirect.NEVER)
             .build();
   }
@@ -173,14 +182,17 @@ public class TsfHttpTransport {
     String value = header.trim();
     try {
       long seconds = Long.parseLong(value);
-      return seconds > 0 ? (int) Math.min(seconds, Integer.MAX_VALUE) : null;
+      if (seconds < 0) {
+        return null;
+      }
+      return (int) Math.min(seconds, Integer.MAX_VALUE);
     } catch (NumberFormatException ignored) {
       try {
         ZonedDateTime when =
             ZonedDateTime.parse(value, DateTimeFormatter.RFC_1123_DATE_TIME.withLocale(Locale.US));
         Duration delay = Duration.between(clock.instant(), when.toInstant());
-        if (delay.isZero() || delay.isNegative()) {
-          return null;
+        if (delay.isNegative() || delay.isZero()) {
+          return 0;
         }
         return (int) Math.min(delay.toSeconds(), Integer.MAX_VALUE);
       } catch (DateTimeParseException ex) {

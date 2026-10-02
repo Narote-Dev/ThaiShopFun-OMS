@@ -105,6 +105,109 @@ class ChannelAdapterUnitTest {
   }
 
   @Test
+  void retryAfterZeroRetriesImmediately() throws Exception {
+    AtomicInteger hits = new AtomicInteger();
+    int port = startOrderServer(Clock.systemUTC(), hits, 429, "Retry-After", "0", null);
+    ChannelProperties properties = properties();
+    properties.getTsf().setRetryMaxAttempts(3);
+    properties.getTsf().setRetryWaitBase(Duration.ofMillis(1));
+    properties.getTsf().setRetryWaitMax(Duration.ofMillis(1));
+    TsfChannelAdapter adapter =
+        tsfAdapter(port, properties, new ChannelResilienceTest.RecordingSleeper());
+    adapter.getOrder(accountRef(), "TSF-DATE");
+    assertThat(hits).hasValue(2);
+  }
+
+  @Test
+  void retryAfterPastHttpDateRetriesImmediately() throws Exception {
+    Instant fixed = Instant.parse("2026-01-01T00:00:00Z");
+    Clock clock = Clock.fixed(fixed, ZoneOffset.UTC);
+    String past =
+        DateTimeFormatter.RFC_1123_DATE_TIME
+            .withLocale(Locale.US)
+            .format(ZonedDateTime.ofInstant(fixed.minusSeconds(120), ZoneOffset.UTC));
+    AtomicInteger hits = new AtomicInteger();
+    int port = startOrderServer(clock, hits, 429, "Retry-After", past, null);
+    ChannelProperties properties = properties();
+    properties.getTsf().setRetryMaxAttempts(3);
+    properties.getTsf().setRetryWaitBase(Duration.ofMillis(1));
+    properties.getTsf().setRetryWaitMax(Duration.ofMillis(1));
+    TsfChannelAdapter adapter =
+        tsfAdapter(port, properties, new ChannelResilienceTest.RecordingSleeper(), clock);
+    adapter.getOrder(accountRef(), "TSF-DATE");
+    assertThat(hits).hasValue(2);
+  }
+
+  @Test
+  void invalidTokenPayloadIsRetriedAsUnavailable() throws Exception {
+    AtomicInteger tokenHits = new AtomicInteger();
+    AtomicInteger orderHits = new AtomicInteger();
+    HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    server.createContext(
+        "/token",
+        exchange -> {
+          int hit = tokenHits.incrementAndGet();
+          byte[] body =
+              hit == 1
+                  ? "{\"expires_in\":3600}".getBytes(StandardCharsets.UTF_8)
+                  : "{\"access_token\":\"ok-token\",\"expires_in\":3600}"
+                      .getBytes(StandardCharsets.UTF_8);
+          exchange.getResponseHeaders().set("Content-Type", "application/json");
+          exchange.sendResponseHeaders(200, body.length);
+          exchange.getResponseBody().write(body);
+          exchange.close();
+        });
+    attachOrderHandler(server, orderHits, "TSF-INVALID");
+    server.start();
+    servers.add(server);
+    ChannelProperties properties = properties();
+    properties.getTsf().setRetryMaxAttempts(3);
+    TsfChannelAdapter adapter =
+        tsfAdapter(
+            server.getAddress().getPort(),
+            properties,
+            new ChannelResilienceTest.RecordingSleeper());
+    OrderDetail detail = adapter.getOrder(accountRef(), "TSF-INVALID");
+    assertThat(detail.orderId()).isEqualTo("TSF-INVALID");
+    assertThat(tokenHits).hasValue(2);
+    assertThat(orderHits).hasValue(1);
+  }
+
+  @Test
+  void nonJsonTokenResponseIsRetriedAsUnavailable() throws Exception {
+    AtomicInteger tokenHits = new AtomicInteger();
+    AtomicInteger orderHits = new AtomicInteger();
+    HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    server.createContext(
+        "/token",
+        exchange -> {
+          int hit = tokenHits.incrementAndGet();
+          byte[] body =
+              hit == 1
+                  ? "not-json".getBytes(StandardCharsets.UTF_8)
+                  : "{\"access_token\":\"ok-token\",\"expires_in\":3600}"
+                      .getBytes(StandardCharsets.UTF_8);
+          exchange.getResponseHeaders().set("Content-Type", "application/json");
+          exchange.sendResponseHeaders(200, body.length);
+          exchange.getResponseBody().write(body);
+          exchange.close();
+        });
+    attachOrderHandler(server, orderHits, "TSF-BAD-JSON");
+    server.start();
+    servers.add(server);
+    ChannelProperties properties = properties();
+    properties.getTsf().setRetryMaxAttempts(3);
+    TsfChannelAdapter adapter =
+        tsfAdapter(
+            server.getAddress().getPort(),
+            properties,
+            new ChannelResilienceTest.RecordingSleeper());
+    adapter.getOrder(accountRef(), "TSF-BAD-JSON");
+    assertThat(tokenHits).hasValue(2);
+    assertThat(orderHits).hasValue(1);
+  }
+
+  @Test
   void clientErrorsAnd409AreNotRetried() throws Exception {
     AtomicInteger notFoundHits = new AtomicInteger();
     HttpServer server404 = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
@@ -534,6 +637,10 @@ class ChannelAdapterUnitTest {
     return tsfAdapter(port, properties(), sleeper, clock, port > 0);
   }
 
+  private TsfChannelAdapter tsfAdapter(int port, ChannelProperties properties, Sleeper sleeper) {
+    return tsfAdapter(port, properties, sleeper, Clock.systemUTC(), port > 0);
+  }
+
   private TsfChannelAdapter tsfAdapter(
       int port, ChannelProperties properties, Sleeper sleeper, Clock clock) {
     return tsfAdapter(port, properties, sleeper, clock, port > 0);
@@ -591,6 +698,27 @@ class ChannelAdapterUnitTest {
         List.of(),
         Instant.parse("2026-01-01T00:00:00Z"),
         1L);
+  }
+
+  private static void attachOrderHandler(
+      HttpServer server, AtomicInteger orderHits, String orderId) {
+    server.createContext(
+        "/internal/v1/orders/" + orderId,
+        exchange -> {
+          orderHits.incrementAndGet();
+          byte[] body =
+              ("""
+              {"order_id":"%s","reservation_id":"rsv","payment_method":"PREPAID",\
+              "currency":"THB","lines":[],"updated_at":"2026-01-01T00:00:00Z",\
+              "aggregate_version":1}
+              """
+                      .formatted(orderId))
+                  .getBytes(StandardCharsets.UTF_8);
+          exchange.getResponseHeaders().set("Content-Type", "application/json");
+          exchange.sendResponseHeaders(200, body.length);
+          exchange.getResponseBody().write(body);
+          exchange.close();
+        });
   }
 
   private static void attachToken(HttpServer server) {

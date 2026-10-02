@@ -19,6 +19,7 @@ import com.thaishopfun.oms.channel.exception.ChannelServerErrorException;
 import com.thaishopfun.oms.channel.exception.ChannelUnavailableException;
 import com.thaishopfun.oms.channel.exception.UnsupportedCapabilityException;
 import com.thaishopfun.oms.channel.tsf.TsfChannelAdapter;
+import io.github.resilience4j.ratelimiter.internal.AtomicRateLimiter;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
@@ -968,6 +969,51 @@ class ChannelResilienceTest {
     runner.join(5000);
     assertThat(interruptedOnWorker).isTrue();
     assertThat(attempts.get()).isGreaterThanOrEqualTo(1);
+  }
+
+  @Test
+  void rateLimiterSkipsReserveWhenWaitExceedsRemainingBudget() {
+    Clock clock = Clock.fixed(Instant.parse("2026-01-01T00:00:00Z"), ZoneOffset.UTC);
+    ChannelProperties properties = properties();
+    properties.getTsf().setRateLimitPerSecond(1);
+    properties.getTsf().setRateLimitWait(Duration.ofSeconds(30));
+    properties.getTsf().setRetryMaxAttempts(1);
+    AccountResilienceRegistry resilience =
+        new AccountResilienceRegistry(properties, new ChannelMetrics(meters));
+    ChannelAccountRef account = accountRef();
+    AtomicRateLimiter limiter =
+        (AtomicRateLimiter) resilience.rateLimiter(Channel.TSF, account.channelAccountId());
+    TestChannelAdapter adapter =
+        new TestChannelAdapter(
+            resilience,
+            properties,
+            new ChannelMetrics(meters),
+            new RecordingSleeper(),
+            clock,
+            () -> sampleOrder());
+    adapter.getOrder(account, "first");
+    assertThat(limiter.getDetailedMetrics().getAvailablePermissions()).isZero();
+
+    ChannelProperties tight = properties();
+    tight.getTsf().setRateLimitPerSecond(1);
+    tight.getTsf().setRateLimitWait(Duration.ofSeconds(30));
+    tight.getTsf().setCallTimeBudget(Duration.ofMillis(50));
+    tight.getTsf().setRetryMaxAttempts(1);
+    TestChannelAdapter tightAdapter =
+        new TestChannelAdapter(
+            resilience,
+            tight,
+            new ChannelMetrics(meters),
+            new RecordingSleeper(),
+            clock,
+            () -> sampleOrder());
+    int waitingBefore = limiter.getDetailedMetrics().getNumberOfWaitingThreads();
+    assertThatThrownBy(() -> tightAdapter.getOrder(account, "second"))
+        .isInstanceOf(ChannelRateLimitedException.class);
+    assertThat(limiter.getDetailedMetrics().getNumberOfWaitingThreads()).isEqualTo(waitingBefore);
+
+    properties.getTsf().setCallTimeBudget(Duration.ofSeconds(10));
+    adapter.getOrder(account, "third");
   }
 
   @Test
