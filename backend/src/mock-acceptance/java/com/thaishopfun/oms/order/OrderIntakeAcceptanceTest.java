@@ -66,6 +66,7 @@ class OrderIntakeAcceptanceTest {
   private static final JsonMapper JSON = JsonMapper.builder().build();
   private static final HttpClient HTTP =
       HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
+  private static final Duration HTTP_TIMEOUT = Duration.ofSeconds(20);
   private static final ContractValidator CONTRACT = ContractValidator.classpath();
 
   private static ConfigurableApplicationContext mock;
@@ -170,6 +171,7 @@ class OrderIntakeAcceptanceTest {
                     HttpRequest.newBuilder(
                             URI.create(
                                 "http://127.0.0.1:" + mockPort() + "/control/received-events"))
+                        .timeout(HTTP_TIMEOUT)
                         .GET()
                         .build(),
                     HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8))
@@ -451,6 +453,7 @@ class OrderIntakeAcceptanceTest {
     String eventId = event.path("event_id").asString();
     HttpRequest request =
         HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + "/internal/v1/events"))
+            .timeout(HTTP_TIMEOUT)
             .header("Content-Type", "application/json")
             .header("X-Event-Id", eventId)
             .header("X-Signature", sign(INBOX_SECRET, now(), body))
