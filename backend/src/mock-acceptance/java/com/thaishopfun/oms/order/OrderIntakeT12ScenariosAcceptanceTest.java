@@ -14,6 +14,7 @@ import com.thaishopfun.oms.auth.UuidV7;
 import com.thaishopfun.oms.inbox.InboxWorker;
 import com.thaishopfun.oms.order.intake.OrderIntakeSupport;
 import com.thaishopfun.oms.outbox.OutboxPublisher;
+import com.thaishopfun.oms.stock.OrderIntakeFaultTestConfig;
 import com.thaishopfun.oms.stock.StockFixture;
 import com.thaishopfun.oms.tenant.TenantContext;
 import java.io.IOException;
@@ -178,7 +179,14 @@ class OrderIntakeT12ScenariosAcceptanceTest {
                         "SELECT count(*) FROM stock_reservation WHERE owner_type = 'ORDER'",
                         Long.class)))
         .isZero();
-    assertThat(tableCount("idempotency_key")).isLessThanOrEqualTo(2);
+    assertThat(
+            fixture.inTenant(
+                shop.tenant(),
+                () ->
+                    jdbc.queryForObject(
+                        "SELECT count(*) FROM idempotency_key WHERE scope = 'stock.adopt'",
+                        Long.class)))
+        .isZero();
     assertThat(text("SELECT status FROM inbox_event WHERE event_id = ?", eventId))
         .isEqualTo("FAILED");
 
@@ -841,6 +849,182 @@ class OrderIntakeT12ScenariosAcceptanceTest {
   }
 
   @Test
+  void twoOrphanPaidsShareOneOpenReconciliationIssue() throws Exception {
+    StockFixture.Shop shop = fixture.shop("ACTIVE");
+    String shopId = fixture.tsfShopId(shop);
+    UUID account = fixture.tsfChannelAccount(shop, "ACTIVE", "CONNECTED");
+    UUID sku = fixture.sku(shop, 2);
+    fixture.channelListing(shop, account, "L-2orph", sku, true);
+
+    String externalA = "TSF-OR-A-" + UUID.randomUUID();
+    String externalB = "TSF-OR-B-" + UUID.randomUUID();
+    ObjectNode paidA = orderPaid(externalA, shopId, 1);
+    ObjectNode paidB = orderPaid(externalB, shopId, 1);
+    ingest(paidA);
+    ingest(paidB);
+    assertThat(worker.processAvailable(10)).isEqualTo(2);
+
+    Instant old = Instant.now().minus(25, ChronoUnit.HOURS);
+    backdateReceivedAt(paidA.path("event_id").asString(), old);
+    backdateReceivedAt(paidB.path("event_id").asString(), old);
+    rewind(paidA.path("event_id").asString());
+    rewind(paidB.path("event_id").asString());
+    assertThat(worker.processAvailable(10)).isEqualTo(1);
+    assertThat(
+            text(
+                "SELECT status FROM inbox_event WHERE event_id = ?",
+                paidA.path("event_id").asString()))
+        .isEqualTo("FAILED");
+    rewind(paidB.path("event_id").asString());
+    assertThat(worker.processAvailable(10)).isEqualTo(1);
+    assertThat(
+            text(
+                "SELECT status FROM inbox_event WHERE event_id = ?",
+                paidB.path("event_id").asString()))
+        .isEqualTo("FAILED");
+
+    JsonNode details =
+        fixture.inTenant(
+            shop.tenant(),
+            () ->
+                JSON.readTree(
+                    jdbc.queryForObject(
+                        """
+                        SELECT details::text FROM reconciliation_issue
+                        WHERE rule = 'ORDER_EVENT_WITHOUT_ORDER' AND status = 'OPEN'
+                        """,
+                        String.class)));
+    assertThat(details.path("count").asInt()).isEqualTo(2);
+    assertThat(details.path("events").size()).isEqualTo(2);
+  }
+
+  @Test
+  void duplicatePaidAfterCancelDoesNotOpenSecondIssue() throws Exception {
+    StockFixture.Shop shop = fixture.shop("ACTIVE");
+    String shopId = fixture.tsfShopId(shop);
+    UUID account = fixture.tsfChannelAccount(shop, "ACTIVE", "CONNECTED");
+    UUID sku = fixture.sku(shop, 2);
+    fixture.channelListing(shop, account, "L-dpac", sku, true);
+
+    JsonNode checkout = checkoutViaControl("chk-dpac", shopId, "L-dpac", 1);
+    String externalOrderId = "TSF-DPAC-" + UUID.randomUUID();
+    ingest(
+        orderCreated(
+            externalOrderId,
+            shopId,
+            checkout.path("reservation_id").asString(),
+            "PREPAID",
+            "L-dpac",
+            1,
+            1));
+    assertThat(worker.processAvailable(10)).isEqualTo(1);
+    ingest(orderCancelled(externalOrderId, shopId, 2));
+    assertThat(worker.processAvailable(10)).isEqualTo(1);
+
+    ingest(orderPaid(externalOrderId, shopId, 3));
+    assertThat(worker.processAvailable(10)).isEqualTo(1);
+    ingest(orderPaid(externalOrderId, shopId, 4));
+    assertThat(worker.processAvailable(10)).isEqualTo(1);
+    assertThat(
+            fixture.inTenant(
+                shop.tenant(),
+                () ->
+                    jdbc.queryForObject(
+                        """
+                        SELECT count(*) FROM reconciliation_issue
+                        WHERE rule = 'PAID_AFTER_CANCEL' AND status = 'OPEN'
+                        """,
+                        Long.class)))
+        .isEqualTo(1);
+  }
+
+  @Test
+  void secondCancelWithNewEventIdReleasesNothing() throws Exception {
+    StockFixture.Shop shop = fixture.shop("ACTIVE");
+    String shopId = fixture.tsfShopId(shop);
+    UUID account = fixture.tsfChannelAccount(shop, "ACTIVE", "CONNECTED");
+    UUID sku = fixture.sku(shop, 3);
+    fixture.channelListing(shop, account, "L-scn", sku, true);
+
+    JsonNode checkout = checkoutViaControl("chk-scn", shopId, "L-scn", 2);
+    String externalOrderId = "TSF-SCN-" + UUID.randomUUID();
+    ingest(
+        orderCreated(
+            externalOrderId,
+            shopId,
+            checkout.path("reservation_id").asString(),
+            "COD",
+            "L-scn",
+            2,
+            1));
+    assertThat(worker.processAvailable(10)).isEqualTo(1);
+    assertThat(fixture.reserved(shop, sku)).isEqualTo(2);
+
+    ingest(orderCancelled(externalOrderId, shopId, 2));
+    assertThat(worker.processAvailable(10)).isEqualTo(1);
+    assertThat(fixture.reserved(shop, sku)).isZero();
+
+    ObjectNode secondCancel = orderCancelled(externalOrderId, shopId, 3);
+    ingest(secondCancel);
+    assertThat(worker.processAvailable(10)).isEqualTo(1);
+    assertThat(fixture.reserved(shop, sku)).isZero();
+  }
+
+  @Test
+  void blankReservationIdFreshReservesMappedLines() throws Exception {
+    StockFixture.Shop shop = fixture.shop("ACTIVE");
+    String shopId = fixture.tsfShopId(shop);
+    UUID account = fixture.tsfChannelAccount(shop, "ACTIVE", "CONNECTED");
+    UUID sku = fixture.sku(shop, 3);
+    fixture.channelListing(shop, account, "L-blank", sku, true);
+
+    String externalOrderId = "TSF-BLANK-" + UUID.randomUUID();
+    ingest(orderCreated(externalOrderId, shopId, "   ", "COD", "L-blank", 2, 1));
+    assertThat(worker.processAvailable(10)).isEqualTo(1);
+    assertThat(fixture.reserved(shop, sku)).isEqualTo(2);
+  }
+
+  @Test
+  void prepaidPaymentHistoryIncludesPendingToPaid() throws Exception {
+    StockFixture.Shop shop = fixture.shop("ACTIVE");
+    String shopId = fixture.tsfShopId(shop);
+    UUID account = fixture.tsfChannelAccount(shop, "ACTIVE", "CONNECTED");
+    UUID sku = fixture.sku(shop, 2);
+    fixture.channelListing(shop, account, "L-hist", sku, true);
+
+    JsonNode checkout = checkoutViaControl("chk-hist", shopId, "L-hist", 1);
+    String externalOrderId = "TSF-HIST-" + UUID.randomUUID();
+    ingest(
+        orderCreated(
+            externalOrderId,
+            shopId,
+            checkout.path("reservation_id").asString(),
+            "PREPAID",
+            "L-hist",
+            1,
+            1));
+    assertThat(worker.processAvailable(10)).isEqualTo(1);
+    ingest(orderPaid(externalOrderId, shopId, 2));
+    assertThat(worker.processAvailable(10)).isEqualTo(1);
+    assertThat(
+            fixture.inTenant(
+                shop.tenant(),
+                () ->
+                    jdbc.queryForObject(
+                        """
+                        SELECT count(*) FROM order_status_history h
+                        JOIN sales_order o ON o.id = h.order_id
+                        WHERE o.external_order_id = ?
+                          AND h.dimension = 'PAYMENT'
+                          AND h.from_status = 'PENDING'
+                          AND h.to_status = 'PAID'
+                        """,
+                        Long.class,
+                        externalOrderId)))
+        .isEqualTo(1);
+  }
+
+  @Test
   void tenantsIsolateSameExternalOrderIdAndForeignReservationId() throws Exception {
     StockFixture.Shop shopA = fixture.shop("ACTIVE");
     StockFixture.Shop shopB = fixture.shop("ACTIVE");
@@ -1160,8 +1344,13 @@ class OrderIntakeT12ScenariosAcceptanceTest {
 
     @Bean
     @Primary
-    OrderIntakeHooks orderIntakeHooks() {
+    OrderIntakeHooks orderIntakeHooks(JdbcTemplate jdbc) {
       return new OrderIntakeHooks() {
+        @Override
+        public void beforeEngineWrite() {
+          OrderIntakeFaultTestConfig.maybeInjectDeadlock(jdbc);
+        }
+
         @Override
         public void afterOutbox() {
           afterOutboxCalls.incrementAndGet();

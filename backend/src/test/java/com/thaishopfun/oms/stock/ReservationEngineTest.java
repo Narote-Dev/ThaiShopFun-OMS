@@ -651,4 +651,49 @@ class ReservationEngineTest extends StockTestBase {
         .extracting(ex -> ((StockOperationException) ex).error())
         .isEqualTo(error);
   }
+
+  @Test
+  void adoptForOrderMergesDeficitIntoExistingPartialCheckoutHold() {
+    Shop shop = fixture.shop("ACTIVE");
+    UUID sku = fixture.sku(shop, 10);
+    ReserveResult checkoutHold =
+        as(shop, () -> engine.reserve(checkout(), List.of(ReserveItem.of(sku, 1)), key()));
+    UUID group = checkoutHold.reservationGroupId();
+    String orderRef = "ord-adopt-" + UUID.randomUUID();
+    as(shop, () -> engine.transferOwner(group, orderRef, key()));
+    int eventsBefore = events.forTenant(shop.tenant()).size();
+    AdoptResult adopt =
+        as(
+            shop,
+            () ->
+                engine.adoptForOrder(
+                    group,
+                    StockOwner.order(orderRef),
+                    List.of(ReserveItem.of(sku, 3)),
+                    null,
+                    key()));
+    assertThat(adopt.adopted()).isTrue();
+    assertThat(adopt.newlyReservedQty()).isEqualTo(2);
+    assertThat(fixture.reserved(shop, sku)).isEqualTo(3);
+    assertThat(fixture.groupRows(shop, group)).hasSize(1);
+    assertThat(events.forTenant(shop.tenant()).size()).isGreaterThan(eventsBefore);
+    fixture.assertInvariants(shop);
+  }
+
+  @Test
+  void ensureOrderHoldReplacesExpiredPartialHold() {
+    Shop shop = fixture.shop("ACTIVE");
+    UUID sku = fixture.sku(shop, 10);
+    String orderRef = "ord-ensure-" + UUID.randomUUID();
+    StockOwner owner = StockOwner.order(orderRef);
+    as(
+        shop,
+        () -> engine.reserve(owner, List.of(ReserveItem.of(sku, 1)), key(), Duration.ofMinutes(5)));
+    clock.advance(Duration.ofMinutes(6));
+    EnsureHoldResult held =
+        as(shop, () -> engine.ensureOrderHold(owner, List.of(ReserveItem.of(sku, 3)), key()));
+    assertThat(held.held()).isTrue();
+    assertThat(fixture.reserved(shop, sku)).isEqualTo(3);
+    fixture.assertInvariants(shop);
+  }
 }

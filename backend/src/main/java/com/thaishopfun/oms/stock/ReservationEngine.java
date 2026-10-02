@@ -872,6 +872,7 @@ public class ReservationEngine {
     }
 
     int newlyReserved = 0;
+    List<ReservedLine> changedForEvent = new ArrayList<>();
     if (!deficitItems.isEmpty()) {
       Map<UUID, Integer> byInventory = new LinkedHashMap<>();
       Map<SkuWarehouse, Need> deficitNeeds = explode(deficitItems, skus, defaultWarehouse);
@@ -891,8 +892,15 @@ public class ReservationEngine {
         ReservationRow existing =
             owned.stream().filter(r -> r.key().equals(entry.getKey())).findFirst().orElse(null);
         if (existing != null) {
-          repository.increaseActiveReservationQty(existing.id(), deficitQty);
+          int merged = repository.increaseActiveReservationQty(existing.id(), deficitQty);
+          if (merged != 1) {
+            throw new StockConflictException(
+                "adopt merge updated " + merged + " rows for reservation " + existing.id());
+          }
           newlyReserved += deficitQty;
+          changedForEvent.add(
+              new ReservedLine(
+                  existing.id(), existing.skuId(), existing.warehouseId(), deficitQty));
           ledger.add(
               new LedgerEntry(
                   UuidV7.generate(),
@@ -922,10 +930,13 @@ public class ReservationEngine {
       }
       if (!lines.isEmpty()) {
         repository.insertReservations(tenantId, orderOwner, newGroup, expiresAt, lines);
+        changedForEvent.addAll(lines);
       }
       if (!ledger.isEmpty()) {
         repository.insertLedger(tenantId, "RESERVE", actor(), ledger);
-        publishChanged(tenantId, lines);
+      }
+      if (!changedForEvent.isEmpty()) {
+        publishChanged(tenantId, changedForEvent);
       }
       groupId = newGroup;
     }

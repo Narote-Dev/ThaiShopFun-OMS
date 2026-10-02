@@ -7,4 +7,7 @@ package com.thaishopfun.oms.order;
 public class OrderIntakeHooks {
 
   public void afterOutbox() {}
+
+  /** Test seam immediately before a stock engine write in intake. */
+  public void beforeEngineWrite() {}
 }

@@ -176,6 +176,7 @@ public class OrderIntakeSupport {
     List<Shortfall> stockShortfalls = List.of();
     if (stockEnforced && !reserveItems.isEmpty()) {
       UUID groupId = parseUuid(payload.reservationId());
+      hooks.beforeEngineWrite();
       AdoptResult adopt =
           engine.adoptForOrder(
               groupId,
@@ -227,6 +228,7 @@ public class OrderIntakeSupport {
     order = applyPayment(order, "PAID", now, account);
     List<ReserveItem> items = mappedReserveItems(order.id());
     if (stockEnforced(account) && !items.isEmpty()) {
+      hooks.beforeEngineWrite();
       EnsureHoldResult held =
           engine.ensureOrderHold(
               StockOwner.order(order.id().toString()), items, "order.ensure:" + message.eventId());
@@ -249,6 +251,7 @@ public class OrderIntakeSupport {
     if ("CANCELLED".equals(order.orderStatus())) {
       return;
     }
+    hooks.beforeEngineWrite();
     engine.release(StockOwner.order(order.id().toString()), "order.release:" + message.eventId());
     stateMachine.applyOrderStatus(
         order, "CANCELLED", "TSF cancel", "TSF", guard(account, order, List.of()));

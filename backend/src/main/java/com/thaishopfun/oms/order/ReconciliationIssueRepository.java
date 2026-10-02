@@ -5,14 +5,21 @@ import com.thaishopfun.oms.tenant.TenantContext;
 import java.util.UUID;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.ObjectNode;
 
 @Repository
 public class ReconciliationIssueRepository {
 
-  private final JdbcTemplate jdbc;
+  private static final int MAX_EVENTS = 100;
 
-  public ReconciliationIssueRepository(JdbcTemplate jdbc) {
+  private final JdbcTemplate jdbc;
+  private final JsonMapper json;
+
+  public ReconciliationIssueRepository(JdbcTemplate jdbc, JsonMapper json) {
     this.jdbc = jdbc;
+    this.json = json;
   }
 
   /** Upserts one open issue per (tenant, rule, order). */
@@ -46,66 +53,57 @@ public class ReconciliationIssueRepository {
   }
 
   /**
-   * One open issue per inbox event when {@code order_id} is unknown. The partial unique index
-   * {@code reconciliation_issue_open_key} uses NULLS NOT DISTINCT, so we dedupe by {@code
-   * details.inbox_event_id} without a migration.
+   * One open shop-level issue per (tenant, rule) when {@code order_id} is unknown. Appends inbox
+   * events into {@code details.events} (cap {@value MAX_EVENTS}) on conflict.
    */
-  public void upsertOpenWithoutOrder(UUID runId, String rule, String detailsJson) {
+  public void upsertOpenWithoutOrder(UUID inboxEventId, String rule, String externalOrderId) {
     UUID tenantId = TenantContext.requireTenantId();
-    String details = detailsJson == null ? "{}" : detailsJson;
-    String inboxEventId = extractInboxEventId(details);
-    if (inboxEventId != null) {
-      Integer existing =
-          jdbc.queryForObject(
-              """
-              SELECT count(*) FROM reconciliation_issue
-              WHERE tenant_id = ? AND rule = ? AND status <> 'RESOLVED'
-                AND details->>'inbox_event_id' = ?
-              """,
-              Integer.class,
-              tenantId,
-              rule,
-              inboxEventId);
-      if (existing != null && existing > 0) {
-        jdbc.update(
-            """
-            UPDATE reconciliation_issue
-            SET details = ?::jsonb, updated_at = now()
-            WHERE tenant_id = ? AND rule = ? AND status <> 'RESOLVED'
-              AND details->>'inbox_event_id' = ?
-            """,
-            details,
-            tenantId,
-            rule,
-            inboxEventId);
-        return;
-      }
+    ObjectNode event = json.createObjectNode();
+    event.put("inbox_event_id", inboxEventId.toString());
+    if (externalOrderId != null && !externalOrderId.isBlank()) {
+      event.put("external_order_id", externalOrderId);
     }
+    ArrayNode events = json.createArrayNode();
+    events.add(event);
+    ObjectNode initial = json.createObjectNode();
+    initial.set("events", events);
+    initial.put("count", 1);
+    String initialJson = json.writeValueAsString(initial);
+
     jdbc.update(
         """
         INSERT INTO reconciliation_issue (id, tenant_id, run_id, rule, order_id, details, status)
-        VALUES (?, ?, ?, ?, NULL, ?::jsonb, 'OPEN')
+        VALUES (?, ?, NULL, ?, NULL, ?::jsonb, 'OPEN')
+        ON CONFLICT (tenant_id, rule, order_id) WHERE (status <> 'RESOLVED')
+        DO UPDATE SET
+          details = jsonb_set(
+            jsonb_set(
+              reconciliation_issue.details,
+              '{events}',
+              (
+                SELECT COALESCE(jsonb_agg(value), '[]'::jsonb)
+                FROM (
+                  SELECT value
+                  FROM jsonb_array_elements(
+                    COALESCE(reconciliation_issue.details->'events', '[]'::jsonb)
+                    || COALESCE(EXCLUDED.details->'events', '[]'::jsonb)
+                  ) WITH ORDINALITY AS t(value, ord)
+                  ORDER BY ord DESC
+                  LIMIT ?
+                ) trimmed
+              ),
+              true
+            ),
+            '{count}',
+            to_jsonb(COALESCE((reconciliation_issue.details->>'count')::int, 0) + 1),
+            true
+          ),
+          updated_at = now()
         """,
         UuidV7.generate(),
         tenantId,
-        runId,
         rule,
-        details);
-  }
-
-  private static String extractInboxEventId(String detailsJson) {
-    int key = detailsJson.indexOf("\"inbox_event_id\"");
-    if (key < 0) {
-      return null;
-    }
-    int start = detailsJson.indexOf('"', key + 16);
-    if (start < 0) {
-      return null;
-    }
-    int end = detailsJson.indexOf('"', start + 1);
-    if (end < 0) {
-      return null;
-    }
-    return detailsJson.substring(start + 1, end);
+        initialJson,
+        MAX_EVENTS);
   }
 }

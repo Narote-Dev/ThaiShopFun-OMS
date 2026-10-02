@@ -60,7 +60,21 @@ public class InboxWorker {
 
   private static final Logger log = LoggerFactory.getLogger(InboxWorker.class);
 
-  private static final String LAST_PROCESSED_VERSION =
+  private static final String LAST_PROCESSED_AGGREGATE =
+      """
+      SELECT MAX(aggregate_version)
+      FROM inbox_event
+      WHERE tenant_id = ?
+        AND source = ?
+        AND aggregate_id = ?
+        AND status = 'PROCESSED'
+        AND aggregate_version > 0
+        AND id <> ?
+        AND event_type NOT IN (%s)
+      """
+          .formatted(InboxEntitlementPolicy.entVerOrderedTypeLiterals());
+
+  private static final String LAST_PROCESSED_FOR_EVENT_TYPE =
       """
       SELECT MAX(aggregate_version)
       FROM inbox_event
@@ -227,8 +241,8 @@ public class InboxWorker {
   private void upsertOrderEventWithoutOrder(InboxRow row) {
     TenantContext.set(row.tenantId(), null);
     try {
-      reconciliation.upsertOpenWithoutOrder(
-          row.id(), "ORDER_EVENT_WITHOUT_ORDER", "{\"inbox_event_id\":\"" + row.id() + "\"}");
+      String externalOrderId = row.payload().path("data").path("order_id").asString(null);
+      reconciliation.upsertOpenWithoutOrder(row.id(), "ORDER_EVENT_WITHOUT_ORDER", externalOrderId);
     } finally {
       TenantContext.clear();
     }
@@ -282,20 +296,21 @@ public class InboxWorker {
     // Step 5: One aggregate at a time, then drop a version that is already applied.
     // Events ordered by ent_ver are not part of this history, and do not use it.
     lockAggregate(row);
-    Long lastVersion = lastProcessedVersion(row);
+    Long lastForStale = lastProcessedVersionForStale(row);
+    Long lastAggregate = lastProcessedVersionAggregate(row);
     boolean entVerOrdered = InboxEntitlementPolicy.ordersByEntVer(row.eventType());
     boolean stale =
         !entVerOrdered
             && row.aggregateVersion() > 0
-            && lastVersion != null
-            && row.aggregateVersion() <= lastVersion;
+            && lastForStale != null
+            && row.aggregateVersion() <= lastForStale;
     // TODO: Handlers must apply the full snapshot in data until REST refetch exists (T10).
     // gap=true means aggregate_version skipped at least one version. Do not assume a delta.
     boolean gap =
         !stale
             && row.aggregateVersion() > 0
-            && lastVersion != null
-            && row.aggregateVersion() > lastVersion + 1;
+            && lastAggregate != null
+            && row.aggregateVersion() > lastAggregate + 1;
     if (!stale) {
       // Step 6: Handler writes and PROCESSED commit together. A throw rolls both back.
       handler.handle(row.message(gap));
@@ -350,16 +365,28 @@ public class InboxWorker {
         key);
   }
 
-  private Long lastProcessedVersion(InboxRow row) {
-    // Step 1: Skip ent_ver-ordered types so a membership version cannot hide a business event.
+  private Long lastProcessedVersionForStale(InboxRow row) {
+    if (InboxAggregateVersionPolicy.versionByEventType(row.eventType())) {
+      return jdbc.queryForObject(
+          LAST_PROCESSED_FOR_EVENT_TYPE,
+          Long.class,
+          row.tenantId(),
+          row.source(),
+          row.aggregateId(),
+          row.id(),
+          row.eventType());
+    }
+    return lastProcessedVersionAggregate(row);
+  }
+
+  private Long lastProcessedVersionAggregate(InboxRow row) {
     return jdbc.queryForObject(
-        LAST_PROCESSED_VERSION,
+        LAST_PROCESSED_AGGREGATE,
         Long.class,
         row.tenantId(),
         row.source(),
         row.aggregateId(),
-        row.id(),
-        row.eventType());
+        row.id());
   }
 
   private void pushBack(InboxRow row, Duration delay) {
