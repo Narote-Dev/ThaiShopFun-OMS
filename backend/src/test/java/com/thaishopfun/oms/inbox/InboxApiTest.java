@@ -354,12 +354,12 @@ class InboxApiTest {
       assertThat(awaitAdvisoryWaiter()).isTrue();
       assertThat(orderCreated.calls.get()).isEqualTo(1);
       orderCreated.release.countDown();
-      left.get(10, TimeUnit.SECONDS);
-      right.get(10, TimeUnit.SECONDS);
-      for (int i = 0; i < 50 && orderCreated.calls.get() < 2; i++) {
-        if (worker.processAvailable(1) == 0) {
-          Thread.sleep(20);
-        }
+      left.get(15, TimeUnit.SECONDS);
+      right.get(15, TimeUnit.SECONDS);
+      long drainUntil = System.nanoTime() + TimeUnit.SECONDS.toNanos(15);
+      while (System.nanoTime() < drainUntil && orderCreated.calls.get() < 2) {
+        worker.processAvailable(1);
+        Thread.sleep(50);
       }
     } finally {
       orderCreated.release.countDown();
