@@ -39,6 +39,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -943,6 +947,75 @@ class OrderIntakeT12ScenariosAcceptanceTest {
   }
 
   @Test
+  void concurrentOrphanPaidsAppendOneIssueAtomically() throws Exception {
+    StockFixture.Shop shop = fixture.shop("ACTIVE");
+    String shopId = fixture.tsfShopId(shop);
+    UUID account = fixture.tsfChannelAccount(shop, "ACTIVE", "CONNECTED");
+    UUID sku = fixture.sku(shop, 2);
+    fixture.channelListing(shop, account, "L-conc-orph", sku, true);
+
+    String externalA = "TSF-COR-A-" + UUID.randomUUID();
+    String externalB = "TSF-COR-B-" + UUID.randomUUID();
+    ObjectNode paidA = orderPaid(externalA, shopId, 1);
+    ObjectNode paidB = orderPaid(externalB, shopId, 1);
+    ingest(paidA);
+    ingest(paidB);
+    assertThat(worker.processAvailable(10)).isEqualTo(2);
+
+    Instant old = Instant.now().minus(25, ChronoUnit.HOURS);
+    backdateReceivedAt(paidA.path("event_id").asString(), old);
+    backdateReceivedAt(paidB.path("event_id").asString(), old);
+    rewind(paidA.path("event_id").asString());
+    rewind(paidB.path("event_id").asString());
+
+    CountDownLatch start = new CountDownLatch(1);
+    ExecutorService pool = Executors.newFixedThreadPool(2);
+    try {
+      Future<?> first =
+          pool.submit(
+              () -> {
+                start.await(10, TimeUnit.SECONDS);
+                return worker.processAvailable(1);
+              });
+      Future<?> second =
+          pool.submit(
+              () -> {
+                start.await(10, TimeUnit.SECONDS);
+                return worker.processAvailable(1);
+              });
+      start.countDown();
+      assertThat(first.get(30, TimeUnit.SECONDS)).isEqualTo(1);
+      assertThat(second.get(30, TimeUnit.SECONDS)).isEqualTo(1);
+    } finally {
+      pool.shutdownNow();
+    }
+
+    assertThat(
+            fixture.inTenant(
+                shop.tenant(),
+                () ->
+                    jdbc.queryForObject(
+                        """
+                        SELECT count(*) FROM reconciliation_issue
+                        WHERE rule = 'ORDER_EVENT_WITHOUT_ORDER' AND status = 'OPEN'
+                        """,
+                        Long.class)))
+        .isEqualTo(1);
+    JsonNode details =
+        fixture.inTenant(
+            shop.tenant(),
+            () ->
+                JSON.readTree(
+                    jdbc.queryForObject(
+                        """
+                        SELECT details::text FROM reconciliation_issue
+                        WHERE rule = 'ORDER_EVENT_WITHOUT_ORDER' AND status = 'OPEN'
+                        """,
+                        String.class)));
+    assertThat(details.path("events").size()).isEqualTo(2);
+  }
+
+  @Test
   void duplicatePaidAfterCancelDoesNotOpenSecondIssue() throws Exception {
     StockFixture.Shop shop = fixture.shop("ACTIVE");
     String shopId = fixture.tsfShopId(shop);
@@ -1095,8 +1168,45 @@ class OrderIntakeT12ScenariosAcceptanceTest {
             1));
     assertThat(worker.processAvailable(10)).isEqualTo(1);
     assertThat(fixture.reserved(shop, skuCtrl)).isEqualTo(1);
-    assertThat(fixture.reserved(shop, skuFree)).isZero();
+    assertThat(fixture.reserved(shop, skuFree)).isEqualTo(1);
     assertNoActiveCheckoutReservations(shop);
+    fixture.assertInvariants(shop);
+  }
+
+  @Test
+  void controlModeUnenforcedLineShortDoesNotIncrementOversellMetric() throws Exception {
+    StockFixture.Shop shop = fixture.shop("ACTIVE");
+    String shopId = fixture.tsfShopId(shop);
+    UUID account = fixture.tsfChannelAccount(shop, "CONTROL", "CONNECTED");
+    UUID skuCtrl = fixture.sku(shop, 10);
+    UUID skuFree = fixture.sku(shop, 0);
+    fixture.channelListing(shop, account, "L-ctl-short", skuCtrl, true);
+    fixture.channelListing(shop, account, "L-free-short", skuFree, false);
+
+    double before = oversellMetric("CONTROL");
+    String externalOrderId = "TSF-CTL-SH-" + UUID.randomUUID();
+    ingest(
+        orderCreatedTwoLines(
+            externalOrderId,
+            shopId,
+            UuidV7.generate().toString(),
+            "COD",
+            "L-ctl-short",
+            "L-free-short",
+            1,
+            1,
+            1));
+    assertThat(worker.processAvailable(10)).isEqualTo(1);
+    assertThat(
+            fixture.inTenant(
+                shop.tenant(),
+                () ->
+                    jdbc.queryForObject(
+                        "SELECT hold_reason FROM sales_order WHERE external_order_id = ?",
+                        String.class,
+                        externalOrderId)))
+        .isEqualTo("OUT_OF_STOCK");
+    assertThat(oversellMetric("CONTROL") - before).isZero();
     fixture.assertInvariants(shop);
   }
 
@@ -1141,6 +1251,18 @@ class OrderIntakeT12ScenariosAcceptanceTest {
             1));
     assertThat(worker.processAvailable(10)).isEqualTo(1);
     assertThat(fixture.reserved(shop, sku)).isEqualTo(1);
+    assertThat(
+            fixture.inTenant(
+                shop.tenant(),
+                () ->
+                    jdbc.queryForObject(
+                        """
+                        SELECT count(*) FROM stock_reservation
+                        WHERE owner_type = 'ORDER' AND status = 'ACTIVE' AND qty = 1
+                        """,
+                        Long.class)))
+        .isEqualTo(1);
+    assertNoActiveCheckoutReservations(shop);
     fixture.assertInvariants(shop);
   }
 
@@ -1211,6 +1333,15 @@ class OrderIntakeT12ScenariosAcceptanceTest {
                         String.class,
                         externalOrderId)))
         .isEqualTo("READY_TO_PICK");
+    assertThat(
+            fixture.inTenant(
+                shop.tenant(),
+                () ->
+                    jdbc.queryForObject(
+                        "SELECT hold_note FROM sales_order WHERE external_order_id = ?",
+                        String.class,
+                        externalOrderId)))
+        .isEmpty();
     fixture.assertInvariants(shop);
   }
 
@@ -1388,6 +1519,33 @@ class OrderIntakeT12ScenariosAcceptanceTest {
                     orderId));
     assertThat(redactAfter).isAfter(beforeCancel.plus(89, ChronoUnit.DAYS));
     assertThat(redactAfter).isBefore(beforeCancel.plus(91, ChronoUnit.DAYS));
+  }
+
+  @Test
+  void prepaidMissingPaymentExpiresAtFailsDead() throws Exception {
+    StockFixture.Shop shop = fixture.shop("ACTIVE");
+    String shopId = fixture.tsfShopId(shop);
+    UUID account = fixture.tsfChannelAccount(shop, "ACTIVE", "CONNECTED");
+    UUID sku = fixture.sku(shop, 2);
+    fixture.channelListing(shop, account, "L-pp-exp", sku, true);
+
+    ObjectNode created =
+        OrderIntakeScenarioSupport.orderCreated(
+            JSON,
+            "TSF-PP-EXP-" + UUID.randomUUID(),
+            shopId,
+            UuidV7.generate().toString(),
+            "PREPAID",
+            "L-pp-exp",
+            1,
+            1);
+    ((ObjectNode) created.path("data")).remove("payment_expires_at");
+    ingest(created);
+    assertThat(worker.processAvailable(10)).isEqualTo(1);
+    String eventId = created.path("event_id").asString();
+    assertThat(text("SELECT status FROM inbox_event WHERE event_id = ?", eventId))
+        .isEqualTo("DEAD");
+    assertThat(text("SELECT attempts FROM inbox_event WHERE event_id = ?", eventId)).isEqualTo("1");
   }
 
   @Test

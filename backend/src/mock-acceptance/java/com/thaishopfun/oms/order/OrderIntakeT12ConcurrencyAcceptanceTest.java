@@ -91,7 +91,7 @@ class OrderIntakeT12ConcurrencyAcceptanceTest {
     registry.add("oms.inbox.hmac-secrets", () -> INBOX_SECRET);
     registry.add("oms.inbox.jitter-ratio", () -> "0");
     registry.add("oms.outbox.publisher-enabled", () -> "false");
-    registry.add("oms.stock.checkout-ttl", () -> "45s");
+    registry.add("oms.stock.checkout-ttl", () -> "2s");
   }
 
   @LocalServerPort private int port;
