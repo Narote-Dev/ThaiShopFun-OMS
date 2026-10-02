@@ -25,6 +25,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
@@ -289,8 +290,25 @@ class ChannelResilienceTest {
 
   @Test
   void httpTimeoutBudgetIncludesRetrySleeps() {
-    Clock clock = Clock.fixed(Instant.parse("2026-01-01T00:00:00Z"), ZoneOffset.UTC);
-    RecordingSleeper sleeper = new RecordingSleeper();
+    java.util.concurrent.atomic.AtomicReference<Instant> now =
+        new java.util.concurrent.atomic.AtomicReference<>(Instant.parse("2026-01-01T00:00:00Z"));
+    Clock clock =
+        new Clock() {
+          @Override
+          public ZoneId getZone() {
+            return ZoneOffset.UTC;
+          }
+
+          @Override
+          public Clock withZone(ZoneId zone) {
+            return this;
+          }
+
+          @Override
+          public Instant instant() {
+            return now.get();
+          }
+        };
     ChannelProperties properties = properties();
     properties.getTsf().setCallTimeBudget(Duration.ofMillis(50));
     properties.getTsf().setRetryMaxAttempts(3);
@@ -301,9 +319,10 @@ class ChannelResilienceTest {
             new AccountResilienceRegistry(properties, new ChannelMetrics(meters)),
             properties,
             new ChannelMetrics(meters),
-            sleeper,
+            new RecordingSleeper(),
             clock,
             () -> {
+              now.set(now.get().plus(Duration.ofMillis(60)));
               throw new ChannelUnavailableException("retry");
             });
     // Step 1: The first retry sleep would exceed the wall-clock budget.
