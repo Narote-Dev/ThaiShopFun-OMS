@@ -38,4 +38,26 @@ public class OrderStatusHistoryRepository {
         reason,
         actor);
   }
+
+  /** Latest time a dimension reached {@code toValue} (for COMPLETED guard). */
+  public java.util.Optional<java.time.Instant> transitionedAt(
+      UUID orderId, String dimension, String toValue) {
+    return jdbc.query(
+        """
+        SELECT created_at FROM order_status_history
+        WHERE order_id = ? AND dimension = ? AND to_value = ?
+        ORDER BY created_at DESC
+        LIMIT 1
+        """,
+        rs -> {
+          if (!rs.next()) {
+            return java.util.Optional.empty();
+          }
+          return java.util.Optional.of(
+              rs.getObject("created_at", java.time.OffsetDateTime.class).toInstant());
+        },
+        orderId,
+        dimension,
+        toValue);
+  }
 }

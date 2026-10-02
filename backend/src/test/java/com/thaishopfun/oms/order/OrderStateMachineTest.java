@@ -137,6 +137,77 @@ class OrderStateMachineTest {
   }
 
   @Test
+  void illegalPaymentTransitionThrowsBeforeHistoryRow() {
+    Shop shop = shop();
+    SalesOrder order = seed(shop, "REFUNDED", "UNFULFILLED", "NONE");
+    GuardContext guards = new GuardContext(true, true, Instant.now());
+
+    assertThatThrownBy(
+            () ->
+                as(
+                    shop,
+                    () ->
+                        stateMachine.applyPaymentStatus(
+                            order, "PENDING", "test", "TEST", null, guards)))
+        .isInstanceOf(OrderStateException.class)
+        .hasMessageContaining("illegal PAYMENT");
+    assertThat(historyCount(shop, order.id())).isZero();
+  }
+
+  @Test
+  void cancelledOrderRejectsPaymentChange() {
+    Shop shop = shop();
+    SalesOrder order =
+        new SalesOrder(
+            UuidV7.generate(),
+            shop.tenant(),
+            shop.channelAccount(),
+            "TSF-" + UuidV7.generate(),
+            "CANCELLED",
+            "PENDING",
+            "UNFULFILLED",
+            "NONE",
+            null,
+            null,
+            "PREPAID",
+            "THB",
+            new BigDecimal("100.00"),
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            new BigDecimal("100.00"),
+            Instant.now().truncatedTo(ChronoUnit.MICROS),
+            null,
+            null,
+            1L,
+            0);
+    as(
+        shop,
+        () -> {
+          orders.insert(order);
+          return null;
+        });
+    GuardContext guards = new GuardContext(true, true, Instant.now());
+
+    assertThatThrownBy(
+            () ->
+                as(
+                    shop,
+                    () ->
+                        stateMachine.applyPaymentStatus(
+                            order, "PAID", "test", "TEST", Instant.now(), guards)))
+        .isInstanceOf(OrderStateException.class)
+        .hasMessageContaining("immutable");
+  }
+
+  @Test
+  void transitionTableIsExposedForMatrixTests() {
+    assertThat(OrderStateMachine.transitionTable())
+        .containsKeys("ORDER", "PAYMENT", "FULFILLMENT", "HOLD");
+    assertThat(OrderStateMachine.transitionTable().get("ORDER").get("ACTIVE"))
+        .containsExactlyInAnyOrder("CANCELLED", "COMPLETED");
+  }
+
+  @Test
   void eachAppliedTransitionWritesExactlyOneHistoryRow() {
     Shop shop = shop();
     SalesOrder order = seed(shop, "PENDING", "UNFULFILLED", "NONE");

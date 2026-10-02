@@ -6,7 +6,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 @Configuration
-@EnableConfigurationProperties(OrderProperties.class)
+@EnableConfigurationProperties({OrderProperties.class, OrderIntakeProperties.class})
 public class OrderConfig {
 
   @Bean

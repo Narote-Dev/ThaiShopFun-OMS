@@ -71,6 +71,7 @@ class InboxApiTest {
     registry.add("oms.inbox.jitter-ratio", () -> "0");
     registry.add("oms.inbox.suspend-defer", () -> "1h");
     registry.add("spring.datasource.hikari.maximum-pool-size", () -> "20");
+    registry.add("oms.order-intake.enabled", () -> "false");
   }
 
   @LocalServerPort private int port;

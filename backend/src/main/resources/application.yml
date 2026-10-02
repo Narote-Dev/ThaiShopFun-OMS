@@ -81,6 +81,8 @@ oms:
     max-defer: 24h
   order:
     unpaid-hold-grace: 10m
+  order-intake:
+    enabled: true
   # T10 recipient PII (AES-256-GCM key ring + HMAC key for phone_hash). No default in any
   # environment: the app refuses to boot without all three. keys = kid:base64-32-byte-key,
   # comma-separated; decrypt accepts any listed key, encrypt uses active-key-id.

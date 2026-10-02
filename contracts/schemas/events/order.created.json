@@ -21,7 +21,7 @@
     "reservation_id": {
       "type": "string",
       "minLength": 1,
-      "description": "Checkout reservation_group_id from POST /internal/v1/inventory/reservations. TSF must pass the reservation_id from the checkout response whenever any item has enforced=true (including mixed CONTROL carts where top-level enforced=false), DELETE it on abandon, and may pass an empty group id when nothing was enforced; OMS treats an unknown or empty group as nothing to adopt and reserves mapped lines fresh."
+      "description": "Checkout reservation_group_id from POST /internal/v1/inventory/reservations. TSF must pass the reservation_id from the checkout response whenever any item has enforced=true (including mixed CONTROL carts where top-level enforced=false), DELETE it on abandon, and may pass a reservation_id that holds nothing when nothing was enforced; OMS treats an unknown id or a group that holds nothing as nothing to adopt and reserves mapped lines fresh."
     },
     "payment_method": {
       "type": "string",

@@ -174,6 +174,7 @@ class DeliveryChaosTest {
     registry.add("oms.inbox.hmac-secrets", () -> INBOX_SECRET);
     registry.add("oms.outbox.destination-url", () -> proxy.uri().toString());
     registry.add("oms.outbox.webhook-secret", () -> OUTBOX_SECRET);
+    registry.add("oms.order-intake.enabled", () -> "false");
   }
 
   @AfterAll

@@ -70,6 +70,7 @@ public class InboxWorker {
         AND status = 'PROCESSED'
         AND aggregate_version > 0
         AND id <> ?
+        AND event_type = ?
         AND event_type NOT IN (%s)
       """
           .formatted(InboxEntitlementPolicy.entVerOrderedTypeLiterals());
@@ -357,7 +358,8 @@ public class InboxWorker {
         row.tenantId(),
         row.source(),
         row.aggregateId(),
-        row.id());
+        row.id(),
+        row.eventType());
   }
 
   private void pushBack(InboxRow row, Duration delay) {

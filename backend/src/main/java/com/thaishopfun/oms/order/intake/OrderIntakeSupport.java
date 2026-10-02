@@ -16,6 +16,7 @@ import com.thaishopfun.oms.order.OrderStateException;
 import com.thaishopfun.oms.order.OrderStateMachine;
 import com.thaishopfun.oms.order.OrderStateMachine.GuardContext;
 import com.thaishopfun.oms.order.OrderStateMachine.TransitionResult;
+import com.thaishopfun.oms.order.OrderStockEnforcement;
 import com.thaishopfun.oms.order.Recipient;
 import com.thaishopfun.oms.order.ReconciliationIssueRepository;
 import com.thaishopfun.oms.order.SalesOrder;
@@ -29,7 +30,6 @@ import com.thaishopfun.oms.stock.ReservationEngine;
 import com.thaishopfun.oms.stock.ReserveItem;
 import com.thaishopfun.oms.stock.Shortfall;
 import com.thaishopfun.oms.stock.StockOwner;
-import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.math.BigDecimal;
 import java.time.Clock;
@@ -40,12 +40,19 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.ObjectNode;
 
 @Service
 public class OrderIntakeSupport {
+
+  private static final Logger log = LoggerFactory.getLogger(OrderIntakeSupport.class);
 
   static final String TSF_CHANNEL_ACCOUNT_MISSING = "TSF_CHANNEL_ACCOUNT_MISSING";
   public static final String BUSINESS_OVERSELL_METRIC = "oms.order.business_oversell";
@@ -65,7 +72,8 @@ public class OrderIntakeSupport {
   private final InboxProperties inboxProperties;
   private final JdbcTemplate jdbc;
   private final Clock clock;
-  private final Counter businessOversell;
+  private final JsonMapper json;
+  private final MeterRegistry meters;
 
   public OrderIntakeSupport(
       ChannelAccountLookup channels,
@@ -83,6 +91,7 @@ public class OrderIntakeSupport {
       InboxProperties inboxProperties,
       JdbcTemplate jdbc,
       Clock clock,
+      JsonMapper json,
       MeterRegistry meters) {
     this.channels = channels;
     this.orders = orders;
@@ -99,7 +108,8 @@ public class OrderIntakeSupport {
     this.inboxProperties = inboxProperties;
     this.jdbc = jdbc;
     this.clock = clock;
-    this.businessOversell = Counter.builder(BUSINESS_OVERSELL_METRIC).register(meters);
+    this.json = json;
+    this.meters = meters;
   }
 
   TsfAccount requireTsfAccount(InboxMessage message) {
@@ -120,7 +130,7 @@ public class OrderIntakeSupport {
   void handleCreated(InboxMessage message) {
     TsfAccount account = requireTsfAccount(message);
     JsonNode data = message.payload().path("data");
-    CreatedPayload payload = CreatedPayload.parse(data);
+    CreatedPayload payload = CreatedPayload.parse(data, clock);
     if (orders.existsByExternalId(account.id(), payload.orderId())) {
       return;
     }
@@ -154,7 +164,7 @@ public class OrderIntakeSupport {
     recipients.insert(orderId, payload.recipient(), payload.redactAfter());
     List<LineMapping> mapped = insertLines(orderId, account.id(), payload.lines());
 
-    boolean stockEnforced = stockEnforced(account.mode());
+    boolean stockEnforced = stockEnforced(account);
     Instant holdExpires = null;
     if ("PREPAID".equals(payload.paymentMethod()) && payload.paymentExpiresAt() != null) {
       holdExpires = payload.paymentExpiresAt().plus(orderProperties.getUnpaidHoldGrace());
@@ -190,7 +200,7 @@ public class OrderIntakeSupport {
       recordOversell(account, mapped, stockShortfalls);
       if ("SHADOW".equals(account.mode())) {
         shadowDiff.insertOrderDiff(
-            account.id(), payload.orderId(), shortfallNote(stockShortfalls), now);
+            account.id(), payload.orderId(), shadowDiffJson(mapped, stockShortfalls), now);
       }
     }
 
@@ -198,7 +208,7 @@ public class OrderIntakeSupport {
     if (!"NONE".equals(holdReason)) {
       current = applyHold(current, holdReason, holdNote);
     }
-    maybeReadyToPick(orders.findById(orderId).orElseThrow(), account.mode(), reserveItems, now);
+    maybeReadyToPick(orders.findById(orderId).orElseThrow(), account, reserveItems, now);
   }
 
   void handlePaid(InboxMessage message) {
@@ -214,9 +224,9 @@ public class OrderIntakeSupport {
       return;
     }
     Instant now = clock.instant();
-    order = applyPayment(order, "PAID", now, account.mode());
+    order = applyPayment(order, "PAID", now, account);
     List<ReserveItem> items = mappedReserveItems(order.id());
-    if (stockEnforced(account.mode()) && !items.isEmpty()) {
+    if (stockEnforced(account) && !items.isEmpty()) {
       EnsureHoldResult held =
           engine.ensureOrderHold(
               StockOwner.order(order.id().toString()), items, "order.ensure:" + message.eventId());
@@ -224,7 +234,7 @@ public class OrderIntakeSupport {
         order = applyHold(order, "OUT_OF_STOCK", shortfallNote(held.shortfalls()));
       }
     }
-    maybeReadyToPick(orders.findById(order.id()).orElseThrow(), account.mode(), items, now);
+    maybeReadyToPick(orders.findById(order.id()).orElseThrow(), account, items, now);
   }
 
   void handleCancelled(InboxMessage message) {
@@ -239,11 +249,9 @@ public class OrderIntakeSupport {
     if ("CANCELLED".equals(order.orderStatus())) {
       return;
     }
-    if (stockEnforced(account.mode())) {
-      engine.release(StockOwner.order(order.id().toString()), "order.release:" + message.eventId());
-    }
+    engine.release(StockOwner.order(order.id().toString()), "order.release:" + message.eventId());
     stateMachine.applyOrderStatus(
-        order, "CANCELLED", "TSF cancel", "TSF", guard(account.mode(), order, List.of()));
+        order, "CANCELLED", "TSF cancel", "TSF", guard(account, order, List.of()));
     hooks.afterOutbox();
   }
 
@@ -255,16 +263,18 @@ public class OrderIntakeSupport {
     if (data.has("recipient")) {
       Recipient recipient = CreatedPayload.parseRecipient(data.path("recipient"));
       recipients.update(order.id(), recipient);
+    } else if (data.has("note")) {
+      log.info("order.updated note ignored for external_order_id={}", externalOrderId);
     }
     hooks.afterOutbox();
   }
 
   private void maybeReadyToPick(
-      SalesOrder order, String mode, List<ReserveItem> mappedItems, Instant now) {
+      SalesOrder order, TsfAccount account, List<ReserveItem> mappedItems, Instant now) {
     if (!"NONE".equals(order.holdReason())) {
       return;
     }
-    GuardContext guard = guard(mode, order, mappedItems);
+    GuardContext guard = guard(account, order, mappedItems);
     try {
       TransitionResult result =
           stateMachine.applyFulfillmentStatus(
@@ -284,21 +294,21 @@ public class OrderIntakeSupport {
     return hold.order();
   }
 
-  private SalesOrder applyPayment(SalesOrder order, String to, Instant paidAt, String mode) {
+  private SalesOrder applyPayment(SalesOrder order, String to, Instant paidAt, TsfAccount account) {
     TransitionResult paid =
         stateMachine.applyPaymentStatus(
-            order, to, "TSF paid", "TSF", paidAt, guard(mode, order, List.of()));
+            order, to, "TSF paid", "TSF", paidAt, guard(account, order, List.of()));
     return paid.order();
   }
 
-  private GuardContext guard(String mode, SalesOrder order, List<ReserveItem> mappedItems) {
-    boolean enforced = stockEnforced(mode);
+  private GuardContext guard(TsfAccount account, SalesOrder order, List<ReserveItem> mappedItems) {
+    boolean enforced = stockEnforced(account);
     boolean covers = !enforced || coverage.covers(order.id(), mappedItems, clock.instant());
     return new GuardContext(enforced, covers, clock.instant());
   }
 
-  private static boolean stockEnforced(String mode) {
-    return "ACTIVE".equals(mode) || "SHADOW".equals(mode) || "CONTROL".equals(mode);
+  private static boolean stockEnforced(TsfAccount account) {
+    return OrderStockEnforcement.enforced(account.mode(), account.status());
   }
 
   private List<LineMapping> insertLines(
@@ -321,7 +331,13 @@ public class OrderIntakeSupport {
       boolean stockControl = listingStockControl(channelAccountId, line.listingSkuId());
       mapped.add(
           new LineMapping(
-              lineId, skuId, line.qty(), line.listingSkuId(), stockControl, skuId != null));
+              lineId,
+              line.lineId(),
+              skuId,
+              line.qty(),
+              line.listingSkuId(),
+              stockControl,
+              skuId != null));
     }
     return mapped;
   }
@@ -365,23 +381,43 @@ public class OrderIntakeSupport {
 
   private void recordOversell(
       TsfAccount account, List<LineMapping> mapped, List<Shortfall> shortfalls) {
-    if (!"ACTIVE".equals(account.mode()) && !"CONTROL".equals(account.mode())) {
-      return;
+    String mode = account.mode();
+    for (LineMapping line : mapped) {
+      if (!line.mapped() || !lineInShortfall(line, shortfalls)) {
+        continue;
+      }
+      boolean enforcedLine =
+          "ACTIVE".equals(mode) || ("CONTROL".equals(mode) && line.stockControl());
+      if (enforcedLine) {
+        meters.counter(BUSINESS_OVERSELL_METRIC, "mode", mode).increment();
+      }
     }
-    boolean enforcedShort =
-        mapped.stream()
-            .anyMatch(
-                line ->
-                    line.mapped()
-                        && line.stockControl()
-                        && shortfalls.stream()
-                            .anyMatch(
-                                sf ->
-                                    sf.requestedBy().contains(line.skuId())
-                                        || sf.skuId().equals(line.skuId())));
-    if (enforcedShort) {
-      businessOversell.increment();
+  }
+
+  private static boolean lineInShortfall(LineMapping line, List<Shortfall> shortfalls) {
+    if (line.skuId() == null) {
+      return false;
     }
+    return shortfalls.stream()
+        .anyMatch(sf -> sf.skuId().equals(line.skuId()) || sf.requestedBy().contains(line.skuId()));
+  }
+
+  private String shadowDiffJson(List<LineMapping> mapped, List<Shortfall> shortfalls) {
+    ArrayNode shortfallsNode = json.createArrayNode();
+    for (Shortfall sf : shortfalls) {
+      ObjectNode entry = json.createObjectNode();
+      mapped.stream()
+          .filter(line -> line.skuId() != null && line.skuId().equals(sf.skuId()))
+          .findFirst()
+          .ifPresent(line -> entry.put("line_id", line.externalLineId()));
+      entry.put("sku_id", sf.skuId().toString());
+      entry.put("requested", sf.requested());
+      entry.put("available", sf.available());
+      shortfallsNode.add(entry);
+    }
+    ObjectNode root = json.createObjectNode();
+    root.set("shortfalls", shortfallsNode);
+    return json.writeValueAsString(root);
   }
 
   private void emitStatusChanged(SalesOrder order) {
@@ -399,6 +435,9 @@ public class OrderIntakeSupport {
   }
 
   private static Instant orderedAt(InboxMessage message, CreatedPayload payload) {
+    if (payload.orderedAt() != null) {
+      return payload.orderedAt();
+    }
     JsonNode occurred = message.payload().path("occurred_at");
     if (occurred.isString() && !occurred.asString().isBlank()) {
       return Instant.parse(occurred.asString());
@@ -436,6 +475,14 @@ public class OrderIntakeSupport {
     return value.asString();
   }
 
+  private static String optionalText(JsonNode node, String field) {
+    JsonNode value = node.path(field);
+    if (!value.isString()) {
+      return "";
+    }
+    return value.asString("");
+  }
+
   private static String requiredText(JsonNode node, String field) {
     JsonNode value = node.path(field);
     if (!value.isString() || value.asString().isBlank()) {
@@ -445,7 +492,13 @@ public class OrderIntakeSupport {
   }
 
   record LineMapping(
-      UUID lineId, UUID skuId, int qty, String listingSkuId, boolean stockControl, boolean mapped) {
+      UUID lineId,
+      String externalLineId,
+      UUID skuId,
+      int qty,
+      String listingSkuId,
+      boolean stockControl,
+      boolean mapped) {
     ReserveItem reserveItem() {
       return ReserveItem.of(skuId, qty);
     }
@@ -476,9 +529,9 @@ public class OrderIntakeSupport {
       Instant redactAfter,
       List<CreatedLine> lines) {
 
-    static CreatedPayload parse(JsonNode data) {
+    static CreatedPayload parse(JsonNode data, Clock clock) {
       String orderId = requiredText(data, "order_id");
-      String reservationId = requiredText(data, "reservation_id");
+      String reservationId = optionalText(data, "reservation_id");
       String paymentMethod = requiredText(data, "payment_method");
       Instant paymentExpiresAt = instant(data, "payment_expires_at");
       String currency = requiredText(data, "currency");
@@ -506,9 +559,9 @@ public class OrderIntakeSupport {
       }
       Instant orderedAt = instant(data, "ordered_at");
       if (orderedAt == null) {
-        orderedAt = Instant.now().truncatedTo(ChronoUnit.SECONDS);
+        orderedAt = clock.instant().truncatedTo(ChronoUnit.SECONDS);
       }
-      Instant redactAfter = Instant.now().plus(90, ChronoUnit.DAYS);
+      Instant redactAfter = clock.instant().plus(90, ChronoUnit.DAYS);
       return new CreatedPayload(
           orderId,
           reservationId,

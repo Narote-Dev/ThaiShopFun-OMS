@@ -2,11 +2,15 @@ package com.thaishopfun.oms.order.intake;
 
 import com.thaishopfun.oms.inbox.InboxHandler;
 import com.thaishopfun.oms.inbox.InboxMessage;
-import org.springframework.context.annotation.Profile;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 @Component
-@Profile("!chaos & !inbox-api-test")
+@ConditionalOnProperty(
+    prefix = "oms.order-intake",
+    name = "enabled",
+    havingValue = "true",
+    matchIfMissing = true)
 public class OrderCancelledHandler implements InboxHandler {
 
   private final OrderIntakeSupport support;

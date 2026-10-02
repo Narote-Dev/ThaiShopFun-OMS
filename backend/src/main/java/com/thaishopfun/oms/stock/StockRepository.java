@@ -720,6 +720,18 @@ class StockRepository {
         owner.ref());
   }
 
+  /** Adds quantity to an ACTIVE reservation row (same owner+sku). */
+  int increaseActiveReservationQty(UUID reservationId, int additionalQty) {
+    return jdbc.update(
+        """
+        UPDATE stock_reservation
+        SET qty = qty + ?, updated_at = now()
+        WHERE id = ? AND status = 'ACTIVE'
+        """,
+        additionalQty,
+        reservationId);
+  }
+
   // ---- mapping -----------------------------------------------------------------------------
 
   private static InventoryRow inventoryRow(ResultSet rs) throws SQLException {

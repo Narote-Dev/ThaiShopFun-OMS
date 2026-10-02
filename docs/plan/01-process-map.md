@@ -225,7 +225,7 @@ MVP ไม่ทำบัญชี settlement/ค่าธรรมเนีย�
 
 **Guard หลัก**
 - `READY_TO_PICK` ได้เมื่อ `payment_status ∈ {PAID, COD_PENDING}` และ `hold_reason=NONE` และ reservation เป็น `ORDER`
-- โหมด **OBSERVE / DISCONNECTED** (OMS ไม่คุมสต๊อก): guard ไม่บังคับ ORDER reservation — COD/PAID ไป `READY_TO_PICK` ได้เมื่อ hold `NONE`
+- โหมด **OBSERVE / DISCONNECTED** และ tenant ที่ OMS ไม่คุมสต๊อก (PO decision 2026-10-01): guard **ไม่**บังคับ ORDER reservation — COD/PAID ไป `READY_TO_PICK` ได้เมื่อ hold `NONE` (ไม่มีแถว `stock_reservation` ก็ได้)
 - `hold_reason ≠ NONE` → fulfillment เดินหน้าไม่ได้
 - `order_status=CANCELLED` ได้เมื่อ fulfillment ยังไม่ SHIPPED หรือเป็น RTS ที่ TSF ยืนยันยกเลิก
 - `COMPLETED` ได้เมื่อ `DELIVERED` + พ้น 7 วัน + ไม่มี return เปิด
