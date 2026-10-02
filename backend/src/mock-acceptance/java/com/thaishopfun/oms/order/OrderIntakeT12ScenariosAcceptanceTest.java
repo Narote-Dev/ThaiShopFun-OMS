@@ -8,6 +8,7 @@ import ch.qos.logback.core.read.ListAppender;
 import com.thaishopfun.mocktsf.MockTsfApplication;
 import com.thaishopfun.mocktsf.OmsEndpoint;
 import com.thaishopfun.mocktsf.contract.ContractValidator;
+import com.thaishopfun.mocktsf.idp.TokenIssuer;
 import com.thaishopfun.oms.auth.AuthTestSupport;
 import com.thaishopfun.oms.auth.UuidV7;
 import com.thaishopfun.oms.inbox.InboxWorker;
@@ -87,6 +88,10 @@ class OrderIntakeT12ScenariosAcceptanceTest {
     startMock();
     AuthTestSupport.register(registry);
     int mockPort = mockPort();
+    registry.add("oms.security.issuer", () -> ISSUER);
+    registry.add(
+        "oms.security.jwks-uri",
+        () -> "http://127.0.0.1:" + mockPort + "/tsf-idp/.well-known/jwks.json");
     registry.add("oms.security.internal-client-ids", () -> "tsf,tsf-checkout");
     registry.add("oms.inbox.hmac-secrets", () -> INBOX_SECRET);
     registry.add("oms.inbox.jitter-ratio", () -> "0");
@@ -999,8 +1004,6 @@ class OrderIntakeT12ScenariosAcceptanceTest {
     data.put("payment_method", paymentMethod);
     if ("PREPAID".equals(paymentMethod)) {
       data.put("payment_expires_at", Instant.now().plus(30, ChronoUnit.MINUTES).toString());
-    } else {
-      data.remove("payment_expires_at");
     }
     ArrayNode lines = JSON.createArrayNode();
     ObjectNode line = JSON.createObjectNode();
@@ -1128,16 +1131,7 @@ class OrderIntakeT12ScenariosAcceptanceTest {
   }
 
   private static String tsfToken() {
-    return AuthTestSupport.token(
-        "tsf",
-        "shop",
-        "ACTIVE",
-        null,
-        1,
-        "oms-internal",
-        Instant.now().plusSeconds(600),
-        java.util.List.of(),
-        "SERVICE");
+    return mock.getBean(TokenIssuer.class).tsfServiceToken();
   }
 
   private static String sign(String secret, String timestamp, byte[] body) throws Exception {
