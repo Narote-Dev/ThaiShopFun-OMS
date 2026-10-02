@@ -4,6 +4,7 @@ import com.thaishopfun.oms.channel.TsfProperties;
 import com.thaishopfun.oms.channel.exception.ChannelClientException;
 import com.thaishopfun.oms.channel.exception.ChannelIdempotencyConflictException;
 import com.thaishopfun.oms.channel.exception.ChannelRateLimitedException;
+import com.thaishopfun.oms.channel.exception.ChannelServerErrorException;
 import com.thaishopfun.oms.channel.exception.ChannelUnavailableException;
 import java.io.IOException;
 import java.net.URI;
@@ -68,7 +69,7 @@ public class TsfHttpTransport {
     HttpRequest.Builder builder =
         HttpRequest.newBuilder(uri)
             .timeout(timeout)
-            .header("Authorization", "Bearer " + tokens.accessToken());
+            .header("Authorization", "Bearer " + tokens.accessToken(timeout));
     for (Map.Entry<String, String> header : extraHeaders.entrySet()) {
       builder.header(header.getKey(), header.getValue());
     }
@@ -111,6 +112,13 @@ public class TsfHttpTransport {
       throw new ChannelUnavailableException(errorMessage(body));
     }
     ParsedError parsed = parseError(body);
+    if (status >= 500) {
+      throw new ChannelServerErrorException(
+          status,
+          parsed.error(),
+          parsed.message() != null ? parsed.message() : errorMessage(body),
+          parsed.traceId());
+    }
     throw new ChannelClientException(
         status,
         parsed.error(),

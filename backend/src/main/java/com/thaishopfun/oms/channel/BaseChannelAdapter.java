@@ -12,9 +12,11 @@ import com.thaishopfun.oms.channel.api.ShipmentRequest;
 import com.thaishopfun.oms.channel.exception.ChannelClientException;
 import com.thaishopfun.oms.channel.exception.ChannelIdempotencyConflictException;
 import com.thaishopfun.oms.channel.exception.ChannelRateLimitedException;
+import com.thaishopfun.oms.channel.exception.ChannelServerErrorException;
 import com.thaishopfun.oms.channel.exception.ChannelUnavailableException;
 import com.thaishopfun.oms.channel.exception.UnsupportedCapabilityException;
 import io.github.resilience4j.bulkhead.Bulkhead;
+import io.github.resilience4j.bulkhead.BulkheadConfig;
 import io.github.resilience4j.bulkhead.BulkheadFullException;
 import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
@@ -29,9 +31,10 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.BooleanSupplier;
 
 /**
- * Decorator order: capability check → retry loop (bulkhead per attempt → rate limiter → circuit
- * breaker → HTTP). Backoff and Retry-After sleeps run outside the bulkhead. Total wall time
- * including sleeps is capped by {@link ChannelProperties.TsfChannelSettings#getHttpTimeout()}.
+ * Decorator order: capability check → retry loop. Each attempt runs bulkhead → rate limiter →
+ * circuit breaker → HTTP, then releases the bulkhead permit before any retry sleep. Total wall time
+ * for waits, HTTP, token fetch, and backoff is capped by {@link
+ * ChannelProperties.TsfChannelSettings#getHttpTimeout()}.
  */
 public abstract class BaseChannelAdapter implements ChannelAdapter {
 
@@ -40,6 +43,8 @@ public abstract class BaseChannelAdapter implements ChannelAdapter {
   private final ChannelMetrics metrics;
   private final Sleeper sleeper;
   private final Clock clock;
+
+  private Instant activeDeadline;
 
   protected BaseChannelAdapter(
       AccountResilienceRegistry resilience,
@@ -161,6 +166,7 @@ public abstract class BaseChannelAdapter implements ChannelAdapter {
     Timer.Sample sample = metrics.startTimer();
     String outcome = "success";
     Instant deadline = clock.instant().plus(settings().getHttpTimeout());
+    activeDeadline = deadline;
     try {
       return invokeWithRetry(account, operation, httpCall, deadline);
     } catch (BulkheadFullException ex) {
@@ -172,6 +178,9 @@ public abstract class BaseChannelAdapter implements ChannelAdapter {
     } catch (UnsupportedCapabilityException
         | ChannelClientException
         | ChannelIdempotencyConflictException ex) {
+      outcome = "client_error";
+      throw ex;
+    } catch (ChannelServerErrorException ex) {
       outcome = "client_error";
       throw ex;
     } catch (ChannelRateLimitedException ex) {
@@ -187,6 +196,7 @@ public abstract class BaseChannelAdapter implements ChannelAdapter {
       outcome = "error";
       throw new ChannelUnavailableException("Channel call failed for " + operation, ex);
     } finally {
+      activeDeadline = null;
       metrics.recordDuration(channel(), operation, sample);
       metrics.recordCall(channel(), operation, outcome);
     }
@@ -199,32 +209,24 @@ public abstract class BaseChannelAdapter implements ChannelAdapter {
     int maxAttempts = Math.max(1, settings.getRetryMaxAttempts());
     CircuitBreaker circuitBreaker =
         resilience.circuitBreaker(channel(), account.channelAccountId());
-    Exception last = null;
+    ChannelRateLimitedException lastRateLimited = null;
+    ChannelUnavailableException lastUnavailable = null;
     for (int attempt = 1; attempt <= maxAttempts; attempt++) {
       ensureBudget(deadline, Duration.ZERO, null);
-      Bulkhead bulkhead = resilience.bulkhead(channel());
-      metrics.enterBulkheadWait(channel());
       try {
-        bulkhead.acquirePermission();
-      } finally {
-        metrics.leaveBulkheadWait(channel());
-      }
-      try {
-        RateLimiter rateLimiter = resilience.rateLimiter(channel(), account.channelAccountId());
-        try {
-          return RateLimiter.decorateCallable(
-                  rateLimiter,
-                  () -> CircuitBreaker.decorateCallable(circuitBreaker, httpCall::call).call())
-              .call();
-        } catch (RequestNotPermitted ex) {
-          throw new ChannelRateLimitedException("Rate limit wait exceeded for " + operation, null);
-        }
-      } catch (ChannelClientException
+        return executeAttempt(account, circuitBreaker, httpCall, deadline);
+      } catch (ChannelServerErrorException
+          | ChannelClientException
           | ChannelIdempotencyConflictException
-          | UnsupportedCapabilityException ex) {
+          | UnsupportedCapabilityException
+          | CallNotPermittedException
+          | BulkheadFullException ex) {
         throw ex;
       } catch (ChannelRateLimitedException ex) {
-        metrics.recordRetry(channel(), operation, "retry_after");
+        if (ex.retryAfterSeconds() == null) {
+          throw ex;
+        }
+        lastRateLimited = ex;
         if (attempt >= maxAttempts) {
           throw ex;
         }
@@ -235,52 +237,104 @@ public abstract class BaseChannelAdapter implements ChannelAdapter {
         if (!retryAfter.isZero() && retryAfter.compareTo(settings.getMaxRetryAfter()) > 0) {
           throw ex;
         }
+        metrics.recordRetry(channel(), operation, "retry_after");
         Duration sleep = backoffDelay(settings, attempt, retryAfter.isZero() ? null : retryAfter);
         sleepBeforeRetry(deadline, sleep, ex);
-      } catch (CallNotPermittedException ex) {
-        throw new ChannelUnavailableException("Channel circuit is open for " + channel(), ex);
-      } catch (BulkheadFullException ex) {
-        throw new ChannelUnavailableException("Channel bulkhead is full for " + channel(), ex);
       } catch (ChannelUnavailableException ex) {
-        last = ex;
-        metrics.recordRetry(channel(), operation, "unavailable");
+        lastUnavailable = ex;
         if (attempt >= maxAttempts) {
           throw ex;
         }
+        metrics.recordRetry(channel(), operation, "unavailable");
         Duration sleep = backoffDelay(settings, attempt, null);
         sleepBeforeRetry(deadline, sleep, null);
-      } catch (RuntimeException ex) {
-        throw ex;
-      } catch (Exception ex) {
-        throw new ChannelUnavailableException("Channel call failed for " + operation, ex);
+      }
+    }
+    if (lastRateLimited != null) {
+      throw lastRateLimited;
+    }
+    if (lastUnavailable != null) {
+      throw lastUnavailable;
+    }
+    throw new ChannelUnavailableException("Channel call failed after retries");
+  }
+
+  private <T> T executeAttempt(
+      ChannelAccountRef account,
+      CircuitBreaker circuitBreaker,
+      Callable<T> httpCall,
+      Instant deadline)
+      throws Exception {
+    Duration remaining = remainingBudget(deadline);
+    Bulkhead bulkhead = resilience.bulkhead(channel());
+    RateLimiter rateLimiter = resilience.rateLimiter(channel(), account.channelAccountId());
+
+    Duration bulkheadWait =
+        minDuration(bulkhead.getBulkheadConfig().getMaxWaitDuration(), remaining);
+    BulkheadConfig bulkheadConfig = bulkhead.getBulkheadConfig();
+    boolean bulkheadConfigChanged = false;
+    synchronized (bulkhead) {
+      if (bulkheadWait.compareTo(bulkheadConfig.getMaxWaitDuration()) < 0) {
+        bulkhead.changeConfig(
+            BulkheadConfig.from(bulkheadConfig).maxWaitDuration(bulkheadWait).build());
+        bulkheadConfigChanged = true;
+      }
+      metrics.enterBulkheadWait(channel());
+      try {
+        bulkhead.acquirePermission();
       } finally {
+        metrics.leaveBulkheadWait(channel());
+        if (bulkheadConfigChanged) {
+          bulkhead.changeConfig(bulkheadConfig);
+        }
+      }
+    }
+
+    Duration rateWait =
+        minDuration(rateLimiter.getRateLimiterConfig().getTimeoutDuration(), remaining);
+    Duration previousRateTimeout = rateLimiter.getRateLimiterConfig().getTimeoutDuration();
+    boolean rateTimeoutChanged = false;
+    synchronized (rateLimiter) {
+      if (rateWait.compareTo(previousRateTimeout) < 0) {
+        rateLimiter.changeTimeoutDuration(rateWait);
+        rateTimeoutChanged = true;
+      }
+      try {
+        if (!rateLimiter.acquirePermission()) {
+          throw new ChannelRateLimitedException("Rate limit wait exceeded for " + channel(), null);
+        }
+        return CircuitBreaker.decorateCallable(circuitBreaker, httpCall::call).call();
+      } catch (RequestNotPermitted ex) {
+        throw new ChannelRateLimitedException("Rate limit wait exceeded for " + channel(), null);
+      } finally {
+        if (rateTimeoutChanged) {
+          rateLimiter.changeTimeoutDuration(previousRateTimeout);
+        }
         bulkhead.releasePermission();
       }
     }
-    if (last instanceof RuntimeException runtime) {
-      throw runtime;
-    }
-    throw new ChannelUnavailableException("Channel call failed after retries", last);
   }
 
   private void sleepBeforeRetry(Instant deadline, Duration sleep, ChannelRateLimitedException rate)
       throws InterruptedException {
-    ChannelProperties.TsfChannelSettings settings = settings();
     ensureBudget(deadline, sleep, rate);
-    if (settings.getHttpTimeout().compareTo(settings.getRetryWaitBase()) < 0) {
-      Duration remaining = Duration.between(clock.instant(), deadline);
-      if (!settings.getRetryWaitBase().isZero()
-          && remaining.compareTo(settings.getRetryWaitBase()) < 0) {
-        if (rate != null) {
-          throw rate;
-        }
-        throw new ChannelUnavailableException("Channel call budget exceeded");
-      }
-    }
     if (sleep.isZero()) {
       return;
     }
-    sleeper.sleep(sleep);
+    try {
+      sleeper.sleep(sleep);
+    } catch (InterruptedException ex) {
+      Thread.currentThread().interrupt();
+      throw ex;
+    }
+  }
+
+  private Duration remainingBudget(Instant deadline) {
+    Duration remaining = Duration.between(clock.instant(), deadline);
+    if (remaining.isNegative() || remaining.isZero()) {
+      throw new ChannelUnavailableException("Channel call budget exceeded");
+    }
+    return remaining;
   }
 
   private void ensureBudget(
@@ -300,6 +354,10 @@ public abstract class BaseChannelAdapter implements ChannelAdapter {
     }
   }
 
+  private static Duration minDuration(Duration a, Duration b) {
+    return a.compareTo(b) <= 0 ? a : b;
+  }
+
   private Duration backoffDelay(
       ChannelProperties.TsfChannelSettings settings, int attempt, Duration floor) {
     long baseMs = settings.getRetryWaitBase().toMillis();
@@ -314,8 +372,23 @@ public abstract class BaseChannelAdapter implements ChannelAdapter {
     return delay;
   }
 
+  /** Remaining call budget capped by configured HTTP timeout (for transport and token). */
+  protected Duration transportTimeout() {
+    ChannelProperties.TsfChannelSettings settings = settings();
+    Duration configured = settings.getHttpTimeout();
+    Instant deadline = activeDeadline;
+    if (deadline == null) {
+      return configured;
+    }
+    Duration remaining = Duration.between(clock.instant(), deadline);
+    if (remaining.isNegative() || remaining.isZero()) {
+      throw new ChannelUnavailableException("Channel call budget exceeded");
+    }
+    return minDuration(configured, remaining);
+  }
+
   protected Duration httpTimeout() {
-    return settings().getHttpTimeout();
+    return transportTimeout();
   }
 
   protected Clock clock() {

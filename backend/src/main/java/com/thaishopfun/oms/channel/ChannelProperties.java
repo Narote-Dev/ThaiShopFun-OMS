@@ -40,6 +40,7 @@ public class ChannelProperties {
     private int circuitPermittedCallsInHalfOpen = 3;
     private int bulkheadMaxConcurrent = 8;
     private Duration bulkheadMaxWait = Duration.ofSeconds(10);
+    private int listingsPageLimit = 100;
 
     public Duration getMaxRetryAfter() {
       return maxRetryAfter;
@@ -151,6 +152,14 @@ public class ChannelProperties {
 
     public void setBulkheadMaxWait(Duration bulkheadMaxWait) {
       this.bulkheadMaxWait = bulkheadMaxWait;
+    }
+
+    public int getListingsPageLimit() {
+      return listingsPageLimit;
+    }
+
+    public void setListingsPageLimit(int listingsPageLimit) {
+      this.listingsPageLimit = listingsPageLimit;
     }
   }
 }

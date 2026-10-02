@@ -9,12 +9,14 @@ import com.thaishopfun.oms.auth.AuthTestSupport;
 import com.thaishopfun.oms.auth.UuidV7;
 import com.thaishopfun.oms.channel.api.CancelRequest;
 import com.thaishopfun.oms.channel.api.LabelContent;
+import com.thaishopfun.oms.channel.api.ListingPage;
 import com.thaishopfun.oms.channel.api.OrderPage;
 import com.thaishopfun.oms.channel.api.Shipment;
 import com.thaishopfun.oms.channel.api.ShipmentRequest;
 import com.thaishopfun.oms.channel.exception.ChannelClientException;
 import com.thaishopfun.oms.channel.exception.ChannelIdempotencyConflictException;
 import com.thaishopfun.oms.channel.tsf.TsfChannelAdapter;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -74,6 +76,7 @@ class TsfChannelAdapterContractTest {
   @Autowired private ChannelProperties channelProperties;
   @Autowired private ChannelMetrics channelMetrics;
   @Autowired private TsfProperties tsfProperties;
+  @Autowired private MeterRegistry meterRegistry;
 
   private static final HttpClient HTTP =
       HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
@@ -161,23 +164,48 @@ class TsfChannelAdapterContractTest {
     realSleepAdapter.getOrder(account, "TSF-240929-000124");
     assertThat(Duration.between(start, Instant.now()).compareTo(Duration.ofSeconds(5)))
         .isGreaterThanOrEqualTo(0);
+    assertThat(
+            meterRegistry
+                .find("oms.channel.retries")
+                .tag("channel", "TSF")
+                .tag("reason", "retry_after")
+                .counter()
+                .count())
+        .isEqualTo(1.0);
     // Step 2: With the fault consumed, a follow-up call succeeds on the first attempt.
     realSleepAdapter.getOrder(account, "TSF-240929-000124");
   }
 
   @Test
-  void listOrdersSpansAtLeastTwoPagesAcrossShops() {
+  void listOrdersCursorPagesAtLeastTwiceOnOneShop() {
     Instant since = Instant.parse("2026-09-29T00:00:00Z");
     ChannelAccountRef active =
         new ChannelAccountRef(UuidV7.generate(), UuidV7.generate(), "shop_active");
-    ChannelAccountRef grace =
-        new ChannelAccountRef(UuidV7.generate(), UuidV7.generate(), "shop_grace");
-    // Step 1: Seeded catalog exposes at least two orders when paging each shop with limit=1.
-    OrderPage activePage = adapter.listOrders(active, since, null, 1);
-    assertThat(activePage.orders()).hasSize(1);
-    OrderPage gracePage = adapter.listOrders(grace, since, null, 1);
-    assertThat(gracePage.orders()).hasSize(1);
-    assertThat(activePage.orders().size() + gracePage.orders().size()).isGreaterThanOrEqualTo(2);
+    String cursor = null;
+    int pages = 0;
+    do {
+      OrderPage page = adapter.listOrders(active, since, cursor, 1);
+      assertThat(page.orders()).isNotEmpty();
+      cursor = page.nextCursor();
+      pages++;
+    } while (cursor != null && !cursor.isBlank());
+    assertThat(pages).isGreaterThanOrEqualTo(2);
+  }
+
+  @Test
+  void listListingsCursorPagesAtLeastTwice() {
+    channelProperties.getTsf().setListingsPageLimit(1);
+    ChannelAccountRef active =
+        new ChannelAccountRef(UuidV7.generate(), UuidV7.generate(), "shop_active");
+    String cursor = null;
+    int pages = 0;
+    do {
+      ListingPage page = adapter.listListings(active, cursor);
+      assertThat(page.listings()).isNotEmpty();
+      cursor = page.nextCursor();
+      pages++;
+    } while (cursor != null && !cursor.isBlank());
+    assertThat(pages).isGreaterThanOrEqualTo(2);
   }
 
   @Test

@@ -3,6 +3,7 @@ package com.thaishopfun.oms.channel;
 import com.thaishopfun.oms.channel.exception.ChannelClientException;
 import com.thaishopfun.oms.channel.exception.ChannelIdempotencyConflictException;
 import com.thaishopfun.oms.channel.exception.ChannelRateLimitedException;
+import com.thaishopfun.oms.channel.exception.ChannelServerErrorException;
 import io.github.resilience4j.bulkhead.Bulkhead;
 import io.github.resilience4j.bulkhead.BulkheadConfig;
 import io.github.resilience4j.bulkhead.BulkheadRegistry;
@@ -93,7 +94,8 @@ public class AccountResilienceRegistry {
             .waitDurationInOpenState(settings.getCircuitWaitInOpenState())
             .permittedNumberOfCallsInHalfOpenState(settings.getCircuitPermittedCallsInHalfOpen())
             .recordExceptions(
-                com.thaishopfun.oms.channel.exception.ChannelUnavailableException.class)
+                com.thaishopfun.oms.channel.exception.ChannelUnavailableException.class,
+                ChannelServerErrorException.class)
             .ignoreExceptions(
                 ChannelRateLimitedException.class,
                 ChannelClientException.class,

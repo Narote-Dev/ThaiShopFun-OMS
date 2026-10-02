@@ -195,6 +195,61 @@ class ChannelAdapterUnitTest {
   }
 
   @Test
+  void token503IsRetriedBeforeOrderCallSucceeds() throws Exception {
+    AtomicInteger tokenHits = new AtomicInteger();
+    AtomicInteger orderHits = new AtomicInteger();
+    HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    server.createContext(
+        "/token",
+        exchange -> {
+          int hit = tokenHits.incrementAndGet();
+          if (hit == 1) {
+            byte[] body = "{\"error\":\"unavailable\"}".getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(503, body.length);
+            exchange.getResponseBody().write(body);
+          } else {
+            byte[] body =
+                "{\"access_token\":\"token-ok\",\"expires_in\":3600}"
+                    .getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, body.length);
+            exchange.getResponseBody().write(body);
+          }
+          exchange.close();
+        });
+    server.createContext(
+        "/internal/v1/orders/TSF-TOKEN-503",
+        exchange -> {
+          orderHits.incrementAndGet();
+          byte[] body =
+              """
+              {"order_id":"TSF-TOKEN-503","reservation_id":"rsv","payment_method":"PREPAID",\
+              "currency":"THB","lines":[],"updated_at":"2026-01-01T00:00:00Z",\
+              "aggregate_version":1}
+              """
+                  .getBytes(StandardCharsets.UTF_8);
+          exchange.getResponseHeaders().set("Content-Type", "application/json");
+          exchange.sendResponseHeaders(200, body.length);
+          exchange.getResponseBody().write(body);
+          exchange.close();
+        });
+    server.start();
+    servers.add(server);
+    ChannelProperties properties = properties();
+    properties.getTsf().setRetryMaxAttempts(3);
+    TsfChannelAdapter adapter =
+        tsfAdapter(
+            server.getAddress().getPort(),
+            properties,
+            new ChannelResilienceTest.RecordingSleeper(),
+            Clock.systemUTC());
+    adapter.getOrder(accountRef(), "TSF-TOKEN-503");
+    assertThat(tokenHits).hasValue(2);
+    assertThat(orderHits).hasValue(1);
+  }
+
+  @Test
   void unauthorizedRefreshesTokenOnceThenFails() throws Exception {
     AtomicInteger tokenHits = new AtomicInteger();
     AtomicInteger orderHits = new AtomicInteger();

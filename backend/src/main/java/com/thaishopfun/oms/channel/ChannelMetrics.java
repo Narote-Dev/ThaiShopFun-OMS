@@ -86,8 +86,8 @@ public class ChannelMetrics {
   private static double stateCode(CircuitBreaker.State state) {
     return switch (state) {
       case CLOSED -> 0;
-      case OPEN -> 1;
-      case HALF_OPEN -> 2;
+      case HALF_OPEN -> 1;
+      case OPEN -> 2;
       case DISABLED -> 3;
       case FORCED_OPEN -> 4;
       case METRICS_ONLY -> 5;

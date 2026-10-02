@@ -97,9 +97,10 @@ public class TsfChannelAdapter extends BaseChannelAdapter {
     StringBuilder path =
         new StringBuilder("/shops/")
             .append(encodePathSegment(account.externalShopId()))
-            .append("/listings");
+            .append("/listings?limit=")
+            .append(settings().getListingsPageLimit());
     if (cursor != null && !cursor.isBlank()) {
-      path.append("?cursor=").append(encodeQueryParam(cursor));
+      path.append("&cursor=").append(encodeQueryParam(cursor));
     }
     TsfHttpTransport.HttpResult result = transport.get(path.toString(), httpTimeout());
     return json.readValue(result.body(), ListingPage.class);

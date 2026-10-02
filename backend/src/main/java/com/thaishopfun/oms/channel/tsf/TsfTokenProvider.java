@@ -52,6 +52,10 @@ public class TsfTokenProvider {
   }
 
   public String accessToken() {
+    return accessToken(TOKEN_HTTP_TIMEOUT);
+  }
+
+  public String accessToken(Duration timeout) {
     Instant now = clock.instant();
     CachedToken current = cached;
     if (current != null && current.validAt(now)) {
@@ -64,7 +68,7 @@ public class TsfTokenProvider {
       if (current != null && current.validAt(now)) {
         return current.token();
       }
-      cached = fetchToken();
+      cached = fetchToken(timeout);
       return cached.token();
     } finally {
       lock.unlock();
@@ -75,13 +79,13 @@ public class TsfTokenProvider {
   public void invalidateAndRefresh() {
     lock.lock();
     try {
-      cached = fetchToken();
+      cached = fetchToken(TOKEN_HTTP_TIMEOUT);
     } finally {
       lock.unlock();
     }
   }
 
-  private CachedToken fetchToken() {
+  private CachedToken fetchToken(Duration timeout) {
     if (!properties.apiConfigured()) {
       throw new IllegalStateException("oms.tsf.base-url is not configured");
     }
@@ -97,9 +101,11 @@ public class TsfTokenProvider {
             + urlEncode(properties.getClientSecret())
             + "&audience="
             + urlEncode(properties.getAudience());
+    Duration requestTimeout =
+        timeout == null || timeout.isNegative() ? TOKEN_HTTP_TIMEOUT : timeout;
     HttpRequest request =
         HttpRequest.newBuilder(URI.create(properties.getTokenUri()))
-            .timeout(TOKEN_HTTP_TIMEOUT)
+            .timeout(requestTimeout)
             .header("Content-Type", "application/x-www-form-urlencoded")
             .POST(HttpRequest.BodyPublishers.ofString(form))
             .build();
@@ -107,17 +113,12 @@ public class TsfTokenProvider {
       HttpResponse<String> response =
           client.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
       int status = response.statusCode();
-      if (status == 502 || status == 503 || status == 504) {
-        log.warn("TSF token request transient failure status={}", status);
+      if (status >= 500) {
+        log.warn("TSF token request server failure status={}", status);
         throw new ChannelUnavailableException("TSF token request failed with HTTP " + status);
       }
-      if (status >= 400 && status < 500) {
-        log.warn("TSF token request client failure status={}", status);
-        throw new ChannelClientException(
-            status, "TOKEN_REQUEST_FAILED", "TSF token request failed with HTTP " + status);
-      }
       if (status != 200) {
-        log.warn("TSF token request failed status={}", status);
+        log.warn("TSF token request client failure status={}", status);
         throw new ChannelClientException(
             status, "TOKEN_REQUEST_FAILED", "TSF token request failed with HTTP " + status);
       }

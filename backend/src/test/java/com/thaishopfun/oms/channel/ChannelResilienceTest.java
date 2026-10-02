@@ -15,6 +15,7 @@ import com.thaishopfun.oms.channel.api.PaymentStatus;
 import com.thaishopfun.oms.channel.api.Shipment;
 import com.thaishopfun.oms.channel.api.ShipmentRequest;
 import com.thaishopfun.oms.channel.exception.ChannelRateLimitedException;
+import com.thaishopfun.oms.channel.exception.ChannelServerErrorException;
 import com.thaishopfun.oms.channel.exception.ChannelUnavailableException;
 import com.thaishopfun.oms.channel.exception.UnsupportedCapabilityException;
 import com.thaishopfun.oms.channel.tsf.TsfChannelAdapter;
@@ -154,6 +155,8 @@ class ChannelResilienceTest {
         .hasMessageContaining("circuit");
     // Step 2: An open circuit must not invoke the downstream stub again.
     assertThat(attempts).hasValue(beforeOpen);
+    assertThat(meters.find("oms.channel.calls").tag("outcome", "circuit_open").counter())
+        .isNotNull();
   }
 
   @Test
@@ -444,7 +447,7 @@ class ChannelResilienceTest {
   }
 
   @Test
-  void http500IsNotRetriedBut503Is() throws Exception {
+  void sustainedHttp500OpensCircuitWithoutRetrying() throws Exception {
     AtomicInteger fiveHundredHits = new AtomicInteger();
     HttpServer server500 = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
     server500.createContext(
@@ -470,12 +473,29 @@ class ChannelResilienceTest {
         });
     server500.start();
     servers.add(server500);
+    ChannelProperties properties = properties();
+    properties.getTsf().setCircuitMinimumNumberOfCalls(2);
+    properties.getTsf().setCircuitSlidingWindowSize(2);
+    properties.getTsf().setCircuitFailureRateThreshold(50);
+    properties.getTsf().setRetryMaxAttempts(3);
     TsfChannelAdapter adapter500 =
-        tsfAdapter(server500.getAddress().getPort(), properties(), new RecordingSleeper());
-    assertThatThrownBy(() -> adapter500.getOrder(accountRef(), "TSF-500"))
-        .isInstanceOf(com.thaishopfun.oms.channel.exception.ChannelClientException.class);
+        tsfAdapter(server500.getAddress().getPort(), properties, new RecordingSleeper());
+    ChannelAccountRef account = accountRef();
+    assertThatThrownBy(() -> adapter500.getOrder(account, "TSF-500"))
+        .isInstanceOf(ChannelServerErrorException.class);
     assertThat(fiveHundredHits).hasValue(1);
+    assertThatThrownBy(() -> adapter500.getOrder(account, "TSF-500b"))
+        .isInstanceOf(ChannelServerErrorException.class);
+    assertThat(fiveHundredHits).hasValue(2);
+    int beforeOpen = fiveHundredHits.get();
+    assertThatThrownBy(() -> adapter500.getOrder(account, "TSF-500c"))
+        .isInstanceOf(ChannelUnavailableException.class)
+        .hasMessageContaining("circuit");
+    assertThat(fiveHundredHits).hasValue(beforeOpen);
+  }
 
+  @Test
+  void http503IsRetried() throws Exception {
     AtomicInteger fiveOhThreeHits = new AtomicInteger();
     HttpServer server503 = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
     server503.createContext(
@@ -516,10 +536,198 @@ class ChannelResilienceTest {
     servers.add(server503);
     TsfChannelAdapter adapter503 =
         tsfAdapter(server503.getAddress().getPort(), properties(), new RecordingSleeper());
-    // Step 1: 503 is retried; 500 is a terminal client error with a single HTTP hit.
     OrderDetail detail = adapter503.getOrder(accountRef(), "TSF-503");
     assertThat(detail.orderId()).isEqualTo("TSF-503");
     assertThat(fiveOhThreeHits).hasValue(2);
+  }
+
+  @Test
+  void slowStubTimeoutRetriesAndFinishesWithinBudget() throws Exception {
+    AtomicInteger hits = new AtomicInteger();
+    HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    attachTokenHandler(server);
+    server.createContext(
+        "/internal/v1/orders/TSF-SLOW",
+        exchange -> {
+          int hit = hits.incrementAndGet();
+          if (hit == 1) {
+            try {
+              Thread.sleep(4000);
+            } catch (InterruptedException ex) {
+              Thread.currentThread().interrupt();
+            }
+            byte[] body = "{\"error\":\"UNAVAILABLE\"}".getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(503, body.length);
+            exchange.getResponseBody().write(body);
+          } else {
+            byte[] body =
+                """
+                {"order_id":"TSF-SLOW","reservation_id":"rsv","payment_method":"PREPAID",\
+                "currency":"THB","lines":[],"updated_at":"2026-01-01T00:00:00Z",\
+                "aggregate_version":1}
+                """
+                    .getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, body.length);
+            exchange.getResponseBody().write(body);
+          }
+          exchange.close();
+        });
+    server.start();
+    servers.add(server);
+    ChannelProperties properties = properties();
+    properties.getTsf().setHttpTimeout(Duration.ofSeconds(5));
+    properties.getTsf().setRetryMaxAttempts(3);
+    properties.getTsf().setRetryWaitBase(Duration.ofMillis(10));
+    properties.getTsf().setRetryWaitMax(Duration.ofMillis(10));
+    TsfChannelAdapter adapter =
+        tsfAdapter(server.getAddress().getPort(), properties, new RecordingSleeper());
+    Instant start = Instant.now();
+    OrderDetail detail = adapter.getOrder(accountRef(), "TSF-SLOW");
+    assertThat(detail.orderId()).isEqualTo("TSF-SLOW");
+    assertThat(hits.get()).isGreaterThanOrEqualTo(2);
+    assertThat(Duration.between(start, Instant.now())).isLessThan(Duration.ofSeconds(10));
+  }
+
+  @Test
+  void retryAfterSleepDoesNotHoldBulkheadPermit() throws Exception {
+    AtomicInteger hits = new AtomicInteger();
+    HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    attachTokenHandler(server);
+    AtomicInteger bhHits = new AtomicInteger();
+    server.createContext(
+        "/internal/v1/orders/TSF-BH",
+        exchange -> {
+          if (bhHits.getAndIncrement() == 0) {
+            byte[] body = "{\"error\":\"RATE_LIMITED\"}".getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.getResponseHeaders().set("Retry-After", "3");
+            exchange.sendResponseHeaders(429, body.length);
+            exchange.getResponseBody().write(body);
+          } else {
+            byte[] body =
+                """
+                {"order_id":"TSF-BH","reservation_id":"rsv","payment_method":"PREPAID",\
+                "currency":"THB","lines":[],"updated_at":"2026-01-01T00:00:00Z",\
+                "aggregate_version":1}
+                """
+                    .getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, body.length);
+            exchange.getResponseBody().write(body);
+          }
+          exchange.close();
+        });
+    server.createContext(
+        "/internal/v1/orders/TSF-BH-2",
+        exchange -> {
+          hits.incrementAndGet();
+          byte[] body =
+              """
+              {"order_id":"TSF-BH-2","reservation_id":"rsv","payment_method":"PREPAID",\
+              "currency":"THB","lines":[],"updated_at":"2026-01-01T00:00:00Z",\
+              "aggregate_version":1}
+              """
+                  .getBytes(StandardCharsets.UTF_8);
+          exchange.getResponseHeaders().set("Content-Type", "application/json");
+          exchange.sendResponseHeaders(200, body.length);
+          exchange.getResponseBody().write(body);
+          exchange.close();
+        });
+    server.start();
+    servers.add(server);
+    ChannelProperties properties = properties();
+    properties.getTsf().setBulkheadMaxConcurrent(1);
+    properties.getTsf().setBulkheadMaxWait(Duration.ofSeconds(5));
+    properties.getTsf().setHttpTimeout(Duration.ofSeconds(30));
+    SystemSleeper realSleeper = new SystemSleeper();
+    TsfChannelAdapter adapter = tsfAdapter(server.getAddress().getPort(), properties, realSleeper);
+    ChannelAccountRef account = accountRef();
+    ExecutorService pool = Executors.newFixedThreadPool(2);
+    try {
+      Future<OrderDetail> first = pool.submit(() -> adapter.getOrder(account, "TSF-BH"));
+      Thread.sleep(100);
+      Future<OrderDetail> second = pool.submit(() -> adapter.getOrder(account, "TSF-BH-2"));
+      assertThat(second.get(10, TimeUnit.SECONDS).orderId()).isEqualTo("TSF-BH-2");
+      assertThat(first.get(15, TimeUnit.SECONDS).orderId()).isEqualTo("TSF-BH");
+      assertThat(hits.get()).isEqualTo(1);
+      assertThat(bhHits.get()).isEqualTo(2);
+    } finally {
+      pool.shutdownNow();
+    }
+  }
+
+  @Test
+  void rateLimiterSpreadsBurstAcrossWallTime() throws Exception {
+    ChannelProperties properties = properties();
+    properties.getTsf().setRateLimitPerSecond(10);
+    properties.getTsf().setRateLimitWait(Duration.ofSeconds(30));
+    properties.getTsf().setRetryMaxAttempts(1);
+    AtomicInteger calls = new AtomicInteger();
+    TestChannelAdapter adapter =
+        adapter(
+            properties,
+            new RecordingSleeper(),
+            () -> {
+              calls.incrementAndGet();
+              return sampleOrder();
+            });
+    ChannelAccountRef account = accountRef();
+    Instant start = Instant.now();
+    for (int i = 0; i < 30; i++) {
+      adapter.getOrder(account, "order-" + i);
+    }
+    assertThat(Duration.between(start, Instant.now()).compareTo(Duration.ofSeconds(2)))
+        .isGreaterThanOrEqualTo(0);
+    assertThat(calls).hasValue(30);
+
+    ChannelAccountRef other = accountRef();
+    Instant otherStart = Instant.now();
+    adapter.getOrder(other, "other");
+    assertThat(Duration.between(otherStart, Instant.now())).isLessThan(Duration.ofSeconds(1));
+  }
+
+  @Test
+  void metricsHaveNoShopOrOrderTags() {
+    TestChannelAdapter adapter = adapter(properties(), new RecordingSleeper(), () -> sampleOrder());
+    adapter.getOrder(accountRef(), "metrics-order");
+    for (var meter : meters.getMeters()) {
+      assertThat(meter.getId().getTags())
+          .noneMatch(tag -> tag.getKey().equals("shop") || tag.getKey().equals("order"));
+    }
+  }
+
+  @Test
+  void interruptFlagIsRestoredWhenRetrySleepIsInterrupted() throws Exception {
+    ChannelProperties properties = properties();
+    properties.getTsf().setRetryMaxAttempts(3);
+    AtomicInteger attempts = new AtomicInteger();
+    TestChannelAdapter adapter =
+        adapter(
+            properties,
+            duration -> {
+              throw new InterruptedException("stop");
+            },
+            () -> {
+              attempts.incrementAndGet();
+              throw new ChannelUnavailableException("retry");
+            });
+    java.util.concurrent.atomic.AtomicBoolean interruptedOnWorker =
+        new java.util.concurrent.atomic.AtomicBoolean();
+    Thread runner =
+        new Thread(
+            () -> {
+              try {
+                adapter.getOrder(accountRef(), "interrupt");
+              } catch (ChannelUnavailableException ex) {
+                interruptedOnWorker.set(Thread.currentThread().isInterrupted());
+              }
+            });
+    runner.start();
+    runner.join(5000);
+    assertThat(interruptedOnWorker).isTrue();
+    assertThat(attempts.get()).isGreaterThanOrEqualTo(1);
   }
 
   @Test
@@ -568,11 +776,16 @@ class ChannelResilienceTest {
   }
 
   private TestChannelAdapter adapter(ChannelProperties properties, RecordingSleeper sleeper) {
-    return adapter(properties, sleeper, () -> sampleOrder());
+    return adapter(properties, (Sleeper) sleeper, () -> sampleOrder());
   }
 
   private TestChannelAdapter adapter(
       ChannelProperties properties, RecordingSleeper sleeper, Callable<?> behavior) {
+    return adapter(properties, (Sleeper) sleeper, behavior);
+  }
+
+  private TestChannelAdapter adapter(
+      ChannelProperties properties, Sleeper sleeper, Callable<?> behavior) {
     return new TestChannelAdapter(
         new AccountResilienceRegistry(properties, new ChannelMetrics(meters)),
         properties,
@@ -580,6 +793,20 @@ class ChannelResilienceTest {
         sleeper,
         Clock.systemUTC(),
         behavior);
+  }
+
+  private static void attachTokenHandler(HttpServer server) {
+    server.createContext(
+        "/token",
+        exchange -> {
+          byte[] body =
+              "{\"access_token\":\"test-token\",\"expires_in\":3600}"
+                  .getBytes(StandardCharsets.UTF_8);
+          exchange.getResponseHeaders().set("Content-Type", "application/json");
+          exchange.sendResponseHeaders(200, body.length);
+          exchange.getResponseBody().write(body);
+          exchange.close();
+        });
   }
 
   private static ChannelProperties properties() {
