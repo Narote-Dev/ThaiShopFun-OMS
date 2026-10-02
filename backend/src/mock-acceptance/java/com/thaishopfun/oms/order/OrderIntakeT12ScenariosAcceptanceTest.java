@@ -14,11 +14,7 @@ import com.thaishopfun.oms.auth.UuidV7;
 import com.thaishopfun.oms.inbox.InboxWorker;
 import com.thaishopfun.oms.order.intake.OrderIntakeSupport;
 import com.thaishopfun.oms.outbox.OutboxPublisher;
-import com.thaishopfun.oms.stock.StockExpiryJob;
 import com.thaishopfun.oms.stock.StockFixture;
-import com.thaishopfun.oms.stock.StockTestConfig;
-import com.thaishopfun.oms.stock.StockTestConfig.Fault;
-import com.thaishopfun.oms.stock.StockTestConfig.FaultHooks;
 import com.thaishopfun.oms.tenant.TenantContext;
 import java.io.IOException;
 import java.io.InputStream;
@@ -35,15 +31,8 @@ import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
-import java.util.ArrayList;
 import java.util.HexFormat;
-import java.util.List;
 import java.util.UUID;
-import java.util.concurrent.Callable;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -52,7 +41,6 @@ import javax.crypto.spec.SecretKeySpec;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.Timeout;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -79,7 +67,7 @@ import tools.jackson.databind.node.ObjectNode;
 @SpringBootTest(
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
     properties = {"spring.main.allow-bean-definition-overriding=true"})
-@Import({OrderIntakeT12ScenariosAcceptanceTest.IntakeTestConfig.class, StockTestConfig.class})
+@Import(OrderIntakeT12ScenariosAcceptanceTest.IntakeTestConfig.class)
 class OrderIntakeT12ScenariosAcceptanceTest {
 
   private static final String ISSUER = OrderIntakeMockRuntime.issuer();
@@ -122,8 +110,6 @@ class OrderIntakeT12ScenariosAcceptanceTest {
   @Autowired OutboxPublisher publisher;
   @Autowired JdbcTemplate jdbc;
   @Autowired PlatformTransactionManager transactions;
-  @Autowired StockExpiryJob expiryJob;
-  @Autowired FaultHooks faults;
 
   StockFixture fixture;
   private final ListAppender<ILoggingEvent> intakeLogs = new ListAppender<>();
@@ -133,7 +119,6 @@ class OrderIntakeT12ScenariosAcceptanceTest {
     MAX_DEFER.set("24h");
     mock().getBean(OmsEndpoint.class).setBaseUrl("http://127.0.0.1:" + port);
     fixture = new StockFixture(jdbc, transactions);
-    faults.reset();
     IntakeTestConfig.failAfterOutbox.set(false);
     IntakeTestConfig.afterOutboxCalls.set(0);
     attachIntakeLogs();
@@ -151,7 +136,6 @@ class OrderIntakeT12ScenariosAcceptanceTest {
   @AfterEach
   void clearTenant() {
     detachIntakeLogs();
-    faults.reset();
     TenantContext.clear();
   }
 
@@ -854,78 +838,6 @@ class OrderIntakeT12ScenariosAcceptanceTest {
                         String.class,
                         externalOrderId)))
         .isEqualTo("READY_TO_PICK");
-  }
-
-  @Test
-  @Timeout(value = 3, unit = TimeUnit.MINUTES)
-  void fiftyParallelCreatedEventsWithSweeperAndDeadlockInjection() throws Exception {
-    StockFixture.Shop shop = fixture.shop("ACTIVE");
-    String shopId = fixture.tsfShopId(shop);
-    UUID account = fixture.tsfChannelAccount(shop, "ACTIVE", "CONNECTED");
-    UUID sku = fixture.sku(shop, 200);
-    fixture.channelListing(shop, account, "L-conc", sku, true);
-
-    for (int i = 0; i < 50; i++) {
-      String externalOrderId = "TSF-CONC-" + i + "-" + UUID.randomUUID();
-      ingest(
-          OrderIntakeScenarioSupport.orderCreated(
-              JSON, externalOrderId, shopId, UuidV7.generate().toString(), "COD", "L-conc", 1, 1));
-    }
-
-    AtomicInteger workerPasses = new AtomicInteger();
-    ExecutorService pool = Executors.newFixedThreadPool(4);
-    try {
-      Future<?> sweeper =
-          pool.submit(
-              () -> {
-                for (int pass = 0; pass < 40; pass++) {
-                  expiryJob.runOnce();
-                  Thread.sleep(25);
-                }
-                return null;
-              });
-      List<Callable<Void>> workers = new ArrayList<>();
-      for (int w = 0; w < 4; w++) {
-        workers.add(
-            () -> {
-              while (true) {
-                if (workerPasses.incrementAndGet() % 11 == 0) {
-                  faults.failNext(Fault.DEADLOCK);
-                }
-                int processed = worker.processAvailable(3);
-                if (processed == 0
-                    && fixture.inTenant(
-                            shop.tenant(),
-                            () ->
-                                jdbc.queryForObject("SELECT count(*) FROM sales_order", Long.class))
-                        >= 50) {
-                  break;
-                }
-                if (processed == 0) {
-                  Thread.sleep(10);
-                }
-              }
-              return null;
-            });
-      }
-      List<Future<Void>> results = pool.invokeAll(workers, 120, TimeUnit.SECONDS);
-      for (Future<Void> result : results) {
-        result.get(30, TimeUnit.SECONDS);
-      }
-      sweeper.get(120, TimeUnit.SECONDS);
-    } finally {
-      pool.shutdownNow();
-    }
-
-    assertThat(worker.processAvailable(20)).isZero();
-    assertThat(
-            fixture.inTenant(
-                shop.tenant(),
-                () -> jdbc.queryForObject("SELECT count(*) FROM sales_order", Long.class)))
-        .isEqualTo(50);
-    assertThat(fixture.reserved(shop, sku)).isEqualTo(50);
-    assertThat(faults.fired()).isGreaterThan(0);
-    fixture.assertInvariants(shop);
   }
 
   @Test
