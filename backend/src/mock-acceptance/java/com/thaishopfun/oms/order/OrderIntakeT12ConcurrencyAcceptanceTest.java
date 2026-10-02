@@ -28,6 +28,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
@@ -187,53 +188,15 @@ class OrderIntakeT12ConcurrencyAcceptanceTest {
     } while (!validOrder);
 
     OrderIntakeFaultTestConfig.injectDeadlockOnce.set(true);
-    for (Op op : ops) {
-      OrderPlan plan = plans.get(op.orderIndex());
-      ShopCtx ctx = plan.ctx();
-      switch (op.kind()) {
-        case CHECKOUT -> {
-          JsonNode checkout =
-              checkoutTwoLines(
-                  "chk-" + op.orderIndex(),
-                  ctx.shopId(),
-                  plan.reverseLines() ? "L-b" : "L-a",
-                  plan.reverseLines() ? "L-a" : "L-b");
-          plan.reservationIdHolder()[0] = checkout.path("reservation_id").asString();
-        }
-        case CREATED ->
-            ingest(
-                OrderIntakeScenarioSupport.orderCreatedTwoLines(
-                    JSON,
-                    plan.externalOrderId(),
-                    ctx.shopId(),
-                    plan.reservationIdHolder()[0],
-                    "COD",
-                    plan.reverseLines() ? "L-b" : "L-a",
-                    plan.reverseLines() ? "L-a" : "L-b",
-                    1,
-                    1,
-                    1));
-        case FOLLOWUP -> {
-          if (plan.cancel()) {
-            ingest(
-                OrderIntakeScenarioSupport.orderCancelled(
-                    JSON, plan.externalOrderId(), ctx.shopId(), 2));
-          } else {
-            ingest(
-                OrderIntakeScenarioSupport.orderPaid(
-                    JSON, plan.externalOrderId(), ctx.shopId(), 2));
-          }
-        }
-      }
-    }
 
     AtomicInteger passes = new AtomicInteger();
+    AtomicBoolean ingestDone = new AtomicBoolean(false);
     ExecutorService pool = Executors.newFixedThreadPool(5);
     try {
       Future<?> sweeper =
           pool.submit(
               () -> {
-                for (int pass = 0; pass < 60; pass++) {
+                while (!ingestDone.get() || inboxNeedsWork()) {
                   expiryJob.runOnce();
                   Thread.sleep(20);
                 }
@@ -243,25 +206,66 @@ class OrderIntakeT12ConcurrencyAcceptanceTest {
       for (int w = 0; w < 4; w++) {
         workers.add(
             () -> {
-              while (passes.incrementAndGet() < 5000) {
-                worker.processAvailable(4);
-                long pending =
-                    jdbc.queryForObject(
-                        "SELECT count(*) FROM inbox_event WHERE status IN ('RECEIVED', 'FAILED')",
-                        Long.class);
-                if (pending == 0) {
+              while (!ingestDone.get() || inboxNeedsWork()) {
+                if (passes.incrementAndGet() > 8000) {
                   break;
                 }
-                Thread.sleep(15);
+                worker.processAvailable(4);
+                Thread.sleep(10);
               }
               return null;
             });
       }
-      List<Future<Void>> done = pool.invokeAll(workers, 150, TimeUnit.SECONDS);
-      for (Future<Void> f : done) {
-        f.get(30, TimeUnit.SECONDS);
+      List<Future<Void>> workerFutures = new ArrayList<>();
+      for (Callable<Void> task : workers) {
+        workerFutures.add(pool.submit(task));
       }
-      sweeper.get(150, TimeUnit.SECONDS);
+
+      for (Op op : ops) {
+        OrderPlan plan = plans.get(op.orderIndex());
+        ShopCtx ctx = plan.ctx();
+        switch (op.kind()) {
+          case CHECKOUT -> {
+            JsonNode checkout =
+                checkoutTwoLines(
+                    "chk-" + op.orderIndex(),
+                    ctx.shopId(),
+                    plan.reverseLines() ? "L-b" : "L-a",
+                    plan.reverseLines() ? "L-a" : "L-b");
+            plan.reservationIdHolder()[0] = checkout.path("reservation_id").asString();
+          }
+          case CREATED ->
+              ingest(
+                  OrderIntakeScenarioSupport.orderCreatedTwoLines(
+                      JSON,
+                      plan.externalOrderId(),
+                      ctx.shopId(),
+                      plan.reservationIdHolder()[0],
+                      "COD",
+                      plan.reverseLines() ? "L-b" : "L-a",
+                      plan.reverseLines() ? "L-a" : "L-b",
+                      1,
+                      1,
+                      1));
+          case FOLLOWUP -> {
+            if (plan.cancel()) {
+              ingest(
+                  OrderIntakeScenarioSupport.orderCancelled(
+                      JSON, plan.externalOrderId(), ctx.shopId(), 2));
+            } else {
+              ingest(
+                  OrderIntakeScenarioSupport.orderPaid(
+                      JSON, plan.externalOrderId(), ctx.shopId(), 2));
+            }
+          }
+        }
+      }
+      ingestDone.set(true);
+
+      for (Future<Void> f : workerFutures) {
+        f.get(180, TimeUnit.SECONDS);
+      }
+      sweeper.get(30, TimeUnit.SECONDS);
     } finally {
       pool.shutdownNow();
     }
@@ -310,16 +314,20 @@ class OrderIntakeT12ConcurrencyAcceptanceTest {
   }
 
   private void drainInbox() throws InterruptedException {
-    for (int pass = 0; pass < 200; pass++) {
-      if (worker.processAvailable(20) == 0
-          && jdbc.queryForObject(
-                  "SELECT count(*) FROM inbox_event WHERE status IN ('RECEIVED', 'FAILED')",
-                  Long.class)
-              == 0) {
+    for (int pass = 0; pass < 400; pass++) {
+      worker.processAvailable(20);
+      if (!inboxNeedsWork()) {
         return;
       }
       Thread.sleep(25);
     }
+  }
+
+  private boolean inboxNeedsWork() {
+    Long remaining =
+        jdbc.queryForObject(
+            "SELECT count(*) FROM inbox_event WHERE status <> 'PROCESSED'", Long.class);
+    return remaining != null && remaining > 0;
   }
 
   private JsonNode checkoutTwoLines(

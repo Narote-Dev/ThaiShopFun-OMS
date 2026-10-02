@@ -886,19 +886,31 @@ class OrderIntakeT12ScenariosAcceptanceTest {
     backdateReceivedAt(paidB.path("event_id").asString(), old);
     rewind(paidA.path("event_id").asString());
     rewind(paidB.path("event_id").asString());
-    assertThat(worker.processAvailable(10)).isEqualTo(1);
+    assertThat(worker.processAvailable(1)).isEqualTo(1);
     assertThat(
             text(
                 "SELECT status FROM inbox_event WHERE event_id = ?",
                 paidA.path("event_id").asString()))
         .isEqualTo("FAILED");
     rewind(paidB.path("event_id").asString());
-    assertThat(worker.processAvailable(10)).isEqualTo(1);
+    assertThat(worker.processAvailable(1)).isEqualTo(1);
     assertThat(
             text(
                 "SELECT status FROM inbox_event WHERE event_id = ?",
                 paidB.path("event_id").asString()))
         .isEqualTo("FAILED");
+
+    assertThat(
+            fixture.inTenant(
+                shop.tenant(),
+                () ->
+                    jdbc.queryForObject(
+                        """
+                        SELECT count(*) FROM reconciliation_issue
+                        WHERE rule = 'ORDER_EVENT_WITHOUT_ORDER' AND status = 'OPEN'
+                        """,
+                        Long.class)))
+        .isEqualTo(1);
 
     JsonNode details =
         fixture.inTenant(
