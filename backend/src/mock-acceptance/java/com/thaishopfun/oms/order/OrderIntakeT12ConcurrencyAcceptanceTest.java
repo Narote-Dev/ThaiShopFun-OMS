@@ -33,7 +33,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
-import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -77,11 +76,6 @@ class OrderIntakeT12ConcurrencyAcceptanceTest {
     registry.add("oms.inbox.hmac-secrets", () -> INBOX_SECRET);
     registry.add("oms.inbox.jitter-ratio", () -> "0");
     registry.add("oms.outbox.publisher-enabled", () -> "false");
-  }
-
-  @AfterAll
-  static void stopMock() {
-    OrderIntakeMockRuntime.stopMock();
   }
 
   @LocalServerPort private int port;

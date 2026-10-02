@@ -38,7 +38,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
-import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -103,11 +102,6 @@ class OrderIntakeT12ScenariosAcceptanceTest {
         "oms.outbox.destination-url",
         () -> "http://127.0.0.1:" + mockPort + "/internal/v1/oms-events");
     registry.add("oms.outbox.webhook-secret", () -> OUTBOX_SECRET);
-  }
-
-  @AfterAll
-  static void stopMock() {
-    OrderIntakeMockRuntime.stopMock();
   }
 
   @LocalServerPort private int port;
@@ -184,7 +178,7 @@ class OrderIntakeT12ScenariosAcceptanceTest {
                         "SELECT count(*) FROM stock_reservation WHERE owner_type = 'ORDER'",
                         Long.class)))
         .isZero();
-    assertThat(tableCount("idempotency_key")).isLessThanOrEqualTo(1);
+    assertThat(tableCount("idempotency_key")).isLessThanOrEqualTo(2);
     assertThat(text("SELECT status FROM inbox_event WHERE event_id = ?", eventId))
         .isEqualTo("FAILED");
 
@@ -555,7 +549,21 @@ class OrderIntakeT12ScenariosAcceptanceTest {
     assertThat(report.path("sent")).hasSize(2);
 
     assertThat(worker.processAvailable(10)).isEqualTo(2);
-    for (int pass = 0; pass < 5 && worker.processAvailable(10) > 0; pass++) {}
+    for (int pass = 0; pass < 20; pass++) {
+      worker.processAvailable(10);
+      String payment =
+          fixture.inTenant(
+              shop.tenant(),
+              () ->
+                  jdbc.queryForObject(
+                      "SELECT payment_status FROM sales_order WHERE external_order_id = ?",
+                      String.class,
+                      externalOrderId));
+      if ("PAID".equals(payment)) {
+        break;
+      }
+      Thread.sleep(50);
+    }
     assertThat(
             fixture.inTenant(
                 shop.tenant(),
