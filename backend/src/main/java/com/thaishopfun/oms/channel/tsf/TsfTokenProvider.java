@@ -20,9 +20,15 @@ import java.util.concurrent.locks.ReentrantLock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
+import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
+/**
+ * OAuth client-credentials cache. {@link HttpClient#connectTimeout} is capped by {@code min(10s,
+ * oms.channel.tsf.http-timeout)}; the JDK has no per-request connect timeout — each token POST uses
+ * {@link HttpRequest#timeout} for the full connect+transfer bound from the remaining call budget.
+ */
 @Component
 public class TsfTokenProvider {
 
@@ -44,7 +50,7 @@ public class TsfTokenProvider {
     this.channelProperties = channelProperties;
     this.json = json;
     this.clock = clock;
-    this.client = HttpClient.newBuilder().connectTimeout(CONNECT_TIMEOUT).build();
+    this.client = HttpClient.newBuilder().connectTimeout(connectTimeout(channelProperties)).build();
   }
 
   @PostConstruct
@@ -147,17 +153,23 @@ public class TsfTokenProvider {
       String token = tokenNode.isString() ? tokenNode.asString() : null;
       int expiresIn = body.path("expires_in").asInt(0);
       if (token == null || token.isBlank() || expiresIn < 1) {
-        throw new ChannelClientException(
-            502, "TOKEN_RESPONSE_INVALID", "TSF token response is invalid");
+        throw new ChannelUnavailableException("TSF token response is invalid");
       }
       Instant expiresAt = clock.instant().plusSeconds(expiresIn);
       return new CachedToken(token, expiresAt, expiresIn);
+    } catch (JacksonException ex) {
+      throw new ChannelUnavailableException("TSF token response is not valid JSON", ex);
     } catch (InterruptedException ex) {
       Thread.currentThread().interrupt();
       throw new ChannelUnavailableException("TSF token request interrupted", ex);
     } catch (java.io.IOException ex) {
       throw new ChannelUnavailableException("TSF token request failed", ex);
     }
+  }
+
+  private static Duration connectTimeout(ChannelProperties channelProperties) {
+    return ChannelCallBudget.minDuration(
+        CONNECT_TIMEOUT, channelProperties.getTsf().getHttpTimeout());
   }
 
   private static String urlEncode(String value) {

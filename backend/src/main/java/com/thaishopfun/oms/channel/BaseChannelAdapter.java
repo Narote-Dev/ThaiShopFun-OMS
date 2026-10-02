@@ -20,6 +20,7 @@ import io.github.resilience4j.bulkhead.BulkheadFullException;
 import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.github.resilience4j.ratelimiter.RateLimiter;
+import io.github.resilience4j.ratelimiter.internal.AtomicRateLimiter;
 import io.micrometer.core.instrument.Timer;
 import java.time.Clock;
 import java.time.Duration;
@@ -330,6 +331,14 @@ public abstract class BaseChannelAdapter implements ChannelAdapter {
     Duration allowed =
         ChannelCallBudget.minDuration(
             rateLimiter.getRateLimiterConfig().getTimeoutDuration(), remaining);
+    long expectedWaitNanos = peekRateLimiterWaitNanos(rateLimiter);
+    if (expectedWaitNanos > 0) {
+      Duration expectedWait = Duration.ofNanos(expectedWaitNanos);
+      if (expectedWait.compareTo(allowed) > 0) {
+        throw new ChannelRateLimitedException(
+            "Rate limit wait exceeds budget for " + channel(), null);
+      }
+    }
     long waitNanos = rateLimiter.reservePermission();
     if (waitNanos < 0) {
       throw new ChannelRateLimitedException("Rate limit denied for " + channel(), null);
@@ -348,6 +357,13 @@ public abstract class BaseChannelAdapter implements ChannelAdapter {
       Thread.currentThread().interrupt();
       throw ex;
     }
+  }
+
+  private static long peekRateLimiterWaitNanos(RateLimiter rateLimiter) {
+    if (rateLimiter instanceof AtomicRateLimiter atomic) {
+      return atomic.getDetailedMetrics().getNanosToWait();
+    }
+    return 0L;
   }
 
   private void sleepBeforeRetry(Instant deadline, Duration sleep, ChannelRateLimitedException rate)
