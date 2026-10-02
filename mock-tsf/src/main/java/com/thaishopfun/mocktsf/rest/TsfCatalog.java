@@ -127,7 +127,8 @@ public class TsfCatalog {
 
   private static Order activeSecond(Instant updated) {
     Map<String, Object> detail = base("TSF-240929-000125", "rsv_01J9Z4A1B2C5", updated, 1);
-    detail.put("lines", List.of(line("L1", "tsf_sku_5000", "SET-TSHIRT-2", "เซ็ตเสื้อ 2 ตัว", 1, 450)));
+    detail.put(
+        "lines", List.of(line("L1", "tsf_sku_5000", "SET-TSHIRT-2", "เซ็ตเสื้อ 2 ตัว", 1, 450)));
     detail.put("totals", totals(450, 40, 0, 490));
     detail.put("payment_method", "PREPAID");
     return new Order(
