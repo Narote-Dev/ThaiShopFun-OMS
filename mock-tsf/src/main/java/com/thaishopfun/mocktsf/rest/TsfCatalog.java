@@ -29,7 +29,8 @@ public class TsfCatalog {
   public TsfCatalog() {
     Instant updated = Instant.parse("2026-09-29T08:15:02Z");
     orders.add(order(updated));
-    orders.add(second(updated.plusSeconds(60)));
+    orders.add(activeSecond(updated.plusSeconds(60)));
+    orders.add(second(updated.plusSeconds(120)));
     listings.add(listing("tsf_sku_7781", "TSHIRT-BLK-M", "เสื้อยืดดำ M", 18, 1042));
     listings.add(listing("tsf_sku_9001", "MUG-WHT", "แก้วขาว", 4, 880));
     listings.add(listing("tsf_sku_5000", "SET-TSHIRT-2", "เซ็ตเสื้อ 2 ตัว", 9, 1043));
