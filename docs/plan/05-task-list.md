@@ -24,6 +24,7 @@ Versions are taken in merge order as the next free number. One migration per PR.
 | V7 | T10 order-side schema |
 | V8 | T08A commit-consistent `inventory_ledger.ledger_seq` |
 | V9 | T12A reservation-group tenant lookup |
+| V10 | T16 TSF channel_account provisioning + resolve_tenant via channel_account |
 
 ## สรุปจำนวน
 | Phase | Cursor | Codex | รวม |

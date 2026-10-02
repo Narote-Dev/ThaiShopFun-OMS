@@ -20,3 +20,9 @@ oms:
   outbox:
     destination-url: http://localhost:8090/internal/v1/oms-events
     webhook-secret: dev-outbox-webhook-secret-local-only
+  # DEV ONLY — same client as mock-tsf IdP (MOCK_OMS_SERVICE_CLIENT_SECRET).
+  tsf:
+    base-url: http://localhost:8090
+    token-uri: http://localhost:8090/tsf-idp/token
+    client-id: oms-service
+    client-secret: dev-oms-service-secret

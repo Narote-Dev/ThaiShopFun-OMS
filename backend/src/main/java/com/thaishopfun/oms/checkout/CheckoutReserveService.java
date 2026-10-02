@@ -212,7 +212,7 @@ public class CheckoutReserveService {
         repository
             .tenant(tenantId)
             .orElseThrow(() -> new IllegalStateException("tenant " + tenantId + " missing"));
-    Optional<ChannelAccount> account = repository.tsfAccount(tenantId);
+    Optional<ChannelAccount> account = repository.tsfAccount(tenantId, request.tsfShopId());
     String modeTag = account.map(ChannelAccount::mode).orElse("none");
     List<ItemPlan> plans = planItems(tenant, account, request);
     Instant expiresAt =

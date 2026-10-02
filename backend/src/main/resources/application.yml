@@ -106,6 +106,30 @@ oms:
   # T08 reservation engine. Retry is bounded (max 3). The expiry interval is capped at 60s so an
   # expired hold is back in stock within 2 minutes. Tests set expiry.enabled=false and call
   # StockExpiryJob directly.
+  # T16 TSF internal API (section 4.7) and per-channel resilience defaults.
+  tsf:
+    base-url: ${OMS_TSF_BASE_URL:}
+    token-uri: ${OMS_TSF_TOKEN_URI:}
+    client-id: ${OMS_TSF_CLIENT_ID:oms-service}
+    client-secret: ${OMS_TSF_CLIENT_SECRET:}
+    audience: ${OMS_TSF_AUDIENCE:tsf-internal}
+  channel:
+    tsf:
+      max-retry-after: 60s
+      call-time-budget: 10s
+      http-timeout: 10s
+      rate-limit-per-second: 10
+      rate-limit-wait: 10s
+      retry-max-attempts: 4
+      retry-wait-base: 500ms
+      retry-wait-max: 30s
+      circuit-failure-rate-threshold: 50
+      circuit-sliding-window-size: 10
+      circuit-minimum-number-of-calls: 5
+      circuit-wait-in-open-state: 30s
+      circuit-permitted-calls-in-half-open: 3
+      bulkhead-max-concurrent: 8
+      bulkhead-max-wait: 10s
   stock:
     checkout-ttl: 15m
     lock-timeout: 2s
