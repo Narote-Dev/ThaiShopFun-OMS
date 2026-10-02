@@ -17,8 +17,12 @@ public class OrderIntakeFaultTestConfig {
   /** When set, the next {@link OrderIntakeHooks#beforeEngineWrite()} raises SQLSTATE 40P01 once. */
   public static final AtomicBoolean injectDeadlockOnce = new AtomicBoolean(false);
 
+  /** Set when {@link #maybeInjectDeadlock} consumed {@link #injectDeadlockOnce}. */
+  public static final AtomicBoolean injectDeadlockConsumed = new AtomicBoolean(false);
+
   public static void maybeInjectDeadlock(JdbcTemplate jdbc) {
     if (injectDeadlockOnce.compareAndSet(true, false)) {
+      injectDeadlockConsumed.set(true);
       jdbc.execute("DO $$ BEGIN RAISE EXCEPTION USING ERRCODE = '40P01'; END $$;");
     }
   }

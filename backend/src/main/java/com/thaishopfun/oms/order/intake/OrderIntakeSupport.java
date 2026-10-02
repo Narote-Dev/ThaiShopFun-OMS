@@ -224,19 +224,24 @@ public class OrderIntakeSupport {
     if ("PAID".equals(order.paymentStatus())) {
       return;
     }
-    Instant now = clock.instant();
-    order = applyPayment(order, "PAID", now, account);
+    Instant paidAt = eventOccurredAt(message);
+    order = applyPayment(order, "PAID", paidAt, account);
     List<ReserveItem> items = mappedReserveItems(order.id());
     if (stockEnforced(account) && !items.isEmpty()) {
       hooks.beforeEngineWrite();
       EnsureHoldResult held =
           engine.ensureOrderHold(
               StockOwner.order(order.id().toString()), items, "order.ensure:" + message.eventId());
-      if (!held.held()) {
+      if (held.held()) {
+        order = orders.findById(order.id()).orElseThrow();
+        if ("OUT_OF_STOCK".equals(order.holdReason())) {
+          order = applyHold(order, "NONE", null);
+        }
+      } else {
         order = applyHold(order, "OUT_OF_STOCK", shortfallNote(held.shortfalls()));
       }
     }
-    maybeReadyToPick(orders.findById(order.id()).orElseThrow(), account, items, now);
+    maybeReadyToPick(orders.findById(order.id()).orElseThrow(), account, items, paidAt);
   }
 
   void handleCancelled(InboxMessage message) {
@@ -255,6 +260,7 @@ public class OrderIntakeSupport {
     engine.release(StockOwner.order(order.id().toString()), "order.release:" + message.eventId());
     stateMachine.applyOrderStatus(
         order, "CANCELLED", "TSF cancel", "TSF", guard(account, order, List.of()));
+    recipients.scheduleRedaction(order.id(), clock.instant().plus(90, ChronoUnit.DAYS));
     hooks.afterOutbox();
   }
 
@@ -441,11 +447,15 @@ public class OrderIntakeSupport {
     if (payload.orderedAt() != null) {
       return payload.orderedAt();
     }
+    return eventOccurredAt(message);
+  }
+
+  private static Instant eventOccurredAt(InboxMessage message) {
     JsonNode occurred = message.payload().path("occurred_at");
     if (occurred.isString() && !occurred.asString().isBlank()) {
       return Instant.parse(occurred.asString());
     }
-    return payload.orderedAt();
+    throw new NonRetryableInboxException("occurred_at is required");
   }
 
   private static UUID parseUuid(String raw) {
@@ -538,6 +548,9 @@ public class OrderIntakeSupport {
       String paymentMethod = requiredText(data, "payment_method");
       Instant paymentExpiresAt = instant(data, "payment_expires_at");
       String currency = requiredText(data, "currency");
+      if (!"THB".equals(currency)) {
+        throw new NonRetryableInboxException("currency must be THB");
+      }
       JsonNode totals = data.path("totals");
       BigDecimal subtotal = decimal(totals, "subtotal");
       BigDecimal shipping = decimal(totals, "shipping_fee");
@@ -561,10 +574,7 @@ public class OrderIntakeSupport {
         throw new NonRetryableInboxException("data.lines must not be empty");
       }
       Instant orderedAt = instant(data, "ordered_at");
-      if (orderedAt == null) {
-        orderedAt = clock.instant().truncatedTo(ChronoUnit.SECONDS);
-      }
-      Instant redactAfter = clock.instant().plus(90, ChronoUnit.DAYS);
+      Instant redactAfter = null;
       return new CreatedPayload(
           orderId,
           reservationId,

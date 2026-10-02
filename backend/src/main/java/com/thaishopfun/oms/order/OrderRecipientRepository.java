@@ -59,6 +59,18 @@ public class OrderRecipientRepository {
         SalesOrderRepository.timestamp(redactAfter));
   }
 
+  /** Sets {@code redact_after} when the order closes (cancel today; completed later). */
+  public void scheduleRedaction(UUID orderId, Instant redactAfter) {
+    jdbc.update(
+        """
+        UPDATE order_recipient
+        SET redact_after = ?, updated_at = now()
+        WHERE order_id = ? AND pii_status = 'ACTIVE'
+        """,
+        SalesOrderRepository.timestamp(redactAfter),
+        orderId);
+  }
+
   public void update(UUID orderId, Recipient recipient) {
     UUID tenantId = TenantContext.requireTenantId();
     boolean hasPhone = recipient.phone() != null && !recipient.phone().isBlank();

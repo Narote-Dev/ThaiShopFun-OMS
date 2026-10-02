@@ -17,6 +17,7 @@ import com.thaishopfun.oms.outbox.OutboxPublisher;
 import com.thaishopfun.oms.stock.OrderIntakeFaultTestConfig;
 import com.thaishopfun.oms.stock.StockFixture;
 import com.thaishopfun.oms.tenant.TenantContext;
+import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.io.IOException;
 import java.io.InputStream;
@@ -35,7 +36,9 @@ import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.Arrays;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -48,6 +51,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.api.Timeout.ThreadMode;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -75,7 +79,7 @@ import tools.jackson.databind.node.ObjectNode;
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
     properties = {"spring.main.allow-bean-definition-overriding=true"})
 @Import(OrderIntakeT12ScenariosAcceptanceTest.IntakeTestConfig.class)
-@Timeout(value = 5, unit = TimeUnit.MINUTES)
+@Timeout(value = 5, unit = TimeUnit.MINUTES, threadMode = ThreadMode.SEPARATE_THREAD)
 class OrderIntakeT12ScenariosAcceptanceTest {
 
   private static final String ISSUER = OrderIntakeMockRuntime.issuer();
@@ -84,6 +88,7 @@ class OrderIntakeT12ScenariosAcceptanceTest {
   private static final JsonMapper JSON = JsonMapper.builder().build();
   private static final HttpClient HTTP =
       HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
+  private static final Duration HTTP_TIMEOUT = Duration.ofSeconds(20);
   private static final ContractValidator CONTRACT = ContractValidator.classpath();
   private static final AtomicReference<String> MAX_DEFER = new AtomicReference<>("24h");
 
@@ -134,6 +139,8 @@ class OrderIntakeT12ScenariosAcceptanceTest {
     attachIntakeLogs();
     try (Connection admin = AuthTestSupport.admin();
         var statement = admin.createStatement()) {
+      statement.execute("SET lock_timeout = '10s'");
+      statement.execute("SET statement_timeout = '30s'");
       statement.execute("SET session_replication_role = replica");
       statement.execute(
           "TRUNCATE TABLE outbox_event, inbox_event, order_status_history, order_line, "
@@ -1090,6 +1097,7 @@ class OrderIntakeT12ScenariosAcceptanceTest {
     assertThat(worker.processAvailable(10)).isEqualTo(1);
     assertThat(fixture.reserved(shop, skuCtrl)).isEqualTo(1);
     assertThat(fixture.reserved(shop, skuFree)).isZero();
+    assertNoActiveCheckoutReservations(shop);
     fixture.assertInvariants(shop);
   }
 
@@ -1161,6 +1169,49 @@ class OrderIntakeT12ScenariosAcceptanceTest {
     assertThat(worker.processAvailable(10)).isEqualTo(1);
     assertThat(fixture.reserved(shop, compA)).isEqualTo(1);
     assertThat(fixture.reserved(shop, compB)).isEqualTo(2);
+    assertNoActiveCheckoutReservations(shop);
+    fixture.assertInvariants(shop);
+  }
+
+  @Test
+  void createdShortRestockPaidClearsOutOfStockHoldAndReachesReadyToPick() throws Exception {
+    StockFixture.Shop shop = fixture.shop("ACTIVE");
+    String shopId = fixture.tsfShopId(shop);
+    UUID account = fixture.tsfChannelAccount(shop, "ACTIVE", "CONNECTED");
+    UUID sku = fixture.sku(shop, 1);
+    fixture.channelListing(shop, account, "L-restock", sku, true);
+
+    String externalOrderId = "TSF-RST-" + UUID.randomUUID();
+    ingest(
+        orderCreated(
+            externalOrderId, shopId, UuidV7.generate().toString(), "COD", "L-restock", 2, 1));
+    assertThat(worker.processAvailable(10)).isEqualTo(1);
+    assertThat(
+            fixture.inTenant(
+                shop.tenant(),
+                () ->
+                    jdbc.queryForObject(
+                        "SELECT hold_reason FROM sales_order WHERE external_order_id = ?",
+                        String.class,
+                        externalOrderId)))
+        .isEqualTo("OUT_OF_STOCK");
+
+    fixture.receive(shop, sku, 5);
+    ObjectNode paid = orderPaid(externalOrderId, shopId, 2);
+    ingest(paid);
+    assertThat(worker.processAvailable(10)).isEqualTo(1);
+    assertThat(
+            fixture.inTenant(
+                shop.tenant(),
+                () ->
+                    jdbc.queryForObject(
+                        """
+                        SELECT fulfillment_status FROM sales_order
+                        WHERE external_order_id = ? AND hold_reason = 'NONE'
+                        """,
+                        String.class,
+                        externalOrderId)))
+        .isEqualTo("READY_TO_PICK");
     fixture.assertInvariants(shop);
   }
 
@@ -1207,7 +1258,6 @@ class OrderIntakeT12ScenariosAcceptanceTest {
   void orderLandsOnTsfAccountMatchingEnvelopeShopId() throws Exception {
     StockFixture.Shop shop = fixture.shop("ACTIVE");
     String shopId = fixture.tsfShopId(shop);
-    UUID matching = fixture.tsfChannelAccount(shop, "ACTIVE", "CONNECTED");
     UUID other =
         fixture.inTenant(
             shop.tenant(),
@@ -1215,14 +1265,15 @@ class OrderIntakeT12ScenariosAcceptanceTest {
               UUID id = UuidV7.generate();
               jdbc.update(
                   """
-                  INSERT INTO channel_account (id, tenant_id, channel, external_shop_id, status, mode)
-                  VALUES (?, ?, 'TSF', ?, 'CONNECTED', 'OBSERVE')
+                  INSERT INTO channel_account (id, tenant_id, channel, external_shop_id, status, mode, created_at)
+                  VALUES (?, ?, 'TSF', ?, 'CONNECTED', 'OBSERVE', now() - interval '2 days')
                   """,
                   id,
                   shop.tenant(),
                   "other-" + id);
               return id;
             });
+    UUID matching = fixture.tsfChannelAccount(shop, "ACTIVE", "CONNECTED");
     UUID sku = fixture.sku(shop, 3);
     fixture.channelListing(shop, matching, "L-acct", sku, true);
     fixture.channelListing(shop, other, "L-other", sku, true);
@@ -1240,6 +1291,130 @@ class OrderIntakeT12ScenariosAcceptanceTest {
                     UUID.class,
                     externalOrderId));
     assertThat(channelAccountId).isEqualTo(matching);
+    assertThat(channelAccountId).isNotEqualTo(other);
+  }
+
+  @Test
+  void paidAtAndOrderedAtFollowEnvelopeOccurredAt() throws Exception {
+    StockFixture.Shop shop = fixture.shop("ACTIVE");
+    String shopId = fixture.tsfShopId(shop);
+    UUID account = fixture.tsfChannelAccount(shop, "ACTIVE", "CONNECTED");
+    UUID sku = fixture.sku(shop, 5);
+    fixture.channelListing(shop, account, "L-ts", sku, true);
+
+    Instant createdAt = Instant.parse("2026-03-15T10:00:00Z");
+    Instant paidAt = Instant.parse("2026-03-16T12:30:00Z");
+    String externalOrderId = "TSF-TS-" + UUID.randomUUID();
+    ObjectNode created =
+        orderCreated(
+            externalOrderId, shopId, UuidV7.generate().toString(), "PREPAID", "L-ts", 1, 1);
+    created.put("occurred_at", createdAt.toString());
+    ((ObjectNode) created.path("data")).remove("ordered_at");
+    ingest(created);
+    assertThat(worker.processAvailable(10)).isEqualTo(1);
+
+    ObjectNode paid = orderPaid(externalOrderId, shopId, 2);
+    paid.put("occurred_at", paidAt.toString());
+    ingest(paid);
+    assertThat(worker.processAvailable(10)).isEqualTo(1);
+
+    Instant storedOrdered =
+        fixture.inTenant(
+            shop.tenant(),
+            () ->
+                jdbc.queryForObject(
+                    "SELECT ordered_at FROM sales_order WHERE external_order_id = ?",
+                    (rs, row) -> rs.getTimestamp("ordered_at").toInstant(),
+                    externalOrderId));
+    Instant storedPaid =
+        fixture.inTenant(
+            shop.tenant(),
+            () ->
+                jdbc.queryForObject(
+                    "SELECT paid_at FROM sales_order WHERE external_order_id = ?",
+                    (rs, row) -> rs.getTimestamp("paid_at").toInstant(),
+                    externalOrderId));
+    assertThat(storedOrdered).isEqualTo(createdAt);
+    assertThat(storedPaid).isEqualTo(paidAt);
+  }
+
+  @Test
+  void redactAfterNullAtIntakeAndScheduledOnCancel() throws Exception {
+    StockFixture.Shop shop = fixture.shop("ACTIVE");
+    String shopId = fixture.tsfShopId(shop);
+    UUID account = fixture.tsfChannelAccount(shop, "ACTIVE", "CONNECTED");
+    UUID sku = fixture.sku(shop, 2);
+    fixture.channelListing(shop, account, "L-red", sku, true);
+
+    JsonNode checkout = checkoutViaControl("chk-red", shopId, "L-red", 1);
+    String externalOrderId = "TSF-RED-" + UUID.randomUUID();
+    ingest(
+        orderCreated(
+            externalOrderId,
+            shopId,
+            checkout.path("reservation_id").asString(),
+            "COD",
+            "L-red",
+            1,
+            1));
+    assertThat(worker.processAvailable(10)).isEqualTo(1);
+    UUID orderId =
+        fixture.inTenant(
+            shop.tenant(),
+            () ->
+                jdbc.queryForObject(
+                    "SELECT id FROM sales_order WHERE external_order_id = ?",
+                    UUID.class,
+                    externalOrderId));
+    assertThat(
+            fixture.inTenant(
+                shop.tenant(),
+                () ->
+                    jdbc.queryForObject(
+                        "SELECT redact_after FROM order_recipient WHERE order_id = ?",
+                        Object.class,
+                        orderId)))
+        .isNull();
+
+    Instant beforeCancel = Instant.now();
+    ingest(orderCancelled(externalOrderId, shopId, 2));
+    assertThat(worker.processAvailable(10)).isEqualTo(1);
+    Instant redactAfter =
+        fixture.inTenant(
+            shop.tenant(),
+            () ->
+                jdbc.queryForObject(
+                    "SELECT redact_after FROM order_recipient WHERE order_id = ?",
+                    Instant.class,
+                    orderId));
+    assertThat(redactAfter).isAfter(beforeCancel.plus(89, ChronoUnit.DAYS));
+    assertThat(redactAfter).isBefore(beforeCancel.plus(91, ChronoUnit.DAYS));
+  }
+
+  @Test
+  void nonThbCurrencyFailsWithoutRetryStorm() throws Exception {
+    StockFixture.Shop shop = fixture.shop("ACTIVE");
+    String shopId = fixture.tsfShopId(shop);
+    UUID account = fixture.tsfChannelAccount(shop, "ACTIVE", "CONNECTED");
+    UUID sku = fixture.sku(shop, 2);
+    fixture.channelListing(shop, account, "L-usd", sku, true);
+
+    ObjectNode created =
+        orderCreated(
+            "TSF-USD-" + UUID.randomUUID(),
+            shopId,
+            UuidV7.generate().toString(),
+            "COD",
+            "L-usd",
+            1,
+            1);
+    ((ObjectNode) created.path("data")).put("currency", "USD");
+    ingest(created);
+    assertThat(worker.processAvailable(10)).isEqualTo(1);
+    String eventId = created.path("event_id").asString();
+    assertThat(text("SELECT status FROM inbox_event WHERE event_id = ?", eventId))
+        .isEqualTo("DEAD");
+    assertThat(text("SELECT attempts FROM inbox_event WHERE event_id = ?", eventId)).isEqualTo("1");
   }
 
   @Test
@@ -1450,6 +1625,7 @@ class OrderIntakeT12ScenariosAcceptanceTest {
                             + OrderIntakeMockRuntime.mockPort()
                             + "/control/checkout/reservations/"
                             + reservationId))
+                .timeout(HTTP_TIMEOUT)
                 .DELETE()
                 .build(),
             HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
@@ -1457,12 +1633,27 @@ class OrderIntakeT12ScenariosAcceptanceTest {
     assertThat(JSON.readTree(response.body()).path("response_schema_valid").asBoolean()).isTrue();
   }
 
+  private void assertNoActiveCheckoutReservations(StockFixture.Shop shop) {
+    fixture.inTenant(
+        shop.tenant(),
+        () -> {
+          assertThat(
+                  jdbc.queryForObject(
+                      """
+                      SELECT count(*) FROM stock_reservation
+                      WHERE owner_type = 'CHECKOUT' AND status = 'ACTIVE'
+                      """,
+                      Long.class))
+              .isZero();
+          return null;
+        });
+  }
+
   private double oversellMetric(String mode) {
-    return meters
-        .find(OrderIntakeSupport.BUSINESS_OVERSELL_METRIC)
-        .tag("mode", mode)
-        .counter()
-        .count();
+    return Optional.ofNullable(
+            meters.find(OrderIntakeSupport.BUSINESS_OVERSELL_METRIC).tag("mode", mode).counter())
+        .map(Counter::count)
+        .orElse(0d);
   }
 
   private JsonNode checkoutViaControl(String checkoutId, String shopId, String listingSku, int qty)
@@ -1495,6 +1686,7 @@ class OrderIntakeT12ScenariosAcceptanceTest {
         HTTP.send(
             HttpRequest.newBuilder(
                     URI.create("http://127.0.0.1:" + OrderIntakeMockRuntime.mockPort() + path))
+                .timeout(HTTP_TIMEOUT)
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(JSON.writeValueAsString(body)))
                 .build(),
@@ -1528,13 +1720,27 @@ class OrderIntakeT12ScenariosAcceptanceTest {
 
   private void attachIntakeLogs() {
     intakeLogs.start();
-    Logger logger = (Logger) LoggerFactory.getLogger(OrderIntakeSupport.class);
-    logger.addAppender(intakeLogs);
+    for (String name :
+        List.of(
+            OrderIntakeSupport.class.getName(),
+            InboxWorker.class.getName(),
+            org.slf4j.Logger.ROOT_LOGGER_NAME)) {
+      ch.qos.logback.classic.Logger logger =
+          (ch.qos.logback.classic.Logger) LoggerFactory.getLogger(name);
+      logger.addAppender(intakeLogs);
+    }
   }
 
   private void detachIntakeLogs() {
-    Logger logger = (Logger) LoggerFactory.getLogger(OrderIntakeSupport.class);
-    logger.detachAppender(intakeLogs);
+    for (String name :
+        List.of(
+            OrderIntakeSupport.class.getName(),
+            InboxWorker.class.getName(),
+            org.slf4j.Logger.ROOT_LOGGER_NAME)) {
+      ch.qos.logback.classic.Logger logger =
+          (ch.qos.logback.classic.Logger) LoggerFactory.getLogger(name);
+      logger.detachAppender(intakeLogs);
+    }
     intakeLogs.list.clear();
   }
 
@@ -1543,6 +1749,7 @@ class OrderIntakeT12ScenariosAcceptanceTest {
     String eventId = event.path("event_id").asString();
     HttpRequest request =
         HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + "/internal/v1/events"))
+            .timeout(HTTP_TIMEOUT)
             .header("Content-Type", "application/json")
             .header("X-Event-Id", eventId)
             .header("X-Signature", sign(INBOX_SECRET, now(), body))

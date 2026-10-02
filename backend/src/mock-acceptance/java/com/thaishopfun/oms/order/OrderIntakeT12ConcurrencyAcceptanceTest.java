@@ -18,12 +18,15 @@ import java.sql.Connection;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Random;
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import org.junit.jupiter.api.AfterAll;
@@ -31,6 +34,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.api.Timeout.ThreadMode;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
@@ -59,10 +63,19 @@ import tools.jackson.databind.node.ObjectNode;
 })
 class OrderIntakeT12ConcurrencyAcceptanceTest {
 
+  private enum StepKind {
+    CHECKOUT,
+    CREATED,
+    FOLLOWUP
+  }
+
+  private record Op(int orderIndex, StepKind kind) {}
+
   private static final String INBOX_SECRET = "dev-inbox-hmac-secret";
   private static final JsonMapper JSON = JsonMapper.builder().build();
   private static final HttpClient HTTP =
       HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
+  private static final Duration HTTP_TIMEOUT = Duration.ofSeconds(20);
 
   @DynamicPropertySource
   static void properties(DynamicPropertyRegistry registry) {
@@ -77,6 +90,7 @@ class OrderIntakeT12ConcurrencyAcceptanceTest {
     registry.add("oms.inbox.hmac-secrets", () -> INBOX_SECRET);
     registry.add("oms.inbox.jitter-ratio", () -> "0");
     registry.add("oms.outbox.publisher-enabled", () -> "false");
+    registry.add("oms.stock.checkout-ttl", () -> "45s");
   }
 
   @LocalServerPort private int port;
@@ -93,8 +107,11 @@ class OrderIntakeT12ConcurrencyAcceptanceTest {
     OrderIntakeMockRuntime.mock().getBean(OmsEndpoint.class).setBaseUrl("http://127.0.0.1:" + port);
     fixture = new StockFixture(jdbc, transactions);
     OrderIntakeFaultTestConfig.injectDeadlockOnce.set(false);
+    OrderIntakeFaultTestConfig.injectDeadlockConsumed.set(false);
     try (Connection admin = AuthTestSupport.admin();
         var statement = admin.createStatement()) {
+      statement.execute("SET lock_timeout = '10s'");
+      statement.execute("SET statement_timeout = '30s'");
       statement.execute("SET session_replication_role = replica");
       statement.execute(
           "TRUNCATE TABLE outbox_event, inbox_event, order_status_history, order_line, "
@@ -116,7 +133,7 @@ class OrderIntakeT12ConcurrencyAcceptanceTest {
   }
 
   @Test
-  @Timeout(value = 3, unit = TimeUnit.MINUTES)
+  @Timeout(value = 8, unit = TimeUnit.MINUTES, threadMode = ThreadMode.SEPARATE_THREAD)
   void fiftyOrdersTenTenantsParallelIntakeWithSweeperAndDeadlockRetry() throws Exception {
     record ShopCtx(StockFixture.Shop shop, String shopId, UUID account, UUID skuA, UUID skuB) {}
 
@@ -125,8 +142,8 @@ class OrderIntakeT12ConcurrencyAcceptanceTest {
       StockFixture.Shop shop = fixture.shop("ACTIVE");
       String shopId = fixture.tsfShopId(shop);
       UUID account = fixture.tsfChannelAccount(shop, "ACTIVE", "CONNECTED");
-      UUID skuA = fixture.sku(shop, 500);
-      UUID skuB = fixture.sku(shop, 500);
+      UUID skuA = fixture.sku(shop, 4);
+      UUID skuB = fixture.sku(shop, 4);
       fixture.channelListing(shop, account, "L-a", skuA, true);
       fixture.channelListing(shop, account, "L-b", skuB, true);
       shops.add(new ShopCtx(shop, shopId, account, skuA, skuB));
@@ -140,102 +157,104 @@ class OrderIntakeT12ConcurrencyAcceptanceTest {
         String[] reservationIdHolder) {}
 
     List<OrderPlan> plans = new ArrayList<>();
-    int expectedActiveUnits = 0;
     for (int i = 0; i < 50; i++) {
       ShopCtx ctx = shops.get(i % 10);
       String externalOrderId = "TSF-CONC-" + i + "-" + UUID.randomUUID();
       boolean reverseLines = i % 2 == 1;
       boolean cancel = i % 5 == 4;
-      if (!cancel) {
-        expectedActiveUnits += 2;
-      }
       plans.add(new OrderPlan(ctx, externalOrderId, reverseLines, cancel, new String[1]));
     }
 
-    enum StepKind {
-      CHECKOUT,
-      CREATED,
-      FOLLOWUP
-    }
-
-    record Op(int orderIndex, StepKind kind) {}
-
-    List<Op> ops = new ArrayList<>();
-    for (int i = 0; i < 50; i++) {
-      ops.add(new Op(i, StepKind.CHECKOUT));
-      ops.add(new Op(i, StepKind.CREATED));
-      ops.add(new Op(i, StepKind.FOLLOWUP));
-    }
-    Random random = new Random(47);
-    boolean validOrder;
-    do {
-      Collections.shuffle(ops, random);
-      validOrder = true;
-      int[] nextStep = new int[50];
-      for (Op op : ops) {
-        int expected =
-            switch (op.kind()) {
-              case CHECKOUT -> 0;
-              case CREATED -> 1;
-              case FOLLOWUP -> 2;
-            };
-        if (nextStep[op.orderIndex()] != expected) {
-          validOrder = false;
-          break;
-        }
-        nextStep[op.orderIndex()]++;
-      }
-    } while (!validOrder);
+    List<Op> ops = shuffledValidOps(new Random(47), 50);
 
     OrderIntakeFaultTestConfig.injectDeadlockOnce.set(true);
+    OrderIntakeFaultTestConfig.injectDeadlockConsumed.set(false);
 
-    for (Op op : ops) {
-      OrderPlan plan = plans.get(op.orderIndex());
-      ShopCtx ctx = plan.ctx();
-      switch (op.kind()) {
-        case CHECKOUT -> {
-          JsonNode checkout =
-              checkoutTwoLines(
-                  "chk-" + op.orderIndex(),
-                  ctx.shopId(),
-                  plan.reverseLines() ? "L-b" : "L-a",
-                  plan.reverseLines() ? "L-a" : "L-b");
-          plan.reservationIdHolder()[0] = checkout.path("reservation_id").asString();
-        }
-        case CREATED ->
-            ingest(
-                OrderIntakeScenarioSupport.orderCreatedTwoLines(
-                    JSON,
-                    plan.externalOrderId(),
+    AtomicBoolean stopWorkers = new AtomicBoolean(false);
+    ExecutorService pool = Executors.newFixedThreadPool(5);
+    try {
+      Future<?> sweeper =
+          pool.submit(
+              () -> {
+                while (!stopWorkers.get()) {
+                  expiryJob.runOnce();
+                  Thread.sleep(50);
+                }
+                return null;
+              });
+      List<Future<?>> workers = new ArrayList<>();
+      for (int w = 0; w < 4; w++) {
+        workers.add(
+            pool.submit(
+                () -> {
+                  while (true) {
+                    if (stopWorkers.get() && !inboxNeedsWork()) {
+                      return null;
+                    }
+                    worker.processAvailable(4);
+                    Thread.sleep(25);
+                  }
+                }));
+      }
+
+      for (Op op : ops) {
+        OrderPlan plan = plans.get(op.orderIndex());
+        ShopCtx ctx = plan.ctx();
+        switch (op.kind()) {
+          case CHECKOUT -> {
+            JsonNode checkout =
+                checkoutTwoLines(
+                    "chk-" + op.orderIndex(),
                     ctx.shopId(),
-                    plan.reservationIdHolder()[0],
-                    "COD",
                     plan.reverseLines() ? "L-b" : "L-a",
-                    plan.reverseLines() ? "L-a" : "L-b",
-                    1,
-                    1,
-                    1));
-        case FOLLOWUP -> {
-          if (plan.cancel()) {
-            ingest(
-                OrderIntakeScenarioSupport.orderCancelled(
-                    JSON, plan.externalOrderId(), ctx.shopId(), 2));
-          } else {
-            ingest(
-                OrderIntakeScenarioSupport.orderPaid(
-                    JSON, plan.externalOrderId(), ctx.shopId(), 2));
+                    plan.reverseLines() ? "L-a" : "L-b");
+            plan.reservationIdHolder()[0] = checkout.path("reservation_id").asString();
+          }
+          case CREATED ->
+              ingest(
+                  OrderIntakeScenarioSupport.orderCreatedTwoLines(
+                      JSON,
+                      plan.externalOrderId(),
+                      ctx.shopId(),
+                      plan.reservationIdHolder()[0],
+                      "COD",
+                      plan.reverseLines() ? "L-b" : "L-a",
+                      plan.reverseLines() ? "L-a" : "L-b",
+                      1,
+                      1,
+                      1));
+          case FOLLOWUP -> {
+            if (plan.cancel()) {
+              ingest(
+                  OrderIntakeScenarioSupport.orderCancelled(
+                      JSON, plan.externalOrderId(), ctx.shopId(), 2));
+            } else {
+              ingest(
+                  OrderIntakeScenarioSupport.orderPaid(
+                      JSON, plan.externalOrderId(), ctx.shopId(), 2));
+            }
           }
         }
       }
-      if (op.kind() != StepKind.CHECKOUT) {
-        worker.processAvailable(4);
+
+      stopWorkers.set(true);
+      for (Future<?> workerFuture : workers) {
+        workerFuture.get(30, TimeUnit.SECONDS);
       }
+      sweeper.get(30, TimeUnit.SECONDS);
+    } finally {
+      stopWorkers.set(true);
+      pool.shutdownNow();
+      pool.awaitTermination(30, TimeUnit.SECONDS);
     }
 
-    for (int pass = 0; pass < 40; pass++) {
-      expiryJob.runOnce();
-    }
     drainInbox();
+
+    assertThat(OrderIntakeFaultTestConfig.injectDeadlockConsumed).isTrue();
+    assertThat(OrderIntakeFaultTestConfig.injectDeadlockOnce).isFalse();
+    assertThat(
+            jdbc.queryForObject("SELECT count(*) FROM inbox_event WHERE attempts > 1", Long.class))
+        .isPositive();
 
     assertThat(
             jdbc.queryForObject(
@@ -247,10 +266,27 @@ class OrderIntakeT12ConcurrencyAcceptanceTest {
         .isZero();
     assertThat(jdbc.queryForObject("SELECT count(*) FROM sales_order", Long.class)).isEqualTo(50);
 
+    long outOfStockOrders =
+        jdbc.queryForObject(
+            "SELECT count(*) FROM sales_order WHERE hold_reason = 'OUT_OF_STOCK'", Long.class);
+    assertThat(outOfStockOrders).isGreaterThan(0);
+
     for (ShopCtx ctx : shops) {
       fixture.inTenant(
           ctx.shop().tenant(),
           () -> {
+            assertThat(
+                    jdbc.queryForObject(
+                        """
+                        SELECT count(*) FROM inventory i
+                        WHERE i.on_hand - COALESCE((
+                          SELECT sum(r.qty) FROM stock_reservation r
+                          WHERE r.tenant_id = i.tenant_id AND r.sku_id = i.sku_id
+                            AND r.warehouse_id = i.warehouse_id AND r.status = 'ACTIVE'
+                        ), 0) < 0
+                        """,
+                        Long.class))
+                .isZero();
             long activeRows =
                 jdbc.queryForObject(
                     """
@@ -274,13 +310,35 @@ class OrderIntakeT12ConcurrencyAcceptanceTest {
             return null;
           });
     }
-
-    assertThat(expectedActiveUnits).isGreaterThan(0);
   }
 
-  private void drainInbox() throws InterruptedException {
+  private static List<Op> shuffledValidOps(Random random, int orderCount) {
+    List<Op> ops = new ArrayList<>(orderCount * 3);
+    int[] next = new int[orderCount];
+    while (ops.size() < orderCount * 3) {
+      List<Integer> eligible = new ArrayList<>();
+      for (int i = 0; i < orderCount; i++) {
+        if (next[i] < 3) {
+          eligible.add(i);
+        }
+      }
+      int pick = eligible.get(random.nextInt(eligible.size()));
+      StepKind kind =
+          switch (next[pick]) {
+            case 0 -> StepKind.CHECKOUT;
+            case 1 -> StepKind.CREATED;
+            default -> StepKind.FOLLOWUP;
+          };
+      ops.add(new Op(pick, kind));
+      next[pick]++;
+    }
+    return ops;
+  }
+
+  private void drainInbox() throws Exception {
     for (int pass = 0; pass < 120; pass++) {
       worker.processAvailable(20);
+      expiryJob.runOnce();
       if (!inboxNeedsWork()) {
         return;
       }
@@ -317,6 +375,7 @@ class OrderIntakeT12ConcurrencyAcceptanceTest {
                         "http://127.0.0.1:"
                             + OrderIntakeMockRuntime.mockPort()
                             + "/control/checkout/reservations"))
+                .timeout(HTTP_TIMEOUT)
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(JSON.writeValueAsString(body)))
                 .build(),
@@ -332,6 +391,7 @@ class OrderIntakeT12ConcurrencyAcceptanceTest {
     String eventId = event.path("event_id").asString();
     HttpRequest request =
         HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + "/internal/v1/events"))
+            .timeout(HTTP_TIMEOUT)
             .header("Content-Type", "application/json")
             .header("X-Event-Id", eventId)
             .header("X-Signature", sign(INBOX_SECRET, now(), body))

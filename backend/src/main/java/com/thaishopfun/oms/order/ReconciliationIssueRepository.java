@@ -81,21 +81,40 @@ public class ReconciliationIssueRepository {
               reconciliation_issue.details,
               '{events}',
               (
-                SELECT COALESCE(jsonb_agg(value), '[]'::jsonb)
+                SELECT COALESCE(jsonb_agg(value ORDER BY min_ord), '[]'::jsonb)
                 FROM (
-                  SELECT value
-                  FROM jsonb_array_elements(
-                    COALESCE(reconciliation_issue.details->'events', '[]'::jsonb)
-                    || COALESCE(EXCLUDED.details->'events', '[]'::jsonb)
-                  ) WITH ORDINALITY AS t(value, ord)
-                  ORDER BY ord DESC
-                  LIMIT ?
-                ) trimmed
+                  SELECT value, MIN(ord) AS min_ord
+                  FROM (
+                    SELECT value, ord
+                    FROM jsonb_array_elements(
+                      COALESCE(reconciliation_issue.details->'events', '[]'::jsonb)
+                      || COALESCE(EXCLUDED.details->'events', '[]'::jsonb)
+                    ) WITH ORDINALITY AS t(value, ord)
+                  ) merged
+                  GROUP BY value->>'inbox_event_id'
+                ) deduped
               ),
               true
             ),
             '{count}',
-            to_jsonb(COALESCE((reconciliation_issue.details->>'count')::int, 0) + 1),
+            to_jsonb(
+              jsonb_array_length(
+                (
+                  SELECT COALESCE(jsonb_agg(value ORDER BY min_ord), '[]'::jsonb)
+                  FROM (
+                    SELECT value, MIN(ord) AS min_ord
+                    FROM (
+                      SELECT value, ord
+                      FROM jsonb_array_elements(
+                        COALESCE(reconciliation_issue.details->'events', '[]'::jsonb)
+                        || COALESCE(EXCLUDED.details->'events', '[]'::jsonb)
+                      ) WITH ORDINALITY AS t(value, ord)
+                    ) merged
+                    GROUP BY value->>'inbox_event_id'
+                  ) deduped
+                )
+              )
+            ),
             true
           ),
           updated_at = now()
@@ -104,7 +123,6 @@ public class ReconciliationIssueRepository {
         tenantId,
         inboxEventId,
         rule,
-        initialJson,
-        MAX_EVENTS);
+        initialJson);
   }
 }
