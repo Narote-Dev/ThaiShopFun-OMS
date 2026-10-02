@@ -167,7 +167,12 @@ public class OrderStateMachine {
     if (from.equals(to) && !"HOLD".equals(dimension)) {
       return new TransitionResult(order, false);
     }
-    String nextHoldNote = holdNote == null ? order.holdNote() : holdNote;
+    String nextHoldNote;
+    if ("HOLD".equals(dimension) && "NONE".equals(to) && holdNote == null) {
+      nextHoldNote = null;
+    } else {
+      nextHoldNote = holdNote == null ? order.holdNote() : holdNote;
+    }
     Instant nextPaidAt = paidAt == null ? order.paidAt() : paidAt;
     String nextOrder = order.orderStatus();
     String nextPayment = order.paymentStatus();
