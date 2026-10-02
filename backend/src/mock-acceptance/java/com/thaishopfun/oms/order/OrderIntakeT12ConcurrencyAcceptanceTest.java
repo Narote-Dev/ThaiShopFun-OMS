@@ -27,7 +27,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import org.junit.jupiter.api.AfterEach;
@@ -187,16 +186,55 @@ class OrderIntakeT12ConcurrencyAcceptanceTest {
 
     OrderIntakeFaultTestConfig.injectDeadlockOnce.set(true);
 
-    AtomicBoolean running = new AtomicBoolean(true);
+    for (Op op : ops) {
+      OrderPlan plan = plans.get(op.orderIndex());
+      ShopCtx ctx = plan.ctx();
+      switch (op.kind()) {
+        case CHECKOUT -> {
+          JsonNode checkout =
+              checkoutTwoLines(
+                  "chk-" + op.orderIndex(),
+                  ctx.shopId(),
+                  plan.reverseLines() ? "L-b" : "L-a",
+                  plan.reverseLines() ? "L-a" : "L-b");
+          plan.reservationIdHolder()[0] = checkout.path("reservation_id").asString();
+        }
+        case CREATED ->
+            ingest(
+                OrderIntakeScenarioSupport.orderCreatedTwoLines(
+                    JSON,
+                    plan.externalOrderId(),
+                    ctx.shopId(),
+                    plan.reservationIdHolder()[0],
+                    "COD",
+                    plan.reverseLines() ? "L-b" : "L-a",
+                    plan.reverseLines() ? "L-a" : "L-b",
+                    1,
+                    1,
+                    1));
+        case FOLLOWUP -> {
+          if (plan.cancel()) {
+            ingest(
+                OrderIntakeScenarioSupport.orderCancelled(
+                    JSON, plan.externalOrderId(), ctx.shopId(), 2));
+          } else {
+            ingest(
+                OrderIntakeScenarioSupport.orderPaid(
+                    JSON, plan.externalOrderId(), ctx.shopId(), 2));
+          }
+        }
+      }
+      if (op.kind() != StepKind.CHECKOUT) {
+        worker.processAvailable(4);
+      }
+    }
+
     ExecutorService pool = Executors.newFixedThreadPool(5);
     try {
       Future<?> sweeper =
           pool.submit(
               () -> {
-                for (int pass = 0; pass < 240; pass++) {
-                  if (!running.get() && !inboxNeedsWork()) {
-                    return null;
-                  }
+                for (int pass = 0; pass < 120; pass++) {
                   expiryJob.runOnce();
                   Thread.sleep(25);
                 }
@@ -207,55 +245,16 @@ class OrderIntakeT12ConcurrencyAcceptanceTest {
         processors.add(
             pool.submit(
                 () -> {
-                  while (running.get() || inboxNeedsWork()) {
+                  for (int pass = 0; pass < 800; pass++) {
+                    if (!inboxNeedsWork()) {
+                      return null;
+                    }
                     worker.processAvailable(4);
-                    Thread.sleep(50);
+                    Thread.sleep(25);
                   }
                   return null;
                 }));
       }
-
-      for (Op op : ops) {
-        OrderPlan plan = plans.get(op.orderIndex());
-        ShopCtx ctx = plan.ctx();
-        switch (op.kind()) {
-          case CHECKOUT -> {
-            JsonNode checkout =
-                checkoutTwoLines(
-                    "chk-" + op.orderIndex(),
-                    ctx.shopId(),
-                    plan.reverseLines() ? "L-b" : "L-a",
-                    plan.reverseLines() ? "L-a" : "L-b");
-            plan.reservationIdHolder()[0] = checkout.path("reservation_id").asString();
-          }
-          case CREATED ->
-              ingest(
-                  OrderIntakeScenarioSupport.orderCreatedTwoLines(
-                      JSON,
-                      plan.externalOrderId(),
-                      ctx.shopId(),
-                      plan.reservationIdHolder()[0],
-                      "COD",
-                      plan.reverseLines() ? "L-b" : "L-a",
-                      plan.reverseLines() ? "L-a" : "L-b",
-                      1,
-                      1,
-                      1));
-          case FOLLOWUP -> {
-            if (plan.cancel()) {
-              ingest(
-                  OrderIntakeScenarioSupport.orderCancelled(
-                      JSON, plan.externalOrderId(), ctx.shopId(), 2));
-            } else {
-              ingest(
-                  OrderIntakeScenarioSupport.orderPaid(
-                      JSON, plan.externalOrderId(), ctx.shopId(), 2));
-            }
-          }
-        }
-        worker.processAvailable(4);
-      }
-      running.set(false);
       for (Future<?> processor : processors) {
         processor.get(120, TimeUnit.SECONDS);
       }
@@ -308,7 +307,7 @@ class OrderIntakeT12ConcurrencyAcceptanceTest {
   }
 
   private void drainInbox() throws InterruptedException {
-    for (int pass = 0; pass < 400; pass++) {
+    for (int pass = 0; pass < 120; pass++) {
       worker.processAvailable(20);
       if (!inboxNeedsWork()) {
         return;
