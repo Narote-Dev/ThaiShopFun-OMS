@@ -170,8 +170,7 @@ class OrderIntakeT12ConcurrencyAcceptanceTest {
 
     ShopCtx ttlProbe = shops.get(0);
     JsonNode orphanCheckout =
-        checkoutTwoLines(
-            "chk-ttl-probe-" + UUID.randomUUID(), ttlProbe.shopId(), "L-a", "L-b");
+        checkoutTwoLines("chk-ttl-probe-" + UUID.randomUUID(), ttlProbe.shopId(), "L-a", "L-b");
     assertThat(orphanCheckout).isNotNull();
 
     OrderIntakeFaultTestConfig.injectDeadlockOnce.set(true);

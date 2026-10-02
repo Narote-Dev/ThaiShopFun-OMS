@@ -1343,13 +1343,7 @@ class OrderIntakeT12ScenariosAcceptanceTest {
     String externalOrderId = "TSF-BND-NC-" + UUID.randomUUID();
     ingest(
         orderCreated(
-            externalOrderId,
-            shopId,
-            UuidV7.generate().toString(),
-            "COD",
-            "L-bnd-cod",
-            1,
-            1));
+            externalOrderId, shopId, UuidV7.generate().toString(), "COD", "L-bnd-cod", 1, 1));
     assertThat(worker.processAvailable(10)).isEqualTo(1);
     assertThat(fixture.reserved(shop, compA)).isEqualTo(1);
     assertThat(fixture.reserved(shop, compB)).isEqualTo(2);
