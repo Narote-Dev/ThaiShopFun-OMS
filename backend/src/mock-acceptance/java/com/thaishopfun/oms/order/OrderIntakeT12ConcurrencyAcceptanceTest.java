@@ -168,6 +168,12 @@ class OrderIntakeT12ConcurrencyAcceptanceTest {
 
     List<Op> ops = shuffledValidOps(new Random(47), 50);
 
+    ShopCtx ttlProbe = shops.get(0);
+    JsonNode orphanCheckout =
+        checkoutTwoLines(
+            "chk-ttl-probe-" + UUID.randomUUID(), ttlProbe.shopId(), "L-a", "L-b");
+    assertThat(orphanCheckout).isNotNull();
+
     OrderIntakeFaultTestConfig.injectDeadlockOnce.set(true);
     OrderIntakeFaultTestConfig.injectDeadlockConsumed.set(false);
 
@@ -256,6 +262,11 @@ class OrderIntakeT12ConcurrencyAcceptanceTest {
     }
 
     drainInbox();
+
+    for (int i = 0; i < 8; i++) {
+      expiryJob.runOnce();
+      Thread.sleep(400);
+    }
 
     assertThat(OrderIntakeFaultTestConfig.injectDeadlockConsumed).isTrue();
     assertThat(OrderIntakeFaultTestConfig.injectDeadlockOnce).isFalse();
