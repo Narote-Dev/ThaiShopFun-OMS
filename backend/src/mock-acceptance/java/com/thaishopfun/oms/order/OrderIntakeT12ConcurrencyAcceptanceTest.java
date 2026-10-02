@@ -268,11 +268,22 @@ class OrderIntakeT12ConcurrencyAcceptanceTest {
             jdbc.queryForObject(
                 "SELECT count(*) FROM inbox_event WHERE status IN ('FAILED', 'DEAD')", Long.class))
         .isZero();
-    assertThat(jdbc.queryForObject("SELECT count(*) FROM sales_order", Long.class)).isEqualTo(50);
-
-    long outOfStockOrders =
-        jdbc.queryForObject(
-            "SELECT count(*) FROM sales_order WHERE hold_reason = 'OUT_OF_STOCK'", Long.class);
+    long salesOrders = 0;
+    long outOfStockOrders = 0;
+    for (ShopCtx ctx : shops) {
+      salesOrders +=
+          fixture.inTenant(
+              ctx.shop().tenant(),
+              () -> jdbc.queryForObject("SELECT count(*) FROM sales_order", Long.class));
+      outOfStockOrders +=
+          fixture.inTenant(
+              ctx.shop().tenant(),
+              () ->
+                  jdbc.queryForObject(
+                      "SELECT count(*) FROM sales_order WHERE hold_reason = 'OUT_OF_STOCK'",
+                      Long.class));
+    }
+    assertThat(salesOrders).isEqualTo(50);
     assertThat(outOfStockOrders).isGreaterThan(0);
 
     for (ShopCtx ctx : shops) {
