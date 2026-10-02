@@ -1447,7 +1447,7 @@ class OrderIntakeT12ScenariosAcceptanceTest {
                         "SELECT hold_note FROM sales_order WHERE external_order_id = ?",
                         String.class,
                         externalOrderId)))
-        .isEqualTo(OrderIntakeSupport.BUNDLE_WITHOUT_COMPONENTS_NOTE);
+        .isEqualTo("bundle has no components");
     assertThat(
             fixture.inTenant(
                 shop.tenant(),
