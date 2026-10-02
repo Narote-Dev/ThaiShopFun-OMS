@@ -21,6 +21,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Random;
 import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
@@ -130,46 +131,100 @@ class OrderIntakeT12ConcurrencyAcceptanceTest {
       shops.add(new ShopCtx(shop, shopId, account, skuA, skuB));
     }
 
-    List<ObjectNode> followUpEvents = new ArrayList<>();
+    record OrderPlan(
+        ShopCtx ctx,
+        String externalOrderId,
+        boolean reverseLines,
+        boolean cancel,
+        String[] reservationIdHolder) {}
+
+    List<OrderPlan> plans = new ArrayList<>();
     int expectedActiveUnits = 0;
     for (int i = 0; i < 50; i++) {
       ShopCtx ctx = shops.get(i % 10);
       String externalOrderId = "TSF-CONC-" + i + "-" + UUID.randomUUID();
       boolean reverseLines = i % 2 == 1;
       boolean cancel = i % 5 == 4;
-
-      JsonNode checkout =
-          checkoutTwoLines(
-              "chk-" + i, ctx.shopId(), reverseLines ? "L-b" : "L-a", reverseLines ? "L-a" : "L-b");
-      String reservationId = checkout.path("reservation_id").asString();
-
-      ingest(
-          OrderIntakeScenarioSupport.orderCreatedTwoLines(
-              JSON,
-              externalOrderId,
-              ctx.shopId(),
-              reservationId,
-              "COD",
-              reverseLines ? "L-b" : "L-a",
-              reverseLines ? "L-a" : "L-b",
-              1,
-              1,
-              1));
-      if (cancel) {
-        followUpEvents.add(
-            OrderIntakeScenarioSupport.orderCancelled(JSON, externalOrderId, ctx.shopId(), 2));
-      } else {
-        followUpEvents.add(
-            OrderIntakeScenarioSupport.orderPaid(JSON, externalOrderId, ctx.shopId(), 2));
+      if (!cancel) {
         expectedActiveUnits += 2;
       }
+      plans.add(new OrderPlan(ctx, externalOrderId, reverseLines, cancel, new String[1]));
     }
 
-    drainInbox();
-    Collections.shuffle(followUpEvents);
+    enum StepKind {
+      CHECKOUT,
+      CREATED,
+      FOLLOWUP
+    }
+
+    record Op(int orderIndex, StepKind kind) {}
+
+    List<Op> ops = new ArrayList<>();
+    for (int i = 0; i < 50; i++) {
+      ops.add(new Op(i, StepKind.CHECKOUT));
+      ops.add(new Op(i, StepKind.CREATED));
+      ops.add(new Op(i, StepKind.FOLLOWUP));
+    }
+    Random random = new Random(47);
+    boolean validOrder;
+    do {
+      Collections.shuffle(ops, random);
+      validOrder = true;
+      int[] nextStep = new int[50];
+      for (Op op : ops) {
+        int expected =
+            switch (op.kind()) {
+              case CHECKOUT -> 0;
+              case CREATED -> 1;
+              case FOLLOWUP -> 2;
+            };
+        if (nextStep[op.orderIndex()] != expected) {
+          validOrder = false;
+          break;
+        }
+        nextStep[op.orderIndex()]++;
+      }
+    } while (!validOrder);
+
     OrderIntakeFaultTestConfig.injectDeadlockOnce.set(true);
-    for (ObjectNode event : followUpEvents) {
-      ingest(event);
+    for (Op op : ops) {
+      OrderPlan plan = plans.get(op.orderIndex());
+      ShopCtx ctx = plan.ctx();
+      switch (op.kind()) {
+        case CHECKOUT -> {
+          JsonNode checkout =
+              checkoutTwoLines(
+                  "chk-" + op.orderIndex(),
+                  ctx.shopId(),
+                  plan.reverseLines() ? "L-b" : "L-a",
+                  plan.reverseLines() ? "L-a" : "L-b");
+          plan.reservationIdHolder()[0] = checkout.path("reservation_id").asString();
+        }
+        case CREATED ->
+            ingest(
+                OrderIntakeScenarioSupport.orderCreatedTwoLines(
+                    JSON,
+                    plan.externalOrderId(),
+                    ctx.shopId(),
+                    plan.reservationIdHolder()[0],
+                    "COD",
+                    plan.reverseLines() ? "L-b" : "L-a",
+                    plan.reverseLines() ? "L-a" : "L-b",
+                    1,
+                    1,
+                    1));
+        case FOLLOWUP -> {
+          if (plan.cancel()) {
+            ingest(
+                OrderIntakeScenarioSupport.orderCancelled(
+                    JSON, plan.externalOrderId(), ctx.shopId(), 2));
+          } else {
+            ingest(
+                OrderIntakeScenarioSupport.orderPaid(
+                    JSON, plan.externalOrderId(), ctx.shopId(), 2));
+          }
+        }
+      }
     }
 
     AtomicInteger passes = new AtomicInteger();
@@ -215,7 +270,11 @@ class OrderIntakeT12ConcurrencyAcceptanceTest {
 
     assertThat(
             jdbc.queryForObject(
-                "SELECT count(*) FROM inbox_event WHERE status NOT IN ('PROCESSED')", Long.class))
+                "SELECT count(*) FROM inbox_event WHERE status <> 'PROCESSED'", Long.class))
+        .isZero();
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT count(*) FROM inbox_event WHERE status IN ('FAILED', 'DEAD')", Long.class))
         .isZero();
     assertThat(jdbc.queryForObject("SELECT count(*) FROM sales_order", Long.class)).isEqualTo(50);
 

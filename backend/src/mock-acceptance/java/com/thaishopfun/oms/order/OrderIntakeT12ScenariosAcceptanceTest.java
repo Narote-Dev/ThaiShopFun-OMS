@@ -17,6 +17,7 @@ import com.thaishopfun.oms.outbox.OutboxPublisher;
 import com.thaishopfun.oms.stock.OrderIntakeFaultTestConfig;
 import com.thaishopfun.oms.stock.StockFixture;
 import com.thaishopfun.oms.tenant.TenantContext;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
@@ -32,7 +33,9 @@ import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
+import java.util.Arrays;
 import java.util.HexFormat;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -111,6 +114,8 @@ class OrderIntakeT12ScenariosAcceptanceTest {
   @Autowired OutboxPublisher publisher;
   @Autowired JdbcTemplate jdbc;
   @Autowired PlatformTransactionManager transactions;
+  @Autowired MeterRegistry meters;
+  @Autowired OrderRecipientRepository recipients;
 
   StockFixture fixture;
   private final ListAppender<ILoggingEvent> intakeLogs = new ListAppender<>();
@@ -503,6 +508,7 @@ class OrderIntakeT12ScenariosAcceptanceTest {
                         String.class,
                         externalOrderId)))
         .isEqualTo("CANCELLED");
+    assertThat(fixture.reserved(shop, sku)).isZero();
   }
 
   @Test
@@ -1025,6 +1031,284 @@ class OrderIntakeT12ScenariosAcceptanceTest {
   }
 
   @Test
+  void checkoutHandOffMixedControlAdoptsOnlyEnforcedSku() throws Exception {
+    StockFixture.Shop shop = fixture.shop("ACTIVE");
+    String shopId = fixture.tsfShopId(shop);
+    UUID account = fixture.tsfChannelAccount(shop, "CONTROL", "CONNECTED");
+    UUID skuCtrl = fixture.sku(shop, 6);
+    UUID skuFree = fixture.sku(shop, 6);
+    fixture.channelListing(shop, account, "L-mix-ctrl", skuCtrl, true);
+    fixture.channelListing(shop, account, "L-mix-free", skuFree, false);
+
+    JsonNode checkout = checkoutTwoLines(shopId, "chk-mix", "L-mix-ctrl", 1, "L-mix-free", 1);
+    assertThat(checkout.path("enforced").asBoolean()).isFalse();
+
+    String externalOrderId = "TSF-MIX-" + UUID.randomUUID();
+    ingest(
+        orderCreatedTwoLines(
+            externalOrderId,
+            shopId,
+            checkout.path("reservation_id").asString(),
+            "COD",
+            "L-mix-ctrl",
+            "L-mix-free",
+            1,
+            1,
+            1));
+    assertThat(worker.processAvailable(10)).isEqualTo(1);
+    assertThat(fixture.reserved(shop, skuCtrl)).isEqualTo(1);
+    assertThat(fixture.reserved(shop, skuFree)).isZero();
+    fixture.assertInvariants(shop);
+  }
+
+  @Test
+  void checkoutHandOffAfterDeletedGroupFreshReservesOrderLines() throws Exception {
+    StockFixture.Shop shop = fixture.shop("ACTIVE");
+    String shopId = fixture.tsfShopId(shop);
+    UUID account = fixture.tsfChannelAccount(shop, "ACTIVE", "CONNECTED");
+    UUID sku = fixture.sku(shop, 8);
+    fixture.channelListing(shop, account, "L-del", sku, true);
+
+    JsonNode checkout = checkoutViaControl("chk-del", shopId, "L-del", 2);
+    String reservationId = checkout.path("reservation_id").asString();
+    deleteCheckoutReservation(reservationId);
+    assertThat(fixture.reserved(shop, sku)).isZero();
+
+    String externalOrderId = "TSF-DEL-" + UUID.randomUUID();
+    ingest(orderCreated(externalOrderId, shopId, reservationId, "COD", "L-del", 2, 1));
+    assertThat(worker.processAvailable(10)).isEqualTo(1);
+    assertThat(fixture.reserved(shop, sku)).isEqualTo(2);
+    fixture.assertInvariants(shop);
+  }
+
+  @Test
+  void checkoutHandOffSurplusCheckoutQtyIsReleasedOnAdopt() throws Exception {
+    StockFixture.Shop shop = fixture.shop("ACTIVE");
+    String shopId = fixture.tsfShopId(shop);
+    UUID account = fixture.tsfChannelAccount(shop, "ACTIVE", "CONNECTED");
+    UUID sku = fixture.sku(shop, 10);
+    fixture.channelListing(shop, account, "L-sur", sku, true);
+
+    JsonNode checkout = checkoutViaControl("chk-sur", shopId, "L-sur", 3);
+    String externalOrderId = "TSF-SUR-" + UUID.randomUUID();
+    ingest(
+        orderCreated(
+            externalOrderId,
+            shopId,
+            checkout.path("reservation_id").asString(),
+            "COD",
+            "L-sur",
+            1,
+            1));
+    assertThat(worker.processAvailable(10)).isEqualTo(1);
+    assertThat(fixture.reserved(shop, sku)).isEqualTo(1);
+    fixture.assertInvariants(shop);
+  }
+
+  @Test
+  void checkoutHandOffBundleExplodesComponentsOnCreated() throws Exception {
+    StockFixture.Shop shop = fixture.shop("ACTIVE");
+    String shopId = fixture.tsfShopId(shop);
+    UUID account = fixture.tsfChannelAccount(shop, "ACTIVE", "CONNECTED");
+    UUID compA = fixture.sku(shop, 10);
+    UUID compB = fixture.sku(shop, 10);
+    UUID bundle = fixture.bundle(shop, Map.of(compA, 1, compB, 2));
+    fixture.channelListing(shop, account, "L-bundle", bundle, true);
+
+    JsonNode checkout = checkoutViaControl("chk-bnd", shopId, "L-bundle", 1);
+    String externalOrderId = "TSF-BND-" + UUID.randomUUID();
+    ingest(
+        orderCreated(
+            externalOrderId,
+            shopId,
+            checkout.path("reservation_id").asString(),
+            "COD",
+            "L-bundle",
+            1,
+            1));
+    assertThat(worker.processAvailable(10)).isEqualTo(1);
+    assertThat(fixture.reserved(shop, compA)).isEqualTo(1);
+    assertThat(fixture.reserved(shop, compB)).isEqualTo(2);
+    fixture.assertInvariants(shop);
+  }
+
+  @Test
+  void businessOversellMetricCountsActiveModeNotShadow() throws Exception {
+    StockFixture.Shop activeShop = fixture.shop("ACTIVE");
+    String activeShopId = fixture.tsfShopId(activeShop);
+    UUID activeAccount = fixture.tsfChannelAccount(activeShop, "ACTIVE", "CONNECTED");
+    UUID activeSku = fixture.sku(activeShop, 1);
+    fixture.channelListing(activeShop, activeAccount, "L-ov-act", activeSku, true);
+    double activeBefore = oversellMetric("ACTIVE");
+    ingest(
+        orderCreated(
+            "TSF-OV-A-" + UUID.randomUUID(),
+            activeShopId,
+            UuidV7.generate().toString(),
+            "COD",
+            "L-ov-act",
+            3,
+            1));
+    assertThat(worker.processAvailable(10)).isEqualTo(1);
+    assertThat(oversellMetric("ACTIVE") - activeBefore).isEqualTo(1.0d);
+
+    StockFixture.Shop shadowShop = fixture.shop("ACTIVE");
+    String shadowShopId = fixture.tsfShopId(shadowShop);
+    UUID shadowAccount = fixture.tsfChannelAccount(shadowShop, "SHADOW", "CONNECTED");
+    UUID shadowSku = fixture.sku(shadowShop, 1);
+    fixture.channelListing(shadowShop, shadowAccount, "L-ov-shd", shadowSku, true);
+    double shadowBefore = oversellMetric("SHADOW");
+    ingest(
+        orderCreated(
+            "TSF-OV-S-" + UUID.randomUUID(),
+            shadowShopId,
+            UuidV7.generate().toString(),
+            "COD",
+            "L-ov-shd",
+            3,
+            1));
+    assertThat(worker.processAvailable(10)).isEqualTo(1);
+    assertThat(oversellMetric("SHADOW") - shadowBefore).isZero();
+  }
+
+  @Test
+  void orderLandsOnTsfAccountMatchingEnvelopeShopId() throws Exception {
+    StockFixture.Shop shop = fixture.shop("ACTIVE");
+    String shopId = fixture.tsfShopId(shop);
+    UUID matching = fixture.tsfChannelAccount(shop, "ACTIVE", "CONNECTED");
+    UUID other =
+        fixture.inTenant(
+            shop.tenant(),
+            () -> {
+              UUID id = UuidV7.generate();
+              jdbc.update(
+                  """
+                  INSERT INTO channel_account (id, tenant_id, channel, external_shop_id, status, mode)
+                  VALUES (?, ?, 'TSF', ?, 'CONNECTED', 'OBSERVE')
+                  """,
+                  id,
+                  shop.tenant(),
+                  "other-" + id);
+              return id;
+            });
+    UUID sku = fixture.sku(shop, 3);
+    fixture.channelListing(shop, matching, "L-acct", sku, true);
+    fixture.channelListing(shop, other, "L-other", sku, true);
+
+    String externalOrderId = "TSF-ACCT-" + UUID.randomUUID();
+    ingest(
+        orderCreated(externalOrderId, shopId, UuidV7.generate().toString(), "COD", "L-acct", 1, 1));
+    assertThat(worker.processAvailable(10)).isEqualTo(1);
+    UUID channelAccountId =
+        fixture.inTenant(
+            shop.tenant(),
+            () ->
+                jdbc.queryForObject(
+                    "SELECT channel_account_id FROM sales_order WHERE external_order_id = ?",
+                    UUID.class,
+                    externalOrderId));
+    assertThat(channelAccountId).isEqualTo(matching);
+  }
+
+  @Test
+  void orderUpdatedRotatesCiphertextPhoneHashAndLogsNoPii() throws Exception {
+    StockFixture.Shop shop = fixture.shop("ACTIVE");
+    String shopId = fixture.tsfShopId(shop);
+    UUID account = fixture.tsfChannelAccount(shop, "ACTIVE", "CONNECTED");
+    UUID sku = fixture.sku(shop, 2);
+    fixture.channelListing(shop, account, "L-pii", sku, true);
+
+    JsonNode checkout = checkoutViaControl("chk-pii", shopId, "L-pii", 1);
+    String externalOrderId = "TSF-PII-" + UUID.randomUUID();
+    ingest(
+        orderCreated(
+            externalOrderId,
+            shopId,
+            checkout.path("reservation_id").asString(),
+            "COD",
+            "L-pii",
+            1,
+            1));
+    assertThat(worker.processAvailable(10)).isEqualTo(1);
+    UUID orderId =
+        fixture.inTenant(
+            shop.tenant(),
+            () ->
+                jdbc.queryForObject(
+                    "SELECT id FROM sales_order WHERE external_order_id = ?",
+                    UUID.class,
+                    externalOrderId));
+    byte[] phoneBefore =
+        fixture.inTenant(
+            shop.tenant(),
+            () ->
+                jdbc.queryForObject(
+                    "SELECT phone_enc FROM order_recipient WHERE order_id = ?",
+                    byte[].class,
+                    orderId));
+    byte[] hashBefore =
+        fixture.inTenant(
+            shop.tenant(),
+            () ->
+                jdbc.queryForObject(
+                    "SELECT phone_hash FROM order_recipient WHERE order_id = ?",
+                    byte[].class,
+                    orderId));
+    StoredRecipient before =
+        fixture.inTenant(shop.tenant(), () -> recipients.find(orderId).orElseThrow());
+
+    intakeLogs.list.clear();
+    ObjectNode recipientUpdate = orderUpdated(externalOrderId, shopId, 2);
+    ObjectNode recipient = JSON.createObjectNode();
+    recipient.put("name", "New Legal Name");
+    recipient.put("phone", "0891112233");
+    ObjectNode address = JSON.createObjectNode();
+    address.put("line1", "changed line");
+    address.put("district", "d");
+    address.put("province", "Chiang Mai");
+    address.put("postcode", "50000");
+    recipient.set("address", address);
+    ((ObjectNode) recipientUpdate.path("data")).set("recipient", recipient);
+    ingest(recipientUpdate);
+    assertThat(worker.processAvailable(10)).isEqualTo(1);
+
+    byte[] phoneAfter =
+        fixture.inTenant(
+            shop.tenant(),
+            () ->
+                jdbc.queryForObject(
+                    "SELECT phone_enc FROM order_recipient WHERE order_id = ?",
+                    byte[].class,
+                    orderId));
+    byte[] hashAfter =
+        fixture.inTenant(
+            shop.tenant(),
+            () ->
+                jdbc.queryForObject(
+                    "SELECT phone_hash FROM order_recipient WHERE order_id = ?",
+                    byte[].class,
+                    orderId));
+    StoredRecipient after =
+        fixture.inTenant(shop.tenant(), () -> recipients.find(orderId).orElseThrow());
+
+    assertThat(phoneBefore).isNotNull();
+    assertThat(phoneAfter).isNotNull();
+    assertThat(Arrays.equals(phoneBefore, phoneAfter)).isFalse();
+    assertThat(Arrays.equals(hashBefore, hashAfter)).isFalse();
+    assertThat(after.phone()).isEqualTo("0891112233");
+    assertThat(after.province()).isEqualTo("Chiang Mai");
+    assertThat(before.phone()).isNotEqualTo(after.phone());
+
+    String logBlob =
+        intakeLogs.list.stream()
+            .map(ILoggingEvent::getFormattedMessage)
+            .reduce("", (a, b) -> a + "\n" + b);
+    assertThat(logBlob).doesNotContain("0891112233");
+    assertThat(logBlob).doesNotContain(before.phone());
+    assertThat(logBlob).doesNotContain("New Legal Name");
+  }
+
+  @Test
   void tenantsIsolateSameExternalOrderIdAndForeignReservationId() throws Exception {
     StockFixture.Shop shopA = fixture.shop("ACTIVE");
     StockFixture.Shop shopB = fixture.shop("ACTIVE");
@@ -1078,6 +1362,75 @@ class OrderIntakeT12ScenariosAcceptanceTest {
                         sharedExternal)))
         .isEqualTo(1);
     assertThat(fixture.reserved(shopB, skuB)).isEqualTo(2);
+  }
+
+  private JsonNode checkoutTwoLines(
+      String shopId, String checkoutId, String listingA, int qtyA, String listingB, int qtyB)
+      throws Exception {
+    ObjectNode body = JSON.createObjectNode();
+    body.put("checkout_id", checkoutId);
+    body.put("tsf_shop_id", shopId);
+    ArrayNode items = JSON.createArrayNode();
+    ObjectNode itemA = JSON.createObjectNode();
+    itemA.put("listing_sku_id", listingA);
+    itemA.put("qty", qtyA);
+    items.add(itemA);
+    ObjectNode itemB = JSON.createObjectNode();
+    itemB.put("listing_sku_id", listingB);
+    itemB.put("qty", qtyB);
+    items.add(itemB);
+    body.set("items", items);
+    JsonNode report = control("/control/checkout/reservations", body);
+    assertThat(report.path("oms_status").asInt()).isEqualTo(201);
+    return JSON.readTree(report.path("oms_body").asString());
+  }
+
+  private ObjectNode orderCreatedTwoLines(
+      String orderId,
+      String shopId,
+      String reservationId,
+      String paymentMethod,
+      String listingA,
+      String listingB,
+      int qtyA,
+      int qtyB,
+      long aggregateVersion)
+      throws IOException {
+    return OrderIntakeScenarioSupport.orderCreatedTwoLines(
+        JSON,
+        orderId,
+        shopId,
+        reservationId,
+        paymentMethod,
+        listingA,
+        listingB,
+        qtyA,
+        qtyB,
+        aggregateVersion);
+  }
+
+  private void deleteCheckoutReservation(String reservationId) throws Exception {
+    HttpResponse<String> response =
+        HTTP.send(
+            HttpRequest.newBuilder(
+                    URI.create(
+                        "http://127.0.0.1:"
+                            + OrderIntakeMockRuntime.mockPort()
+                            + "/control/checkout/reservations/"
+                            + reservationId))
+                .DELETE()
+                .build(),
+            HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+    assertThat(response.statusCode()).isEqualTo(200);
+    assertThat(JSON.readTree(response.body()).path("response_schema_valid").asBoolean()).isTrue();
+  }
+
+  private double oversellMetric(String mode) {
+    return meters
+        .find(OrderIntakeSupport.BUSINESS_OVERSELL_METRIC)
+        .tag("mode", mode)
+        .counter()
+        .count();
   }
 
   private JsonNode checkoutViaControl(String checkoutId, String shopId, String listingSku, int qty)
