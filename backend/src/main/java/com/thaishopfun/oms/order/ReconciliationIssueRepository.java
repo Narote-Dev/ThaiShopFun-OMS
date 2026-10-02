@@ -112,6 +112,7 @@ public class ReconciliationIssueRepository {
               FROM deduped d
               ORDER BY d.min_ord DESC
               LIMIT """
+            + " "
             + MAX_EVENTS
             + """
             ),
