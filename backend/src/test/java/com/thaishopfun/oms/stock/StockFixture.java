@@ -231,19 +231,37 @@ public final class StockFixture {
   }
 
   public UUID channelAccount(Shop shop, String mode, String status) {
-    UUID account = UuidV7.generate();
-    inTenant(
+    return channelAccount(shop, tsfShopId(shop), mode, status);
+  }
+
+  public UUID channelAccount(Shop shop, String externalShopId, String mode, String status) {
+    return inTenant(
         shop.tenant(),
-        () ->
+        () -> {
+          List<UUID> existing =
+              jdbc.query(
+                  "SELECT id FROM channel_account WHERE channel = 'TSF' AND external_shop_id = ?",
+                  (rs, row) -> rs.getObject("id", UUID.class),
+                  externalShopId);
+          if (!existing.isEmpty()) {
             jdbc.update(
-                "INSERT INTO channel_account (id, tenant_id, channel, external_shop_id, status, mode) "
-                    + "VALUES (?, ?, 'TSF', ?, ?, ?)",
-                account,
-                shop.tenant(),
-                "ext-" + account,
+                "UPDATE channel_account SET mode = ?, status = ? WHERE id = ?",
+                mode,
                 status,
-                mode));
-    return account;
+                existing.get(0));
+            return existing.get(0);
+          }
+          UUID account = UuidV7.generate();
+          jdbc.update(
+              "INSERT INTO channel_account (id, tenant_id, channel, external_shop_id, status, mode) "
+                  + "VALUES (?, ?, 'TSF', ?, ?, ?)",
+              account,
+              shop.tenant(),
+              externalShopId,
+              status,
+              mode);
+          return account;
+        });
   }
 
   public void channelListing(

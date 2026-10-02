@@ -281,7 +281,7 @@ class FlywayV4CatalogStockTest {
         }
         // Change: migrate() also applies V6 (T08) and V7 (T10). V5 is unused (T07 shipped
         // without one).
-        assertThat(versions).containsExactly("1", "2", "3", "4", "6", "7", "8", "9");
+        assertThat(versions).containsExactly("1", "2", "3", "4", "6", "7", "8", "9", "10");
         assertThat(count(upgrade, "inbox_event")).isEqualTo(1);
         Graph graph = seedForTenant(upgrade, tenant);
         assertThat(countFor(upgrade, "inventory", graph.tenant())).isEqualTo(1);
@@ -1198,13 +1198,20 @@ class FlywayV4CatalogStockTest {
             UUID.randomUUID(),
             UUID.randomUUID(),
             UUID.randomUUID());
-    insertChannelAccount(connection, graph.channelAccount(), tenant, "shop-" + tenant);
+    UUID channelAccountId = graph.channelAccount();
+    java.util.Optional<UUID> existingAccount =
+        existingChannelAccountId(connection, tenant, "shop-" + tenant);
+    if (existingAccount.isPresent()) {
+      channelAccountId = existingAccount.get();
+    } else {
+      insertChannelAccount(connection, channelAccountId, tenant, "shop-" + tenant);
+    }
     insertProduct(connection, graph.product(), tenant);
     insertSku(connection, graph.sku(), tenant, graph.product(), false);
     insertSku(connection, graph.spareSku(), tenant, graph.product(), false);
     insertSku(connection, graph.bundle(), tenant, graph.product(), true);
     insertComponent(connection, tenant, graph.bundle(), graph.sku(), 2);
-    insertListing(connection, UUID.randomUUID(), tenant, graph.channelAccount(), graph.sku());
+    insertListing(connection, UUID.randomUUID(), tenant, channelAccountId, graph.sku());
     insertWarehouse(connection, graph.warehouse(), tenant, true);
     insertInventory(connection, graph.inventory(), tenant, graph.sku(), graph.warehouse());
     insertLedger(connection, UUID.randomUUID(), tenant, graph.sku(), graph.warehouse());
@@ -1222,6 +1229,23 @@ class FlywayV4CatalogStockTest {
             + "VALUES (?, 'Shop', ?, 'PRO', 'ACTIVE', 1)",
         id,
         "shop-" + id);
+  }
+
+  private static java.util.Optional<UUID> existingChannelAccountId(
+      Connection connection, UUID tenantId, String externalShopId) throws SQLException {
+    try (PreparedStatement statement =
+        connection.prepareStatement(
+            "SELECT id FROM channel_account WHERE tenant_id = ? AND channel = 'TSF' "
+                + "AND external_shop_id = ?")) {
+      statement.setObject(1, tenantId);
+      statement.setString(2, externalShopId);
+      try (ResultSet rows = statement.executeQuery()) {
+        if (!rows.next()) {
+          return java.util.Optional.empty();
+        }
+        return java.util.Optional.of(rows.getObject(1, UUID.class));
+      }
+    }
   }
 
   private static void insertChannelAccount(

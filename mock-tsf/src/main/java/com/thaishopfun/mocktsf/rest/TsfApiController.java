@@ -100,16 +100,24 @@ public class TsfApiController {
   @GetMapping("/shops/{shopId}/listings")
   public ResponseEntity<String> listings(
       @PathVariable String shopId,
-      @RequestParam(value = "cursor", required = false) String cursor) {
+      @RequestParam(value = "cursor", required = false) String cursor,
+      @RequestParam(value = "limit", required = false) Integer limit) {
     if (!catalog.knownShop(shopId)) {
       throw new ApiException(404, "SHOP_NOT_FOUND", "shop is unknown");
     }
-    if (cursor != null) {
+    int size = limit == null ? 100 : limit;
+    if (size < 1 || size > 100) {
+      throw ApiException.badRequest("BAD_REQUEST", "limit must be between 1 and 100");
+    }
+    int offset = decodeCursor(cursor);
+    List<Map<String, Object>> all = catalog.listings();
+    if (offset > all.size()) {
       throw ApiException.badRequest("BAD_REQUEST", "cursor is invalid");
     }
+    int end = Math.min(offset + size, all.size());
     Map<String, Object> body = new LinkedHashMap<>();
-    body.put("listings", catalog.listings());
-    body.put("next_cursor", null);
+    body.put("listings", all.subList(offset, end));
+    body.put("next_cursor", end < all.size() ? encodeCursor(end) : null);
     return responses.outbound(200, "listing-page", body);
   }
 

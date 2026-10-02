@@ -29,7 +29,8 @@ public class TsfCatalog {
   public TsfCatalog() {
     Instant updated = Instant.parse("2026-09-29T08:15:02Z");
     orders.add(order(updated));
-    orders.add(second(updated.plusSeconds(60)));
+    orders.add(activeSecond(updated.plusSeconds(60)));
+    orders.add(second(updated.plusSeconds(120)));
     listings.add(listing("tsf_sku_7781", "TSHIRT-BLK-M", "เสื้อยืดดำ M", 18, 1042));
     listings.add(listing("tsf_sku_9001", "MUG-WHT", "แก้วขาว", 4, 880));
     listings.add(listing("tsf_sku_5000", "SET-TSHIRT-2", "เซ็ตเสื้อ 2 ตัว", 9, 1043));
@@ -122,6 +123,21 @@ public class TsfCatalog {
         3,
         detail,
         payment("TSF-240929-000123", "PAID"));
+  }
+
+  private static Order activeSecond(Instant updated) {
+    Map<String, Object> detail = base("TSF-240929-000125", "rsv_01J9Z4A1B2C5", updated, 1);
+    detail.put(
+        "lines", List.of(line("L1", "tsf_sku_5000", "SET-TSHIRT-2", "เซ็ตเสื้อ 2 ตัว", 1, 450)));
+    detail.put("totals", totals(450, 40, 0, 490));
+    detail.put("payment_method", "PREPAID");
+    return new Order(
+        "shop_active",
+        "TSF-240929-000125",
+        updated,
+        1,
+        detail,
+        payment("TSF-240929-000125", "PAID"));
   }
 
   private static Order second(Instant updated) {

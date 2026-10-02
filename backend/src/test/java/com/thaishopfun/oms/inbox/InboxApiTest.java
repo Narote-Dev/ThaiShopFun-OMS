@@ -356,6 +356,11 @@ class InboxApiTest {
       orderCreated.release.countDown();
       left.get(10, TimeUnit.SECONDS);
       right.get(10, TimeUnit.SECONDS);
+      for (int i = 0; i < 50 && orderCreated.calls.get() < 2; i++) {
+        if (worker.processAvailable(1) == 0) {
+          Thread.sleep(20);
+        }
+      }
     } finally {
       orderCreated.release.countDown();
       pool.shutdownNow();
