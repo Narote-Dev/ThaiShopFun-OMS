@@ -2,7 +2,6 @@ package com.thaishopfun.oms.order;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.thaishopfun.mocktsf.MockTsfApplication;
 import com.thaishopfun.mocktsf.OmsEndpoint;
 import com.thaishopfun.mocktsf.idp.TokenIssuer;
 import com.thaishopfun.oms.auth.AuthTestSupport;
@@ -40,10 +39,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.SpringApplication;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
-import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
@@ -61,19 +58,17 @@ import tools.jackson.databind.node.ObjectNode;
 @Import({StockTestConfig.class, OrderIntakeT12ScenariosAcceptanceTest.IntakeTestConfig.class})
 class OrderIntakeT12ConcurrencyAcceptanceTest {
 
-  private static final String ISSUER = "http://mock-tsf.test/tsf-idp";
+  private static final String ISSUER = OrderIntakeMockRuntime.issuer();
   private static final String INBOX_SECRET = "dev-inbox-hmac-secret";
   private static final JsonMapper JSON = JsonMapper.builder().build();
   private static final HttpClient HTTP =
       HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
 
-  private static ConfigurableApplicationContext mock;
-
   @DynamicPropertySource
   static void properties(DynamicPropertyRegistry registry) {
-    startMock();
+    OrderIntakeMockRuntime.startMock();
     AuthTestSupport.register(registry);
-    int mockPort = mockPort();
+    int mockPort = OrderIntakeMockRuntime.mockPort();
     registry.add("oms.security.issuer", () -> ISSUER);
     registry.add(
         "oms.security.jwks-uri",
@@ -86,9 +81,7 @@ class OrderIntakeT12ConcurrencyAcceptanceTest {
 
   @AfterAll
   static void stopMock() {
-    if (mock != null) {
-      mock.close();
-    }
+    OrderIntakeMockRuntime.stopMock();
   }
 
   @LocalServerPort private int port;
@@ -103,7 +96,7 @@ class OrderIntakeT12ConcurrencyAcceptanceTest {
 
   @BeforeEach
   void setup() throws Exception {
-    mock.getBean(OmsEndpoint.class).setBaseUrl("http://127.0.0.1:" + port);
+    OrderIntakeMockRuntime.mock().getBean(OmsEndpoint.class).setBaseUrl("http://127.0.0.1:" + port);
     fixture = new StockFixture(jdbc, transactions);
     faults.reset();
     try (Connection admin = AuthTestSupport.admin();
@@ -213,7 +206,7 @@ class OrderIntakeT12ConcurrencyAcceptanceTest {
   }
 
   private static String tsfToken() {
-    return mock.getBean(TokenIssuer.class).tsfServiceToken();
+    return OrderIntakeMockRuntime.mock().getBean(TokenIssuer.class).tsfServiceToken();
   }
 
   private static String sign(String secret, String timestamp, byte[] body) throws Exception {
@@ -226,28 +219,5 @@ class OrderIntakeT12ConcurrencyAcceptanceTest {
 
   private static String now() {
     return Long.toString(Instant.now().getEpochSecond());
-  }
-
-  private static void startMock() {
-    if (mock != null) {
-      return;
-    }
-    SpringApplication app = MockTsfApplication.application();
-    mock =
-        app.run(
-            "--server.port=0",
-            "--server.address=127.0.0.1",
-            "--mock.issuer=" + ISSUER,
-            "--mock.oms-base-url=http://127.0.0.1:9",
-            "--spring.main.banner-mode=off",
-            "--spring.main.register-shutdown-hook=false");
-  }
-
-  private static int mockPort() {
-    String port = mock.getEnvironment().getProperty("local.server.port");
-    if (port == null || port.isBlank() || "0".equals(port)) {
-      throw new IllegalStateException("mock-tsf did not bind a port");
-    }
-    return Integer.parseInt(port);
   }
 }
