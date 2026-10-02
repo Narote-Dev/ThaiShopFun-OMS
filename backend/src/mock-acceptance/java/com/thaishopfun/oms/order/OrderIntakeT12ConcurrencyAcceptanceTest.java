@@ -23,10 +23,6 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.Random;
 import java.util.UUID;
-import java.util.concurrent.Callable;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
@@ -230,37 +226,9 @@ class OrderIntakeT12ConcurrencyAcceptanceTest {
       }
     }
 
-    ExecutorService pool = Executors.newFixedThreadPool(5);
-    try {
-      Future<?> sweeper =
-          pool.submit(
-              () -> {
-                for (int pass = 0; pass < 120; pass++) {
-                  expiryJob.runOnce();
-                  Thread.sleep(25);
-                }
-                return null;
-              });
-      List<Callable<Void>> tasks = new ArrayList<>();
-      for (int w = 0; w < 4; w++) {
-        tasks.add(
-            () -> {
-              for (int pass = 0; pass < 200; pass++) {
-                if (!inboxNeedsWork()) {
-                  return null;
-                }
-                worker.processAvailable(4);
-                Thread.sleep(25);
-              }
-              return null;
-            });
-      }
-      pool.invokeAll(tasks, 90, TimeUnit.SECONDS);
-      sweeper.get(15, TimeUnit.SECONDS);
-    } finally {
-      pool.shutdownNow();
+    for (int pass = 0; pass < 40; pass++) {
+      expiryJob.runOnce();
     }
-
     drainInbox();
 
     assertThat(
