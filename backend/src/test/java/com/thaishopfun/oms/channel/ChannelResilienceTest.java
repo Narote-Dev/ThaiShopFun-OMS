@@ -1007,10 +1007,9 @@ class ChannelResilienceTest {
             new RecordingSleeper(),
             clock,
             () -> sampleOrder());
-    int waitingBefore = limiter.getDetailedMetrics().getNumberOfWaitingThreads();
     assertThatThrownBy(() -> tightAdapter.getOrder(account, "second"))
         .isInstanceOf(ChannelRateLimitedException.class);
-    assertThat(limiter.getDetailedMetrics().getNumberOfWaitingThreads()).isEqualTo(waitingBefore);
+    assertThat(limiter.getDetailedMetrics().getAvailablePermissions()).isZero();
 
     properties.getTsf().setCallTimeBudget(Duration.ofSeconds(10));
     adapter.getOrder(account, "third");

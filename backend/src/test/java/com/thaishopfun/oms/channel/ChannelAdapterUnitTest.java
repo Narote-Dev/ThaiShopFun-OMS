@@ -105,21 +105,23 @@ class ChannelAdapterUnitTest {
   }
 
   @Test
-  void retryAfterZeroRetriesImmediately() throws Exception {
+  void retryAfterZeroRetriesWithBaseBackoff() throws Exception {
     AtomicInteger hits = new AtomicInteger();
     int port = startOrderServer(Clock.systemUTC(), hits, 429, "Retry-After", "0", null);
     ChannelProperties properties = properties();
     properties.getTsf().setRetryMaxAttempts(3);
     properties.getTsf().setRetryWaitBase(Duration.ofMillis(1));
     properties.getTsf().setRetryWaitMax(Duration.ofMillis(1));
-    TsfChannelAdapter adapter =
-        tsfAdapter(port, properties, new ChannelResilienceTest.RecordingSleeper());
+    ChannelResilienceTest.RecordingSleeper sleeper = new ChannelResilienceTest.RecordingSleeper();
+    TsfChannelAdapter adapter = tsfAdapter(port, properties, sleeper);
     adapter.getOrder(accountRef(), "TSF-DATE");
     assertThat(hits).hasValue(2);
+    assertThat(sleeper.durations())
+        .allSatisfy(d -> assertThat(d).isLessThanOrEqualTo(Duration.ofMillis(1)));
   }
 
   @Test
-  void retryAfterPastHttpDateRetriesImmediately() throws Exception {
+  void retryAfterPastHttpDateRetriesWithBaseBackoff() throws Exception {
     Instant fixed = Instant.parse("2026-01-01T00:00:00Z");
     Clock clock = Clock.fixed(fixed, ZoneOffset.UTC);
     String past =
@@ -132,10 +134,12 @@ class ChannelAdapterUnitTest {
     properties.getTsf().setRetryMaxAttempts(3);
     properties.getTsf().setRetryWaitBase(Duration.ofMillis(1));
     properties.getTsf().setRetryWaitMax(Duration.ofMillis(1));
-    TsfChannelAdapter adapter =
-        tsfAdapter(port, properties, new ChannelResilienceTest.RecordingSleeper(), clock);
+    ChannelResilienceTest.RecordingSleeper sleeper = new ChannelResilienceTest.RecordingSleeper();
+    TsfChannelAdapter adapter = tsfAdapter(port, properties, sleeper, clock);
     adapter.getOrder(accountRef(), "TSF-DATE");
     assertThat(hits).hasValue(2);
+    assertThat(sleeper.durations())
+        .allSatisfy(d -> assertThat(d).isLessThanOrEqualTo(Duration.ofMillis(1)));
   }
 
   @Test
