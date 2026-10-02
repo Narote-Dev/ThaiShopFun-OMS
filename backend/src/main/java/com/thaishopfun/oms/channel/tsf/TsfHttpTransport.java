@@ -42,29 +42,16 @@ public class TsfHttpTransport {
       JsonMapper json,
       Clock clock,
       ChannelProperties channelProperties) {
-    this(properties, tokens, json, clock, channelProperties, defaultHttpClient());
-  }
-
-  TsfHttpTransport(
-      TsfProperties properties,
-      TsfTokenProvider tokens,
-      JsonMapper json,
-      Clock clock,
-      ChannelProperties channelProperties,
-      HttpClient httpClient) {
     this.properties = properties;
     this.tokens = tokens;
     this.json = json;
     this.clock = clock;
     this.channelProperties = channelProperties;
-    this.httpClient = httpClient;
-  }
-
-  private static HttpClient defaultHttpClient() {
-    return HttpClient.newBuilder()
-        .connectTimeout(Duration.ofSeconds(10))
-        .followRedirects(HttpClient.Redirect.NEVER)
-        .build();
+    this.httpClient =
+        HttpClient.newBuilder()
+            .connectTimeout(Duration.ofSeconds(10))
+            .followRedirects(HttpClient.Redirect.NEVER)
+            .build();
   }
 
   public HttpResult get(String path, Instant deadline) {

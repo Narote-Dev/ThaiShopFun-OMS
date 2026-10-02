@@ -323,10 +323,13 @@ public abstract class BaseChannelAdapter implements ChannelAdapter {
 
   private void awaitRateLimiter(RateLimiter rateLimiter, Instant deadline)
       throws InterruptedException {
+    Duration remaining = Duration.between(clock.instant(), deadline);
+    if (remaining.isZero() || remaining.isNegative()) {
+      throw new ChannelUnavailableException("Channel call budget exceeded");
+    }
     Duration allowed =
         ChannelCallBudget.minDuration(
-            rateLimiter.getRateLimiterConfig().getTimeoutDuration(),
-            ChannelCallBudget.remaining(clock, deadline));
+            rateLimiter.getRateLimiterConfig().getTimeoutDuration(), remaining);
     long waitNanos = rateLimiter.reservePermission();
     if (waitNanos < 0) {
       throw new ChannelRateLimitedException("Rate limit denied for " + channel(), null);

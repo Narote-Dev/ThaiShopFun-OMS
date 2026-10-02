@@ -289,7 +289,7 @@ class ChannelResilienceTest {
   }
 
   @Test
-  void httpTimeoutBudgetIncludesRetrySleeps() {
+  void attemptDurationCountsAgainstBudget() {
     java.util.concurrent.atomic.AtomicReference<Instant> now =
         new java.util.concurrent.atomic.AtomicReference<>(Instant.parse("2026-01-01T00:00:00Z"));
     Clock clock =
@@ -329,6 +329,38 @@ class ChannelResilienceTest {
     assertThatThrownBy(() -> adapter.getOrder(accountRef(), "budget"))
         .isInstanceOf(ChannelUnavailableException.class)
         .hasMessageContaining("budget");
+  }
+
+  @Test
+  void retryAfterExceedingCallBudgetThrowsWithoutSleep() throws Exception {
+    AtomicInteger attempts = new AtomicInteger();
+    HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    attachTokenHandler(server);
+    server.createContext(
+        "/internal/v1/orders/TSF-429-BUDGET",
+        exchange -> {
+          attempts.incrementAndGet();
+          byte[] body = "{\"error\":\"RATE_LIMITED\"}".getBytes(StandardCharsets.UTF_8);
+          exchange.getResponseHeaders().set("Content-Type", "application/json");
+          exchange.getResponseHeaders().set("Retry-After", "1");
+          exchange.sendResponseHeaders(429, body.length);
+          exchange.getResponseBody().write(body);
+          exchange.close();
+        });
+    server.start();
+    servers.add(server);
+    Clock clock = Clock.fixed(Instant.parse("2026-01-01T00:00:00Z"), ZoneOffset.UTC);
+    RecordingSleeper sleeper = new RecordingSleeper();
+    ChannelProperties properties = properties();
+    properties.getTsf().setCallTimeBudget(Duration.ofMillis(50));
+    properties.getTsf().setMaxRetryAfter(Duration.ofSeconds(60));
+    properties.getTsf().setRetryMaxAttempts(3);
+    TsfChannelAdapter adapter =
+        tsfAdapter(server.getAddress().getPort(), properties, sleeper, clock);
+    assertThatThrownBy(() -> adapter.getOrder(accountRef(), "TSF-429-BUDGET"))
+        .isInstanceOf(ChannelRateLimitedException.class);
+    assertThat(sleeper.durations()).isEmpty();
+    assertThat(attempts.get()).isEqualTo(1);
   }
 
   @Test
