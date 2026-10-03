@@ -48,7 +48,7 @@ public class ListingChangedHandler implements InboxHandler {
       return;
     }
     if ("DELETE".equals(action)) {
-      listings.markRemoved(account.id(), listingSkuId);
+      listings.markRemoved(message.tenantId(), account.id(), listingSkuId);
       return;
     }
     throw new NonRetryableInboxException("unsupported listing.changed action: " + action);

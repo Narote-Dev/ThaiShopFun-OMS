@@ -226,13 +226,14 @@ public class ChannelListingRepository {
         newlyMapped);
   }
 
-  public void markRemoved(UUID channelAccountId, String externalSkuId) {
+  public void markRemoved(UUID tenantId, UUID channelAccountId, String externalSkuId) {
     jdbc.update(
         """
         UPDATE channel_listing
         SET removed_at = now(), updated_at = now()
-        WHERE channel_account_id = ? AND external_sku_id = ?
+        WHERE tenant_id = ? AND channel_account_id = ? AND external_sku_id = ?
         """,
+        tenantId,
         channelAccountId,
         externalSkuId);
   }
