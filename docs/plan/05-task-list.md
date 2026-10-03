@@ -7,7 +7,7 @@
 - **Narote approve ทุก merge** เข้า `main` (branch protection: CI เขียว + Codex review + Narote approve)
 - 1 task = 1 PR (ใหญ่เกิน ~600 บรรทัดไม่นับ test → แตก PR)
 - **Flyway migrations may be written by Cursor or Codex, one migration per PR, never edit a merged version; Codex reviews every migration PR.**
-- **Definition of Done:** CI เขียว (รวม contract test), test ครอบ AC, ไม่มี PII ใน log, invariant check ผ่าน, อัปเดต `docs/` ถ้าเปลี่ยน contract (แก้ spec ใน `tsf-oms-contracts` ก่อนเสมอ)
+- **Definition of Done:** CI เขียว (รวม contract test), test ครอบ AC, ไม่มี PII ใน log, invariant check ผ่าน, อัปเดต `docs/` ถ้าเปลี่ยน contract (แก้ spec ใน in-repo `contracts/` ก่อนเสมอ; ย้ายไป repo `tsf-oms-contracts` ภายหลังได้แต่ไม่บังคับ)
 
 ### Flyway versions
 
@@ -54,6 +54,7 @@ flowchart LR
     T06-->T07 & T08
     T08-->T08A & T09
     T07-->T08A
+    T00-->T09
   end
   subgraph P2[Phase 2]
     T10-->T12
@@ -64,10 +65,11 @@ flowchart LR
   end
   subgraph P3[Phase 3]
     T18 & T20 & T21-->T22
-    T18 & T20-->T19
+    T18 & T20 & T21-->T19
     T23
     T28
   end
+  T00-->T19
   subgraph P4[Phase 4]
     T40-->T41 & T24
     T26-->T42 & T43
@@ -90,6 +92,9 @@ flowchart LR
   T15-->T23 & T40
   T22-->T40 & T26
   T16-->T50
+  Q2[Q2 hosting] --> T26
+  HOST[Public HTTPS host] --> T28
+  TSF1012[TSF-10..12] --> T21
 ```
 
 ---
@@ -102,7 +107,7 @@ flowchart LR
 
 **T01 · Cursor · deps: —** Repo skeleton + staging
 - repo `oms`: `backend/` (Spring Boot 4.1, Java 17, Maven wrapper), `frontend/` (Vite + React + TS), `docker-compose.yml` (Postgres 16+), GitHub Actions, deploy staging (Railway) อัตโนมัติจาก `main`
-- AC: `./mvnw verify` + `npm ci && npm run build && npm test` ผ่านใน CI · `/actuator/health` = UP บน staging · README รัน local ใน 3 คำสั่ง · Spotless/ESLint บังคับ
+- AC: `./mvnw verify` + `npm ci && npm run build && npm test` ผ่านใน CI · README รัน local ใน 3 คำสั่ง · Spotless/ESLint บังคับ · **ส่วนที่เหลือ** (staging auto-deploy จาก `main` + `/actuator/health` = UP บน staging) → **T26 AC** ไม่มี owner แยก
 
 **T01C · Codex · deps: —** Contracts (in-repo)
 - in-repo `contracts/`: OpenAPI 3.1 (OMS internal + TSF internal), AsyncAPI 3 + JSON Schema ทุก event ใน 04, examples, CI (Spectral lint, validate examples, `oasdiff` breaking check); อาจย้ายไป `tsf-oms-contracts` ภายหลังแบบเดิม
@@ -165,7 +170,7 @@ flowchart LR
 - เอกสาร Opening balance, Receive, Adjustment (บังคับ reason), Count (จำ `system_qty_at_start`), Write-off; DRAFT → POSTED (ห้ามแก้หลัง post, ยกเลิกด้วย VOID + เอกสารกลับรายการ); return restock hook; หน้า stock history ต่อ SKU (กรอง reason/วันที่, ลิงก์ไปเอกสาร/ออเดอร์)
 - AC: post แล้ว ledger reason ตรง (`OPENING_BALANCE/RECEIVE/ADJUST_IN/ADJUST_OUT/COUNT_CORRECTION/DAMAGE_WRITE_OFF`) · Count ที่มีการขายระหว่างนับ → ยอดสุดท้าย = นับได้ − ที่ขายหลังเริ่มนับ · ADJUST_OUT จนต่ำกว่า `reserved` → 422 · post ซ้ำ (double click) ไม่ลง ledger ซ้ำ · STAFF post ADJUST ไม่ได้ (OWNER/ADMIN เท่านั้น)
 
-**T09 · Codex · deps: T08** Concurrency + bundle stress
+**T09 · Codex · deps: T08, T00** Concurrency + bundle stress
 - jqwik + multi-thread test
 - AC ต้องมีทุกเคส:
   - bundle vs component race (ขาย bundle กับ SKU ลูกพร้อมกันจนของหมด) → ไม่ติดลบ, สำเร็จรวมไม่เกินของ
@@ -239,12 +244,12 @@ flowchart LR
 - เทียบ `last_exposed_qty` กับ `last_seen_channel_qty` จาก listings
 - AC: diff → issue `STOCK_DRIFT` + re-push · ไม่แตะ `on_hand`
 
-**T19 · Codex · deps: T18, T20** E2E
+**T19 · Codex · deps: T18, T20, T21** E2E
 - Playwright + mock TSF: reserve → created → paid → pick → pack → label → ship → delivered → คืนบางชิ้น → refund; และ cancel ตอน PACKED
 - AC: รันใน CI < 5 นาที · InvariantChecker ผ่านท้ายทุก scenario
 
-**T28 · Cursor · deps: T04** Public product page + demo tenant
-- หน้า HTTPS สาธารณะอธิบาย OMS + demo account สำหรับ reviewer marketplace
+**T28 · Cursor · deps: T04, public HTTPS hosting (Q2)** Public product page + demo tenant
+- หน้า HTTPS สาธารณะอธิบาย OMS + demo account สำหรับ reviewer marketplace (งาน launch ใน MVP 39 task)
 - AC: เปิดได้ไม่ต้อง login · demo tenant มีข้อมูลตัวอย่าง ไม่มี PII จริง
 
 ## Phase 4: Pilot (สัปดาห์ 14–22)
@@ -256,9 +261,9 @@ flowchart LR
 - เก็บ diff stock/order/reservation (OMS vs TSF จริง), คำนวณเกณฑ์เลื่อน mode
 - AC: หน้า report แสดง diff % รายวัน · เกณฑ์ใน 02 (diff < 0.5% 7 วัน) คำนวณถูกจาก fixture
 
-**T26 · Cursor · deps: T22** Prod deploy + observability + PITR
-- prod env, JSON log + `trace_id`, metrics (reserve latency, inbox lag, DEAD, stock propagation lag, business oversell, hold count), alert, **เปิด Railway PITR**
-- AC: prod deploy ต้องกดเอง (Narote) · alert เมื่อ DEAD > 0, inbox lag > 5 นาที, reserve p95 เกิน NFR · `railway postgres pitr status` = healthy
+**T26 · Cursor · deps: T22, Q2 (hosting + งบ)** Prod deploy + observability + PITR
+- prod/staging env, JSON log + `trace_id`, metrics (reserve latency, inbox lag, DEAD, stock propagation lag, business oversell, hold count), alert, **เปิด Railway PITR** · ตั้ง `oms.security.internal-client-ids` และ secret ตาม [MVP roadmap §5.2.1](../MVP-ROADMAP.md) · **SPA→API:** same-origin reverse proxy `/api`→backend (แนะนำ) หรือ wire `VITE_OMS_API_BASE_URL` + backend CORS · cross-host smoke (SSO + `/api/v1/me`)
+- AC: prod deploy ต้องกดเอง (Narote) · alert เมื่อ DEAD > 0, inbox lag > 5 นาที, reserve p95 เกิน NFR · `railway postgres pitr status` = healthy · deployed UI เรียก API ได้จริง (ไม่พึ่ง Vite proxy)
 
 **T24 · Cursor · deps: T17, T40** Dashboard + audit viewer
 - การ์ด: รอแพ็ก, ใกล้ ship-by, hold, DEAD events, mode ปัจจุบัน, sync paused, issue เปิด; หน้า audit
@@ -277,7 +282,7 @@ flowchart LR
 - AC: เพิ่มตารางไม่มี FORCE RLS → CI fail · รายงาน finding ใน PR
 
 ## Phase 5: Multichannel (framework เริ่ม ~สัปดาห์ 14, adapter หลัง approval)
-**T50M · Codex · deps: T10** Flyway V5: `allocation_policy`, `channel_allocation`
+**T50M · Codex · deps: T10** Flyway (next free version at time of work — ห้ามใช้ V5; หลัง V11 ปัจจุบันคือ V12+ หรือเลขว่างถัดไปเมื่อเริ่มงาน): `allocation_policy`, `channel_allocation`
 - AC: CHECK ผลรวม allocation ≤ physical − buffer (ตรวจใน service + test)
 
 **T50 · Codex · deps: T16** Capability framework (ต่อยอด T16)
@@ -316,5 +321,8 @@ flowchart LR
 | TSF-05 | T18 | ออก label/tracking ผ่านขนส่งของ TSF |
 | TSF-06 | T03 | `membership.changed` + entitlement `oms` ต่อ tier |
 | **TSF-07** | T12A | **checkout เรียก `POST /inventory/reservations` ก่อนสร้างออเดอร์**, 409 → แสดง OUT_OF_STOCK, `DELETE` เมื่อทิ้ง checkout, ส่ง `reservation_id` ใน `order.created`, เคารพ `enforced` |
-| **TSF-08** | T01C | ดึง `tsf-oms-contracts` tag เดียวกัน + contract test ใน CI ของ TSF |
+| **TSF-08** | T01C | ใช้ spec/tag เดียวกับ OMS (in-repo `contracts/` หรือ mirror ไป `tsf-oms-contracts` ถ้าย้าย) + contract test ใน CI ของ TSF |
 | **TSF-09** | T12A | timeout 800 ms + circuit breaker ตอนเรียก reserve + fallback policy (ตัดสินใจ #6) + metric |
+| **TSF-10** | T21, launch | TSF Pay ส่ง `payment.status_changed` / `refund.status_changed` ผ่าน TSF (OMS อ่านอย่างเดียว) |
+| **TSF-11** | launch | หน้า membership/billing ใน TSF ที่ขายแพ็กเกจที่มี OMS entitlement |
+| **TSF-12** | T04 prod, launch | ลิงก์ "เข้า OMS" จากหลังบ้าน TSF + โดเมน/redirect URI prod (OIDC `oms-web`) |
