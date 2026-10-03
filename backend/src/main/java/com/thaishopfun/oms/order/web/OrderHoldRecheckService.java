@@ -61,14 +61,19 @@ public class OrderHoldRecheckService {
       throw OrderApiException.conflict("HOLD_NOT_RECHECKABLE", "Order hold is not recheckable");
     }
     ReevalSummary summary =
-        tx.write(() -> resolverJob.resolveOrderRecheck(orderId, idempotencyKeyHeader.trim()));
-    SalesOrder after = orders.findById(orderId).orElseThrow();
-    audit.write(
-        actor,
-        "ORDER_HOLD_RECHECKED",
-        orderId,
-        Map.of("hold_reason", before.holdReason()),
-        Map.of("hold_reason", after.holdReason()));
+        resolverJob.resolveOrderRecheck(orderId, idempotencyKeyHeader.trim());
+    SalesOrder after =
+        tx.write(
+            () -> {
+              SalesOrder fresh = orders.findById(orderId).orElseThrow(OrderApiException::notFound);
+              audit.write(
+                  actor,
+                  "ORDER_HOLD_RECHECKED",
+                  orderId,
+                  Map.of("hold_reason", before.holdReason()),
+                  Map.of("hold_reason", fresh.holdReason()));
+              return fresh;
+            });
     OrderViews.HoldRecheckResponse response =
         new OrderViews.HoldRecheckResponse(
             after.id(),

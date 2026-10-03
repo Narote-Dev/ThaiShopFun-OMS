@@ -103,6 +103,7 @@ test('owner maps unmapped listing and order becomes ready to pick', async ({ pag
   await page.getByRole('link', { name: 'Listings' }).click()
   await page.getByLabel('Channel account id').fill(channelAccountId)
   await page.getByRole('button', { name: 'Apply' }).click()
+  await page.getByRole('button', { name: 'Sync listings' }).click()
   await expect(page.getByText('L-demo-missing')).toBeVisible({ timeout: 60_000 })
 
   await page.getByRole('button', { name: 'Map' }).first().click()

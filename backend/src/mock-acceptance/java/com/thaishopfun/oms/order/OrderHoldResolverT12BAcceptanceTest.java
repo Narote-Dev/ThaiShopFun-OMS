@@ -8,6 +8,8 @@ import com.thaishopfun.mocktsf.idp.TokenIssuer;
 import com.thaishopfun.oms.auth.AuthTestSupport;
 import com.thaishopfun.oms.auth.UuidV7;
 import com.thaishopfun.oms.inbox.InboxWorker;
+import com.thaishopfun.oms.listing.ChannelListingRepository;
+import com.thaishopfun.oms.order.hold.OrderHoldResolverJob;
 import com.thaishopfun.oms.stock.StockFixture;
 import java.net.URI;
 import java.net.http.HttpClient;
