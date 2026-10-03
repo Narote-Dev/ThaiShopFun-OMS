@@ -140,7 +140,7 @@ class OrderIntakeT13UnknownSkuAcceptanceTest {
     assertThat(historyHoldCount(shop, orderId)).isEqualTo(1);
     assertThat(orderReservationCount(shop, orderId)).isZero();
 
-    resetInboxToPending(eventId);
+    resetInboxToReceived(eventId);
     drainWorkerUntilProcessed(eventId);
     assertInboxProcessedOnce(eventId);
     assertThat(holdReason(shop, orderId)).isEqualTo("SKU_NOT_MAPPED");
@@ -252,11 +252,15 @@ class OrderIntakeT13UnknownSkuAcceptanceTest {
     assertThat(text("SELECT last_error FROM inbox_event WHERE event_id = ?", eventId)).isNull();
   }
 
-  private void resetInboxToPending(String eventId) throws Exception {
+  private void resetInboxToReceived(String eventId) throws Exception {
     try (Connection admin = AuthTestSupport.admin();
         var statement =
             admin.prepareStatement(
-                "UPDATE inbox_event SET status = 'PENDING', attempts = 0, last_error = NULL WHERE event_id = ?")) {
+                """
+                UPDATE inbox_event
+                SET status = 'RECEIVED', attempts = 0, last_error = NULL, processed_at = NULL
+                WHERE event_id = ?
+                """)) {
       statement.setString(1, eventId);
       assertThat(statement.executeUpdate()).isEqualTo(1);
     }
