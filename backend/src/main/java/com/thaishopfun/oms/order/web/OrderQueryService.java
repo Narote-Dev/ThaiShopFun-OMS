@@ -327,16 +327,11 @@ public class OrderQueryService {
                       """,
                       (rs, rowNum) ->
                           new OrderViews.ChannelAccountHoldCount(
-                              rs.getObject("channel_account_id", UUID.class),
-                              rs.getLong("cnt")));
+                              rs.getObject("channel_account_id", UUID.class), rs.getLong("cnt")));
             }
             result.add(
                 new OrderViews.HoldGroup(
-                    group.holdReason(),
-                    group.holdDetail(),
-                    group.count(),
-                    samples,
-                    channelCounts));
+                    group.holdReason(), group.holdDetail(), group.count(), samples, channelCounts));
           }
           return new OrderViews.HoldsView(result);
         });

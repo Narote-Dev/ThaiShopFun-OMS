@@ -119,8 +119,7 @@ public final class OrderViews {
       List<HoldSample> samples,
       @JsonProperty("channel_account_counts") List<ChannelAccountHoldCount> channelAccountCounts) {
 
-    public HoldGroup(
-        String holdReason, String holdDetail, long count, List<HoldSample> samples) {
+    public HoldGroup(String holdReason, String holdDetail, long count, List<HoldSample> samples) {
       this(holdReason, holdDetail, count, samples, List.of());
     }
   }

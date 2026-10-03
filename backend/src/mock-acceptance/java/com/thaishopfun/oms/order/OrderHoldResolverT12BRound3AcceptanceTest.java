@@ -680,7 +680,8 @@ class OrderHoldResolverT12BRound3AcceptanceTest {
 
       assertThat(holdReason(shop, externalOrderId)).isEqualTo("OUT_OF_STOCK");
       assertThat(holdNote(shop, externalOrderId))
-          .isEqualTo(com.thaishopfun.oms.order.hold.OrderHoldEffects.BUNDLE_WITHOUT_COMPONENTS_NOTE);
+          .isEqualTo(
+              com.thaishopfun.oms.order.hold.OrderHoldEffects.BUNDLE_WITHOUT_COMPONENTS_NOTE);
       assertThat(ensureHoldKeyCount(shop)).isEqualTo(keysBefore);
       if ("SHADOW".equals(mode)) {
         assertThat(
