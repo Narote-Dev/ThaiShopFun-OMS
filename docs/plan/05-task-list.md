@@ -318,5 +318,5 @@ flowchart LR
 | TSF-05 | T18 | ออก label/tracking ผ่านขนส่งของ TSF |
 | TSF-06 | T03 | `membership.changed` + entitlement `oms` ต่อ tier |
 | **TSF-07** | T12A | **checkout เรียก `POST /inventory/reservations` ก่อนสร้างออเดอร์**, 409 → แสดง OUT_OF_STOCK, `DELETE` เมื่อทิ้ง checkout, ส่ง `reservation_id` ใน `order.created`, เคารพ `enforced` |
-| **TSF-08** | T01C | ดึง `tsf-oms-contracts` tag เดียวกัน + contract test ใน CI ของ TSF |
+| **TSF-08** | T01C | ใช้ spec/tag เดียวกับ OMS (in-repo `contracts/` หรือ mirror ไป `tsf-oms-contracts` ถ้าย้าย) + contract test ใน CI ของ TSF |
 | **TSF-09** | T12A | timeout 800 ms + circuit breaker ตอนเรียก reserve + fallback policy (ตัดสินใจ #6) + metric |

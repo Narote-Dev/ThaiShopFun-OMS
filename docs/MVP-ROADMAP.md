@@ -75,7 +75,7 @@
 ### ภาพรวมตัวเลข (MVP = Phase 0–4 = 39 task)
 | สถานะ | จำนวน | task |
 |---|---|---|
-| ✅ เสร็จ + merge แล้ว | 17 | T02, T03, T04, T05, T06, T07, T08, T08A, T10, T11, T12, T13, T14, T14B, T16, T17 (+ ฟีเจอร์ T12A แยกจาก perf ด้านล่าง) |
+| ✅ เสร็จ + merge แล้ว | 17 | T02, T03, T04, T05, T06, T07, T08, T08A, T10, T11, T12, T12A, T13, T14, T14B, T16, T17 (ไม่รวม T01 — staging deploy ยังไม่ครบ) |
 | 🟡 ทำแล้วบางส่วน | 4 | **T01** (CI/local ผ่าน แต่ยังไม่มี staging deploy อัตโนมัติ + health บน staging), **T01C** (in-repo `contracts/` มีแล้ว ยังขาด AsyncAPI + `oasdiff`), **T12A** (API + migration V9 merge แล้ว แต่ perf AC ยังไม่ผ่าน — ดูด้านล่าง), **T27** (เข้ารหัส PII + `phone_hash` มากับ T10 แล้ว ส่วน lifecycle ยังไม่ทำ) |
 | 🔨 กำลังทำ | 1 | T12B (branch `feat/T12B-sku-mapping` — cloud agent กำลังทำ ห้ามเปิดงานซ้ำ) |
 | ⬜ ยังไม่เริ่ม | 18 | T00, T09, T12C, T15, T18, T19, T20, T21, T22, T23, T24, T25, T26, T28, T40, T41, T42, T43 |
