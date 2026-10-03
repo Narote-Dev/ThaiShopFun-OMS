@@ -288,12 +288,15 @@ class OrderCancelApiTest extends OrderIntegrationTest {
             Map.of("reason", "alt shop"));
     assertThat(result.status()).isEqualTo(202);
     assertThat(cancelHits(order.externalOrderId())).hasSize(1);
-    String externalShop =
-        jdbc.queryForObject(
-            "SELECT external_shop_id FROM channel_account WHERE id = ?",
-            String.class,
-            altChannel);
-    assertThat(externalShop).isEqualTo("shop_alt_active");
+    try (Connection admin = AuthTestSupport.admin();
+        PreparedStatement ps =
+            admin.prepareStatement("SELECT external_shop_id FROM channel_account WHERE id = ?")) {
+      ps.setObject(1, altChannel);
+      try (var rs = ps.executeQuery()) {
+        assertThat(rs.next()).isTrue();
+        assertThat(rs.getString(1)).isEqualTo("shop_alt_active");
+      }
+    }
   }
 
   private ActiveShop shopActive() throws Exception {
