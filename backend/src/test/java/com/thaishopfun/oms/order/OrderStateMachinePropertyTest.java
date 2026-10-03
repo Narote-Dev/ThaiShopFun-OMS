@@ -70,24 +70,12 @@ class OrderStateMachinePropertyTest {
     int steps = 1 + random.nextInt(12);
     for (int i = 0; i < steps; i++) {
       String dimension = pickDimension(random);
-      String from = model.value(dimension);
+      SalesOrder current = as(shop, () -> orders.findById(order.id()).orElseThrow());
+      String from = dimensionValue(current, dimension);
       String to =
           OrderStateMachine.allowedValues(dimension)
               .get(random.nextInt(OrderStateMachine.allowedValues(dimension).size()));
-      boolean legal =
-          oracleExpectsSuccess(
-              model.orderStatus,
-              model.payment,
-              model.fulfillment,
-              model.hold,
-              dimension,
-              from,
-              to,
-              guards,
-              order.id(),
-              shop);
-
-      SalesOrder current = as(shop, () -> orders.findById(order.id()).orElseThrow());
+      boolean legal = oracleExpectsSuccess(current, dimension, from, to, guards, shop);
       long versionBefore = current.version();
       long historyBefore = historyCount(shop, order.id());
       try {
@@ -131,59 +119,74 @@ class OrderStateMachinePropertyTest {
   }
 
   private boolean oracleExpectsSuccess(
-      String orderStatus,
-      String payment,
-      String fulfillment,
-      String hold,
+      SalesOrder order,
       String dimension,
       String from,
       String to,
       GuardContext guards,
-      UUID orderId,
       Shop shop) {
-    if (!from.equals(modelValue(dimension, orderStatus, payment, fulfillment, hold))) {
+    if (!from.equals(dimensionValue(order, dimension))) {
       return false;
     }
     if (!OrderStateMachineExpectedTransitions.isLegalEdge(dimension, from, to)) {
       return false;
     }
+    if ("FULFILLMENT".equals(dimension)) {
+      return oracleFulfillmentTarget(order, from, to, guards);
+    }
     if (from.equals(to) && !"HOLD".equals(dimension)) {
-      if ("FULFILLMENT".equals(dimension)
-          && ("CANCELLED".equals(orderStatus) || "COMPLETED".equals(orderStatus))) {
-        return false;
-      }
       return true;
     }
-    if ("ORDER".equals(dimension) && "CANCELLED".equals(orderStatus) && !"CANCELLED".equals(to)) {
+    if ("ORDER".equals(dimension) && "CANCELLED".equals(order.orderStatus()) && !"CANCELLED".equals(to)) {
       return false;
     }
     if ("ORDER".equals(dimension)
         && "CANCELLED".equals(to)
-        && Set.of("SHIPPED", "DELIVERED").contains(fulfillment)) {
+        && Set.of("SHIPPED", "DELIVERED").contains(order.fulfillmentStatus())) {
       return false;
     }
     if ("ORDER".equals(dimension) && "COMPLETED".equals(to)) {
-      if (!"DELIVERED".equals(fulfillment)) {
+      if (!"DELIVERED".equals(order.fulfillmentStatus())) {
+        return false;
+      }
+      if (order.paidAt() == null) {
+        return false;
+      }
+      if (guards.openReturn()) {
         return false;
       }
       Optional<Instant> delivered =
-          as(shop, () -> history.transitionedAt(orderId, "FULFILLMENT", "DELIVERED"));
+          as(shop, () -> history.transitionedAt(order.id(), "FULFILLMENT", "DELIVERED"));
       if (delivered.isEmpty() || delivered.get().isAfter(NOW.minus(7, ChronoUnit.DAYS))) {
         return false;
       }
     }
-    if (("FULFILLMENT".equals(dimension) || "HOLD".equals(dimension))
-        && ("CANCELLED".equals(orderStatus) || "COMPLETED".equals(orderStatus))) {
+    if ("HOLD".equals(dimension)
+        && ("CANCELLED".equals(order.orderStatus()) || "COMPLETED".equals(order.orderStatus()))) {
       return false;
     }
-    if ("FULFILLMENT".equals(dimension) && !"NONE".equals(hold) && !from.equals(to)) {
+    return true;
+  }
+
+  private static boolean oracleFulfillmentTarget(
+      SalesOrder order, String fromFulfillment, String to, GuardContext guards) {
+    if (!order.fulfillmentStatus().equals(fromFulfillment)) {
       return false;
     }
-    if ("FULFILLMENT".equals(dimension) && "READY_TO_PICK".equals(to)) {
-      if (!"ACTIVE".equals(orderStatus)) {
+    if ("CANCELLED".equals(order.orderStatus()) || "COMPLETED".equals(order.orderStatus())) {
+      return false;
+    }
+    if (!"NONE".equals(order.holdReason()) && !fromFulfillment.equals(to)) {
+      return false;
+    }
+    if ("READY_TO_PICK".equals(to)) {
+      if (!"ACTIVE".equals(order.orderStatus())) {
         return false;
       }
-      if (!Set.of("PAID", "COD_PENDING").contains(payment)) {
+      if (!Set.of("PAID", "COD_PENDING").contains(order.paymentStatus())) {
+        return false;
+      }
+      if (!"NONE".equals(order.holdReason())) {
         return false;
       }
       if (guards.stockEnforced() && !guards.reservationCoversMappedLines()) {
@@ -193,13 +196,12 @@ class OrderStateMachinePropertyTest {
     return true;
   }
 
-  private static String modelValue(
-      String dimension, String orderStatus, String payment, String fulfillment, String hold) {
+  private static String dimensionValue(SalesOrder order, String dimension) {
     return switch (dimension) {
-      case "ORDER" -> orderStatus;
-      case "PAYMENT" -> payment;
-      case "FULFILLMENT" -> fulfillment;
-      case "HOLD" -> hold;
+      case "ORDER" -> order.orderStatus();
+      case "PAYMENT" -> order.paymentStatus();
+      case "FULFILLMENT" -> order.fulfillmentStatus();
+      case "HOLD" -> order.holdReason();
       default -> throw new IllegalArgumentException(dimension);
     };
   }
@@ -261,7 +263,13 @@ class OrderStateMachinePropertyTest {
     }
 
     String value(String dimension) {
-      return modelValue(dimension, orderStatus, payment, fulfillment, hold);
+      return switch (dimension) {
+        case "ORDER" -> orderStatus;
+        case "PAYMENT" -> payment;
+        case "FULFILLMENT" -> fulfillment;
+        case "HOLD" -> hold;
+        default -> throw new IllegalStateException(dimension);
+      };
     }
 
     void apply(String dimension, String to) {
