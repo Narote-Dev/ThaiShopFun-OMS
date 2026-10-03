@@ -23,7 +23,7 @@ import tools.jackson.databind.node.ObjectNode;
  * Local/e2e demo orders for shop_active. Idempotent external ids (DEMO-*). Not part of the TSF
  * contract.
  */
-@Profile({"local", "e2e"})
+@Profile("!prod")
 @RestController
 @RequestMapping("/control/demo")
 public class DemoOrdersController {
