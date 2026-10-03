@@ -54,7 +54,30 @@ class OrderApiPerfTest extends OrderIntegrationTest {
         shop.owner(),
         OrderHttp.ordersPath("?fulfillment_status=READY_TO_PICK&hold_reason=NONE&limit=50"),
         "filtered");
-    assertUnder1s(shop.owner(), OrderHttp.ordersPath("?limit=50&offset=9000"), "deep page");
+    String deep =
+        http.get(OrderHttp.ordersPath("?limit=50"), shop.owner())
+            .body()
+            .path("next_cursor")
+            .asString();
+    for (int i = 0; i < 179 && deep != null && !deep.isBlank(); i++) {
+      deep =
+          http.get(
+                  OrderHttp.ordersPath(
+                      "?limit=50&cursor="
+                          + java.net.URLEncoder.encode(
+                              deep, java.nio.charset.StandardCharsets.UTF_8)),
+                  shop.owner())
+              .body()
+              .path("next_cursor")
+              .asString();
+    }
+    assertUnder1s(
+        shop.owner(),
+        OrderHttp.ordersPath(
+            "?limit=50&cursor="
+                + java.net.URLEncoder.encode(
+                    deep == null ? "" : deep, java.nio.charset.StandardCharsets.UTF_8)),
+        "deep page");
   }
 
   private void assertUnder1s(String token, String path, String label) {

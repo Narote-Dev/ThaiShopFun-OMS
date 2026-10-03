@@ -11,7 +11,8 @@ public final class OrderViews {
 
   private OrderViews() {}
 
-  public record Page<T>(List<T> items, long total, int limit, int offset) {}
+  public record Page<T>(
+      List<T> items, long total, int limit, @JsonProperty("next_cursor") String nextCursor) {}
 
   public record ListItem(
       UUID id,
@@ -88,6 +89,7 @@ public final class OrderViews {
       @JsonProperty("payment_status") String paymentStatus,
       @JsonProperty("fulfillment_status") String fulfillmentStatus,
       @JsonProperty("hold_reason") String holdReason,
+      @JsonProperty("hold_detail") String holdDetail,
       @JsonProperty("hold_note") String holdNote,
       @JsonProperty("payment_method") String paymentMethod,
       String currency,

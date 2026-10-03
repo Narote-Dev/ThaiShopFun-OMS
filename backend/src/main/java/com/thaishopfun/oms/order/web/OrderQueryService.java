@@ -1,6 +1,7 @@
 package com.thaishopfun.oms.order.web;
 
 import com.thaishopfun.oms.catalog.CatalogApiException;
+import com.thaishopfun.oms.catalog.Fields;
 import com.thaishopfun.oms.catalog.PageResult;
 import com.thaishopfun.oms.channel.Channel;
 import com.thaishopfun.oms.channel.ChannelAdapterRegistry;
@@ -9,7 +10,6 @@ import com.thaishopfun.oms.order.OrderRecipientRepository;
 import com.thaishopfun.oms.order.OrderStatusHistoryRepository;
 import com.thaishopfun.oms.order.SalesOrder;
 import com.thaishopfun.oms.order.SalesOrderRepository;
-import com.thaishopfun.oms.stock.ReserveDemandPlanner;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Instant;
@@ -38,8 +38,14 @@ public class OrderQueryService {
   private final OrderRecipientRepository recipients;
   private final OrderLineRepository lines;
   private final OrderStatusHistoryRepository history;
-  private final ReserveDemandPlanner demandPlanner;
   private final ChannelAdapterRegistry adapters;
+  private final OrderRecipientMaskedReader maskedRecipients;
+
+  private static final String BASE_FROM =
+      """
+      FROM sales_order o
+      JOIN channel_account ca ON ca.tenant_id = o.tenant_id AND ca.id = o.channel_account_id
+      """;
 
   public OrderQueryService(
       JdbcTemplate jdbc,
@@ -48,16 +54,16 @@ public class OrderQueryService {
       OrderRecipientRepository recipients,
       OrderLineRepository lines,
       OrderStatusHistoryRepository history,
-      ReserveDemandPlanner demandPlanner,
-      ChannelAdapterRegistry adapters) {
+      ChannelAdapterRegistry adapters,
+      OrderRecipientMaskedReader maskedRecipients) {
     this.jdbc = jdbc;
     this.tx = tx;
     this.orders = orders;
     this.recipients = recipients;
     this.lines = lines;
     this.history = history;
-    this.demandPlanner = demandPlanner;
     this.adapters = adapters;
+    this.maskedRecipients = maskedRecipients;
   }
 
   public OrderViews.Page<OrderViews.ListItem> list(
@@ -71,9 +77,8 @@ public class OrderQueryService {
       String orderedTo,
       String q,
       Integer limit,
-      Integer offset) {
+      String cursorRaw) {
     int pageLimit = PageResult.limit(limit);
-    int pageOffset = PageResult.offset(offset);
     return tx.read(
         () -> {
           SearchClause search = resolveSearch(q);
@@ -88,14 +93,27 @@ public class OrderQueryService {
                   orderedFrom,
                   orderedTo,
                   search);
+          OrderListCursor cursor =
+              cursorRaw == null || cursorRaw.isBlank()
+                  ? OrderListCursor.firstPage(Instant.now())
+                  : OrderListCursor.decode(cursorRaw);
+          List<Object> whereParams = new ArrayList<>(filter.params());
+          StringBuilder where = new StringBuilder(filter.where());
+          where.append(" AND o.ordered_at <= ?");
+          whereParams.add(java.sql.Timestamp.from(cursor.snapshotBefore()));
+          if (cursor.hasKeyset()) {
+            where.append(" AND (o.ordered_at < ? OR (o.ordered_at = ? AND o.id < ?))");
+            whereParams.add(java.sql.Timestamp.from(cursor.orderedAt()));
+            whereParams.add(java.sql.Timestamp.from(cursor.orderedAt()));
+            whereParams.add(cursor.id());
+          }
           long total =
               jdbc.queryForObject(
-                  "SELECT count(*) FROM sales_order o" + filter.joins() + filter.where(),
+                  "SELECT count(*) " + BASE_FROM + filter.joins() + where,
                   Long.class,
-                  filter.params().toArray());
-          List<Object> pageParams = new ArrayList<>(filter.params());
+                  whereParams.toArray());
+          List<Object> pageParams = new ArrayList<>(whereParams);
           pageParams.add(pageLimit);
-          pageParams.add(pageOffset);
           List<OrderViews.ListItem> items =
               jdbc.query(
                   """
@@ -103,15 +121,19 @@ public class OrderQueryService {
                          o.fulfillment_status, o.hold_reason, o.payment_method, o.grand_total,
                          o.ordered_at, o.ship_by, o.channel_account_id, ca.channel,
                          r.phone_last4
-                  FROM sales_order o
-                  JOIN channel_account ca ON ca.tenant_id = o.tenant_id AND ca.id = o.channel_account_id
                   """
+                      + BASE_FROM
                       + filter.joins()
-                      + filter.where()
-                      + " ORDER BY o.ordered_at DESC, o.id DESC LIMIT ? OFFSET ?",
+                      + where
+                      + " ORDER BY o.ordered_at DESC, o.id DESC LIMIT ?",
                   this::mapListItem,
                   pageParams.toArray());
-          return new OrderViews.Page<>(items, total, pageLimit, pageOffset);
+          String next = null;
+          if (!items.isEmpty() && items.size() == pageLimit) {
+            OrderViews.ListItem last = items.get(items.size() - 1);
+            next = cursor.encode(last.orderedAt(), last.id());
+          }
+          return new OrderViews.Page<>(items, total, pageLimit, next);
         });
   }
 
@@ -142,6 +164,7 @@ public class OrderQueryService {
                               row.actor(),
                               row.createdAt()))
                   .toList();
+          String holdDetail = resolveHoldDetail(order.id(), order.holdReason());
           return new OrderViews.DetailView(
               order.id(),
               order.externalOrderId(),
@@ -149,6 +172,7 @@ public class OrderQueryService {
               order.paymentStatus(),
               order.fulfillmentStatus(),
               order.holdReason(),
+              holdDetail,
               order.holdNote(),
               order.paymentMethod(),
               order.currency(),
@@ -174,69 +198,108 @@ public class OrderQueryService {
   public OrderViews.HoldsView holds() {
     return tx.read(
         () -> {
-          List<HoldRow> rows =
+          String bundleWithoutComponents =
+              """
+              (o.hold_reason = 'OUT_OF_STOCK' AND EXISTS (
+                SELECT 1 FROM order_line ol
+                JOIN sku s ON s.id = ol.sku_id AND s.is_bundle = true
+                WHERE ol.order_id = o.id
+                AND NOT EXISTS (
+                  SELECT 1 FROM sku_bundle_component bc
+                  WHERE bc.tenant_id = ol.tenant_id AND bc.bundle_sku_id = ol.sku_id
+                )
+              ))
+              """;
+          List<HoldGroupRow> counts =
               jdbc.query(
                   """
-                  SELECT o.id, o.external_order_id, o.ordered_at, o.hold_reason
+                  SELECT o.hold_reason,
+                    CASE WHEN """
+                      + bundleWithoutComponents
+                      + " THEN 'BUNDLE_WITHOUT_COMPONENTS' END AS hold_detail, count(*) AS cnt"
+                      + """
                   FROM sales_order o
                   WHERE o.hold_reason <> 'NONE'
-                  ORDER BY o.ordered_at DESC
+                  GROUP BY o.hold_reason, 2
+                  ORDER BY o.hold_reason, 2
                   """,
                   (rs, rowNum) ->
-                      new HoldRow(
-                          rs.getObject("id", UUID.class),
-                          rs.getString("external_order_id"),
-                          rs.getObject("ordered_at", java.time.OffsetDateTime.class).toInstant(),
-                          rs.getString("hold_reason")));
-          Map<String, Long> counts = new LinkedHashMap<>();
-          Map<String, List<OrderViews.HoldSample>> samples = new LinkedHashMap<>();
-          for (HoldRow row : rows) {
-            String key = groupKey(row);
-            counts.merge(key, 1L, Long::sum);
-            samples.computeIfAbsent(key, k -> new ArrayList<>());
-            if (samples.get(key).size() < 5) {
-              samples
-                  .get(key)
-                  .add(new OrderViews.HoldSample(row.id(), row.externalOrderId(), row.orderedAt()));
-            }
-          }
+                      new HoldGroupRow(
+                          rs.getString("hold_reason"),
+                          rs.getString("hold_detail"),
+                          rs.getLong("cnt")));
+          Map<String, List<OrderViews.HoldSample>> samplesByKey = new LinkedHashMap<>();
+          jdbc.query(
+              """
+              SELECT id, external_order_id, ordered_at, hold_reason, hold_detail FROM (
+                SELECT o.id, o.external_order_id, o.ordered_at, o.hold_reason,
+                  CASE WHEN """
+                  + bundleWithoutComponents
+                  + " THEN 'BUNDLE_WITHOUT_COMPONENTS' END AS hold_detail,"
+                  + """
+                  ROW_NUMBER() OVER (
+                    PARTITION BY o.hold_reason,
+                      CASE WHEN """
+                  + bundleWithoutComponents
+                  + " THEN 'BUNDLE_WITHOUT_COMPONENTS' END"
+                  + """
+                    ORDER BY o.ordered_at DESC
+                  ) AS rn
+                FROM sales_order o
+                WHERE o.hold_reason <> 'NONE'
+              ) ranked
+              WHERE rn <= 5
+              """,
+              (rs, rowNum) -> {
+                String key = holdGroupKey(rs.getString("hold_reason"), rs.getString("hold_detail"));
+                samplesByKey
+                    .computeIfAbsent(key, k -> new ArrayList<>())
+                    .add(
+                        new OrderViews.HoldSample(
+                            rs.getObject("id", UUID.class),
+                            rs.getString("external_order_id"),
+                            rs.getObject("ordered_at", java.time.OffsetDateTime.class)
+                                .toInstant()));
+                return null;
+              });
           List<OrderViews.HoldGroup> groups = new ArrayList<>();
-          for (Map.Entry<String, Long> entry : counts.entrySet()) {
-            String key = entry.getKey();
-            String holdReason = key;
-            String holdDetail = null;
-            if (key.endsWith(":BUNDLE_WITHOUT_COMPONENTS")) {
-              holdReason = "OUT_OF_STOCK";
-              holdDetail = "BUNDLE_WITHOUT_COMPONENTS";
-            }
+          for (HoldGroupRow row : counts) {
+            String key = holdGroupKey(row.holdReason(), row.holdDetail());
             groups.add(
                 new OrderViews.HoldGroup(
-                    holdReason, holdDetail, entry.getValue(), List.copyOf(samples.get(key))));
+                    row.holdReason(),
+                    row.holdDetail(),
+                    row.count(),
+                    List.copyOf(samplesByKey.getOrDefault(key, List.of()))));
           }
           return new OrderViews.HoldsView(groups);
         });
   }
 
-  private String groupKey(HoldRow row) {
-    if ("OUT_OF_STOCK".equals(row.holdReason())) {
-      if (isBundleWithoutComponents(row.id())) {
-        return "OUT_OF_STOCK:BUNDLE_WITHOUT_COMPONENTS";
-      }
-      return "OUT_OF_STOCK";
-    }
-    return row.holdReason();
+  private static String holdGroupKey(String holdReason, String holdDetail) {
+    return holdReason + "|" + (holdDetail == null ? "" : holdDetail);
   }
 
-  private boolean isBundleWithoutComponents(UUID orderId) {
-    List<UUID> skuIds =
-        lines.findByOrderId(orderId).stream()
-            .map(OrderLineRepository.OrderLine::skuId)
-            .filter(id -> id != null)
-            .toList();
-    if (skuIds.isEmpty()) {
-      return false;
+  private String resolveHoldDetail(UUID orderId, String holdReason) {
+    if (!"OUT_OF_STOCK".equals(holdReason)) {
+      return null;
     }
-    return !demandPlanner.componentlessBundleSkus(skuIds).isEmpty();
+    Boolean bundle =
+        jdbc.queryForObject(
+            """
+            SELECT EXISTS (
+              SELECT 1 FROM order_line ol
+              JOIN sku s ON s.id = ol.sku_id AND s.is_bundle = true
+              WHERE ol.order_id = ?
+              AND NOT EXISTS (
+                SELECT 1 FROM sku_bundle_component bc
+                WHERE bc.tenant_id = ol.tenant_id AND bc.bundle_sku_id = ol.sku_id
+              )
+            )
+            """,
+            Boolean.class,
+            orderId);
+    return Boolean.TRUE.equals(bundle) ? "BUNDLE_WITHOUT_COMPONENTS" : null;
   }
 
   private OrderViews.ListItem mapListItem(ResultSet rs, int rowNum) throws SQLException {
@@ -330,14 +393,14 @@ public class OrderQueryService {
     Map<UUID, List<OrderViews.ComponentView>> map = new HashMap<>();
     jdbc.query(
         """
-        SELECT sc.parent_sku_id, sc.component_sku_id, sc.qty, s.sku_code, s.name
-        FROM sku_component sc
-        JOIN sku s ON s.id = sc.component_sku_id
-        WHERE sc.parent_sku_id IN ("""
+        SELECT bc.bundle_sku_id, bc.component_sku_id, bc.qty, s.sku_code, s.name
+        FROM sku_bundle_component bc
+        JOIN sku s ON s.id = bc.component_sku_id
+        WHERE bc.bundle_sku_id IN ("""
             + placeholders
             + ")",
         (rs, rowNum) -> {
-          UUID parent = rs.getObject("parent_sku_id", UUID.class);
+          UUID parent = rs.getObject("bundle_sku_id", UUID.class);
           map.computeIfAbsent(parent, k -> new ArrayList<>())
               .add(
                   new OrderViews.ComponentView(
@@ -392,21 +455,16 @@ public class OrderQueryService {
   }
 
   private OrderViews.RecipientView loadRecipient(UUID orderId) {
-    return recipients
+    return maskedRecipients
         .find(orderId)
         .map(
-            stored -> {
-              if ("REDACTED".equals(stored.piiStatus())) {
-                return new OrderViews.RecipientView(
-                    "redacted", "redacted", stored.province(), stored.postcode(), "REDACTED");
-              }
-              return new OrderViews.RecipientView(
-                  OrderPiiMask.maskedName(stored.name()),
-                  OrderPiiMask.maskedPhone(stored.phoneLast4()),
-                  stored.province(),
-                  stored.postcode(),
-                  stored.piiStatus());
-            })
+            row ->
+                new OrderViews.RecipientView(
+                    row.nameMasked(),
+                    row.phoneMasked(),
+                    row.province(),
+                    row.postcode(),
+                    row.piiStatus()))
         .orElse(new OrderViews.RecipientView(null, null, null, null, "MISSING"));
   }
 
@@ -428,7 +486,7 @@ public class OrderQueryService {
 
   private record ChannelAccountRow(UUID id, String channel, String mode, String status) {}
 
-  private record HoldRow(UUID id, String externalOrderId, Instant orderedAt, String holdReason) {}
+  private record HoldGroupRow(String holdReason, String holdDetail, long count) {}
 
   sealed interface SearchClause permits PhoneSearch, TrackingSearch, ExternalSearch, NoSearch {}
 
@@ -547,9 +605,10 @@ public class OrderQueryService {
         where.append(" AND sh.tracking_no = ?");
         params.add(tracking.trackingNo());
       } else if (search instanceof ExternalSearch external) {
-        where.append(" AND (o.external_order_id = ? OR o.external_order_id LIKE ?)");
+        String escaped = Fields.likeEscape(external.query());
+        where.append(" AND (o.external_order_id = ? OR o.external_order_id LIKE ? ESCAPE '\\\\')");
         params.add(external.query());
-        params.add(external.query() + "%");
+        params.add(escaped + "%");
       }
       return new Filter(join.toString(), where.toString(), params);
     }

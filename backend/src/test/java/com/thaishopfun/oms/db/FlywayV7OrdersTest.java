@@ -147,6 +147,7 @@ class FlywayV7OrdersTest {
           .contains(
               "sales_order_channel_account_external_order_key",
               "sales_order_tenant_fulfillment_ordered_idx",
+              "sales_order_tenant_ordered_id_desc_idx",
               "sales_order_tenant_hold_idx",
               "sales_order_tenant_ship_by_idx",
               "order_recipient_tenant_phone_hash_idx",

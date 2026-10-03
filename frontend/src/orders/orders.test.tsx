@@ -16,6 +16,7 @@ const order: OrderDetail = {
   payment_status: 'PAID',
   fulfillment_status: 'READY_TO_PICK',
   hold_reason: 'NONE',
+  hold_detail: null,
   hold_note: null,
   payment_method: 'PREPAID',
   currency: 'THB',

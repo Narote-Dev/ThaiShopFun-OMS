@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
-import type { Page } from '../catalog/api'
 import {
   ORDER_PAGE_SIZE,
   ordersApi,
   ordersMessage,
   type OrderFilters,
   type OrderListItem,
+  type OrdersPage,
 } from './api'
 
 const TABS = ['', 'READY_TO_PICK', 'PICKING', 'PACKED', 'SHIPPED', 'DELIVERED', 'UNFULFILLED'] as const
@@ -25,7 +25,13 @@ function filtersFromHash(): OrderFilters {
   }
 }
 
-function writeHash(filters: OrderFilters, offset: number) {
+function cursorFromHash(): string | null {
+  const query = window.location.hash.includes('?') ? window.location.hash.split('?')[1] : ''
+  const value = new URLSearchParams(query).get('cursor')
+  return value && value.length > 0 ? value : null
+}
+
+function writeHash(filters: OrderFilters, cursor: string | null) {
   const params = new URLSearchParams()
   if (filters.fulfillment_status) params.set('fulfillment_status', filters.fulfillment_status)
   if (filters.order_status) params.set('order_status', filters.order_status)
@@ -34,21 +40,17 @@ function writeHash(filters: OrderFilters, offset: number) {
   if (filters.q) params.set('q', filters.q)
   if (filters.ordered_from) params.set('ordered_from', filters.ordered_from)
   if (filters.ordered_to) params.set('ordered_to', filters.ordered_to)
-  if (offset > 0) params.set('offset', String(offset))
+  if (cursor) params.set('cursor', cursor)
   const qs = params.toString()
   window.location.hash = qs ? `#/orders?${qs}` : '#/orders'
-}
-
-function initialOffset(): number {
-  const off = Number(new URLSearchParams(window.location.hash.split('?')[1] ?? '').get('offset') ?? 0)
-  return Number.isFinite(off) ? off : 0
 }
 
 export default function OrdersListPage() {
   const [filters, setFilters] = useState<OrderFilters>(filtersFromHash)
   const [applied, setApplied] = useState<OrderFilters>(filtersFromHash)
-  const [offset, setOffset] = useState(initialOffset)
-  const [page, setPage] = useState<Page<OrderListItem> | null>(null)
+  const [cursor, setCursor] = useState<string | null>(cursorFromHash)
+  const [backStack, setBackStack] = useState<string[]>([])
+  const [page, setPage] = useState<OrdersPage<OrderListItem> | null>(null)
   const [error, setError] = useState('')
 
   const tab = applied.fulfillment_status
@@ -56,7 +58,7 @@ export default function OrdersListPage() {
   useEffect(() => {
     let active = true
     ordersApi
-      .list(applied, ORDER_PAGE_SIZE, offset)
+      .list(applied, ORDER_PAGE_SIZE, cursor)
       .then((next) => {
         if (!active) return
         setPage(next)
@@ -68,25 +70,26 @@ export default function OrdersListPage() {
     return () => {
       active = false
     }
-  }, [applied, offset])
+  }, [applied, cursor])
 
   function selectTab(value: string) {
     const next = { ...applied, fulfillment_status: value }
     setFilters(next)
     setApplied(next)
-    setOffset(0)
-    writeHash(next, 0)
+    setCursor(null)
+    setBackStack([])
+    writeHash(next, null)
   }
 
   function apply(event: FormEvent) {
     event.preventDefault()
     setApplied(filters)
-    setOffset(0)
-    writeHash(filters, 0)
+    setCursor(null)
+    setBackStack([])
+    writeHash(filters, null)
   }
 
   const total = page?.total ?? 0
-  const last = Math.min(offset + ORDER_PAGE_SIZE, total)
   const tabLabel = useMemo(
     () => (value: string) => (value === '' ? 'All' : value.replaceAll('_', ' ')),
     [],
@@ -173,28 +176,29 @@ export default function OrdersListPage() {
           ))}
         </tbody>
       </table>
-      <p>
-        {total === 0 ? 'No orders' : `Showing ${offset + 1}–${last} of ${total}`}
-      </p>
+      <p>{total === 0 ? 'No orders' : `${page?.items.length ?? 0} on this page · ${total} matching`}</p>
       <div className="toolbar">
         <button
           type="button"
-          disabled={offset === 0}
+          disabled={backStack.length === 0}
           onClick={() => {
-            const next = Math.max(0, offset - ORDER_PAGE_SIZE)
-            setOffset(next)
-            writeHash(applied, next)
+            const stack = [...backStack]
+            const prev = stack.pop() ?? null
+            setBackStack(stack)
+            setCursor(prev)
+            writeHash(applied, prev)
           }}
         >
           Previous
         </button>
         <button
           type="button"
-          disabled={last >= total}
+          disabled={!page?.next_cursor}
           onClick={() => {
-            const next = offset + ORDER_PAGE_SIZE
-            setOffset(next)
-            writeHash(applied, next)
+            if (!page?.next_cursor) return
+            setBackStack([...backStack, cursor ?? ''])
+            setCursor(page.next_cursor)
+            writeHash(applied, page.next_cursor)
           }}
         >
           Next

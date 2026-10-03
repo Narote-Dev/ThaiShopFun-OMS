@@ -12,11 +12,15 @@ import com.thaishopfun.oms.order.SalesOrder;
 import com.thaishopfun.oms.order.SalesOrderRepository;
 import java.util.Map;
 import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
 @Service
 public class OrderCancelService {
+
+  private static final Logger log = LoggerFactory.getLogger(OrderCancelService.class);
 
   private final OrderAccess access;
   private final OrderTransactions tx;
@@ -43,29 +47,55 @@ public class OrderCancelService {
     this.jdbc = jdbc;
   }
 
+  record CancelPlan(
+      SalesOrder order,
+      AccountRow account,
+      ChannelAdapter adapter,
+      String idempotencyKey,
+      String reason) {}
+
   public OrderViews.CancelResponseView requestCancel(
       UUID orderId, OrderViews.CancelRequestBody body) {
     OrderAccess.Actor actor = access.requireOwnerOrAdmin();
-    SalesOrder order = orders.findById(orderId).orElseThrow(OrderApiException::notFound);
-    if ("CHANNEL_CANCEL_PENDING".equals(order.holdReason())) {
-      return new OrderViews.CancelResponseView(null, order.externalOrderId(), "PENDING");
-    }
-    validateCancellable(order);
-    AccountRow accountRow = loadAccount(order).orElseThrow(OrderApiException::notFound);
-    ChannelAdapter adapter = adapters.require(Channel.valueOf(accountRow.channel()));
-    if (!adapter.capabilities().supportsCancelRequest()) {
-      throw new OrderApiException(422, "CAPABILITY_UNSUPPORTED", "Cancel request is not supported");
-    }
     String reason = body == null || body.reason() == null ? "" : body.reason().trim();
     String idempotencyKey = "cancel-request:" + orderId;
+
+    CancelPlan plan =
+        tx.read(
+            () -> {
+              SalesOrder order = orders.findById(orderId).orElseThrow(OrderApiException::notFound);
+              if ("CHANNEL_CANCEL_PENDING".equals(order.holdReason())) {
+                return null;
+              }
+              validateCancellable(order);
+              AccountRow accountRow = loadAccount(order).orElseThrow(OrderApiException::notFound);
+              ChannelAdapter adapter = adapters.require(Channel.valueOf(accountRow.channel()));
+              if (!adapter.capabilities().supportsCancelRequest()) {
+                throw new OrderApiException(
+                    422, "CAPABILITY_UNSUPPORTED", "Cancel request is not supported");
+              }
+              return new CancelPlan(order, accountRow, adapter, idempotencyKey, reason);
+            });
+
+    if (plan == null) {
+      SalesOrder pending =
+          tx.read(() -> orders.findById(orderId).orElseThrow(OrderApiException::notFound));
+      return new OrderViews.CancelResponseView(null, pending.externalOrderId(), "PENDING");
+    }
+
     CancelResponse channelResponse;
     try {
       channelResponse =
-          adapter.requestCancel(
-              accountRow.ref(), order.externalOrderId(), idempotencyKey, new CancelRequest(reason));
+          plan.adapter()
+              .requestCancel(
+                  plan.account().ref(),
+                  plan.order().externalOrderId(),
+                  plan.idempotencyKey(),
+                  new CancelRequest(plan.reason()));
     } catch (UnsupportedCapabilityException ex) {
       throw new OrderApiException(422, "CAPABILITY_UNSUPPORTED", ex.getMessage());
     }
+
     return tx.write(
         () -> {
           SalesOrder fresh = orders.findById(orderId).orElseThrow(OrderApiException::notFound);
@@ -74,6 +104,15 @@ public class OrderCancelService {
                 channelResponse.cancelRequestId(),
                 fresh.externalOrderId(),
                 channelResponse.status());
+          }
+          try {
+            validateCancellable(fresh);
+          } catch (OrderApiException ex) {
+            log.info(
+                "cancel request ignored for order {} after channel call: {}",
+                orderId,
+                ex.getMessage());
+            throw ex;
           }
           String holdNote = previousHoldNote(fresh);
           stateMachine.applyHoldReason(
@@ -96,9 +135,6 @@ public class OrderCancelService {
     if ("SHIPPED".equals(order.fulfillmentStatus())
         || "DELIVERED".equals(order.fulfillmentStatus())) {
       throw OrderApiException.conflict("ORDER_NOT_CANCELLABLE", "Order is already shipped");
-    }
-    if ("CANCELLED".equals(order.orderStatus())) {
-      throw OrderApiException.conflict("ORDER_NOT_CANCELLABLE", "Order is cancelled");
     }
   }
 

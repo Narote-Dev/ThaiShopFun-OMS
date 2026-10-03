@@ -61,6 +61,7 @@ export default function OrderDetailPage({ id, me }: { id: string; me: Me }) {
       {order.hold_reason !== 'NONE' ? (
         <p role="status" className="banner">
           Hold: {order.hold_reason}
+          {order.hold_detail ? ` (${order.hold_detail})` : ''}
           {order.hold_note ? ` — ${order.hold_note}` : ''}
         </p>
       ) : null}
@@ -108,12 +109,48 @@ export default function OrderDetailPage({ id, me }: { id: string; me: Me }) {
                 </td>
                 <td>{line.name}</td>
                 <td>{line.qty}</td>
-                <td>{line.mapped ? 'Mapped' : 'Not mapped'}</td>
+                <td>
+                  {line.mapped ? 'Mapped' : 'Not mapped'}
+                  {line.bundle && line.components.length > 0 ? (
+                    <ul>
+                      {line.components.map((c) => (
+                        <li key={c.sku_id}>
+                          <a href={`#/catalog/skus/${c.sku_id}/history`}>{c.sku_code}</a> × {c.qty}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </td>
               </tr>
             ))}
           </tbody>
         </table>
       </section>
+      {order.reservations.length > 0 ? (
+        <section>
+          <h2>Reservations</h2>
+          <ul>
+            {order.reservations.map((r) => (
+              <li key={r.id}>
+                <a href={`#/catalog/skus/${r.sku_id}/history`}>{r.sku_code}</a> · {r.qty} @ {r.warehouse_code} (
+                {r.status})
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+      {order.shipments.length > 0 ? (
+        <section>
+          <h2>Shipments</h2>
+          <ul>
+            {order.shipments.map((s) => (
+              <li key={s.id}>
+                {s.tracking_no ?? '—'} · {s.carrier ?? '—'} · {s.status}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
       <section>
         <h2>Timeline</h2>
         <ol aria-label="Status timeline">

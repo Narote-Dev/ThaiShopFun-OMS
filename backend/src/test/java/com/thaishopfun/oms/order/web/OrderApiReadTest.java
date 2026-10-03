@@ -12,6 +12,7 @@ import com.thaishopfun.oms.order.OrderStatusHistoryRepository;
 import com.thaishopfun.oms.order.SalesOrder;
 import com.thaishopfun.oms.order.SalesOrderRepository;
 import java.util.UUID;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
@@ -28,16 +29,24 @@ class OrderApiReadTest extends OrderIntegrationTest {
 
   private OrderFixture fixture;
   private ListAppender<ILoggingEvent> logs;
+  private Logger root;
+  private Logger jdbc;
 
   @BeforeEach
   void setup() {
     fixture = new OrderFixture(orders, recipients, history, transactions);
     logs = new ListAppender<>();
     logs.start();
-    Logger root = (Logger) LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME);
+    root = (Logger) LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME);
     root.addAppender(logs);
-    Logger jdbc = (Logger) LoggerFactory.getLogger("org.springframework.jdbc");
+    jdbc = (Logger) LoggerFactory.getLogger("org.springframework.jdbc");
     jdbc.setLevel(Level.TRACE);
+  }
+
+  @AfterEach
+  void teardownLogs() {
+    root.detachAppender(logs);
+    jdbc.setLevel(Level.INFO);
   }
 
   @Test

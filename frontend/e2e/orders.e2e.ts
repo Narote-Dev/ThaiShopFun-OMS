@@ -5,24 +5,23 @@ test('owner browses orders, opens detail with masked phone, requests cancel', as
   await page.getByRole('link', { name: /^Active Shop/ }).click()
   await expect(page.getByRole('heading', { name: 'Active Shop' })).toBeVisible()
 
-  // Step 1: Seed demo orders after the shop is provisioned (idempotent).
   await request.post('http://127.0.0.1:8090/control/demo/orders-seed')
 
   await page.getByRole('link', { name: 'Orders', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Orders' })).toBeVisible()
 
-  const firstOrder = page.getByRole('table', { name: 'Orders' }).getByRole('link').first()
-  await expect(firstOrder).toBeVisible({ timeout: 120_000 })
-  const label = await firstOrder.textContent()
-  await firstOrder.click()
-  await expect(page.getByRole('heading', { name: `Order ${label}` })).toBeVisible()
+  await page.getByLabel('Search').fill('DEMO-COD')
+  await page.getByRole('button', { name: 'Apply' }).click()
+  const codLink = page.getByRole('link', { name: 'DEMO-COD' })
+  await expect(codLink).toBeVisible({ timeout: 120_000 })
+  await codLink.click()
+  await expect(page.getByRole('heading', { name: 'Order DEMO-COD' })).toBeVisible()
   await expect(page.getByText(/\*\*\*-\*\*\*-/)).toBeVisible()
 
   const cancel = page.getByRole('button', { name: 'Request cancel' })
-  if (await cancel.isVisible()) {
-    page.once('dialog', (dialog) => void dialog.accept())
-    await page.getByLabel('Reason').fill('E2E cancel')
-    await cancel.click()
-    await expect(page.getByText('CHANNEL_CANCEL_PENDING')).toBeVisible({ timeout: 30_000 })
-  }
+  await expect(cancel).toBeVisible()
+  page.once('dialog', (dialog) => void dialog.accept())
+  await page.getByLabel('Reason').fill('E2E cancel')
+  await cancel.click()
+  await expect(page.getByText('CHANNEL_CANCEL_PENDING')).toBeVisible({ timeout: 30_000 })
 })

@@ -7,6 +7,8 @@ import com.thaishopfun.oms.channel.exception.ChannelClientException;
 import com.thaishopfun.oms.channel.exception.ChannelRateLimitedException;
 import com.thaishopfun.oms.channel.exception.ChannelServerErrorException;
 import com.thaishopfun.oms.channel.exception.ChannelUnavailableException;
+import com.thaishopfun.oms.order.OrderOptimisticLockException;
+import com.thaishopfun.oms.order.OrderStateException;
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -30,6 +32,12 @@ class OrderErrorHandler {
   @ExceptionHandler(OrderApiException.class)
   ResponseEntity<Map<String, Object>> order(OrderApiException ex, HttpServletRequest request) {
     return body(request, ex.status(), ex.code(), ex.getMessage(), List.of());
+  }
+
+  @ExceptionHandler({OrderStateException.class, OrderOptimisticLockException.class})
+  ResponseEntity<Map<String, Object>> stateConflict(
+      RuntimeException ex, HttpServletRequest request) {
+    return body(request, 409, "ORDER_NOT_CANCELLABLE", ex.getMessage(), List.of());
   }
 
   @ExceptionHandler(CatalogApiException.class)

@@ -1,6 +1,4 @@
 import { apiRequest, ApiError } from '../api/client'
-import type { Page } from '../catalog/api'
-
 export type OrderListItem = {
   id: string
   external_order_id: string
@@ -40,6 +38,8 @@ export type OrderLine = {
   components: { sku_id: string; sku_code: string; name: string; qty: number }[]
 }
 
+export type OrdersPage<T> = { items: T[]; total: number; limit: number; next_cursor: string | null }
+
 export type OrderDetail = {
   id: string
   external_order_id: string
@@ -47,6 +47,7 @@ export type OrderDetail = {
   payment_status: string
   fulfillment_status: string
   hold_reason: string
+  hold_detail: string | null
   hold_note: string | null
   payment_method: string
   currency: string
@@ -105,10 +106,10 @@ export type HoldGroup = {
 export const ORDER_PAGE_SIZE = 25
 
 export const ordersApi = {
-  list(filters: OrderFilters, limit: number, offset: number): Promise<Page<OrderListItem>> {
+  list(filters: OrderFilters, limit: number, cursor: string | null): Promise<OrdersPage<OrderListItem>> {
     const params = new URLSearchParams()
     params.set('limit', String(limit))
-    params.set('offset', String(offset))
+    if (cursor) params.set('cursor', cursor)
     if (filters.fulfillment_status) params.set('fulfillment_status', filters.fulfillment_status)
     if (filters.order_status) params.set('order_status', filters.order_status)
     if (filters.payment_status) params.set('payment_status', filters.payment_status)

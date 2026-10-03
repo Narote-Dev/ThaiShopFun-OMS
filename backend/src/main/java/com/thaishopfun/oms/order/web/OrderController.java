@@ -35,7 +35,7 @@ class OrderController {
       @RequestParam(name = "ordered_to", required = false) String orderedTo,
       @RequestParam(name = "q", required = false) String q,
       @RequestParam(name = "limit", required = false) Integer limit,
-      @RequestParam(name = "offset", required = false) Integer offset) {
+      @RequestParam(name = "cursor", required = false) String cursor) {
     return ok(
         queries.list(
             orderStatus,
@@ -48,7 +48,7 @@ class OrderController {
             orderedTo,
             q,
             limit,
-            offset));
+            cursor));
   }
 
   @GetMapping("/holds")

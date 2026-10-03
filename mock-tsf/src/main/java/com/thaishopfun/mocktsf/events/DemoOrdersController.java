@@ -23,7 +23,7 @@ import tools.jackson.databind.node.ObjectNode;
  * Local/e2e demo orders for shop_active. Idempotent external ids (DEMO-*). Not part of the TSF
  * contract.
  */
-@Profile("!prod")
+@Profile({"local", "e2e"})
 @RestController
 @RequestMapping("/control/demo")
 public class DemoOrdersController {
@@ -45,6 +45,14 @@ public class DemoOrdersController {
   public ResponseEntity<Map<String, Object>> seed() throws IOException {
     if (shops.find(SHOP).isEmpty()) {
       throw new IllegalStateException("shop_active is not in the seed");
+    }
+    OmsCaller.CallResult catalog = oms.postDemoOrderCatalog();
+    if (!catalog.reached() || catalog.status() >= 500) {
+      throw new IllegalStateException(
+          "demo order catalog setup failed: status="
+              + catalog.status()
+              + " body="
+              + catalog.body());
     }
     List<Map<String, Object>> sent = new ArrayList<>();
     sent.add(send(created("DEMO-READY", "L-demo-ready", "PREPAID", 1)));

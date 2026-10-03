@@ -33,6 +33,10 @@ public class OmsEndpoint {
     return base.resolve("/internal/v1/inventory/reservations/" + reservationId);
   }
 
+  public URI demoOrderCatalog() {
+    return base.resolve("/control/demo/order-catalog");
+  }
+
   private static String strip(String url) {
     if (url == null || url.isBlank()) {
       throw new IllegalStateException("mock.oms-base-url is required");
