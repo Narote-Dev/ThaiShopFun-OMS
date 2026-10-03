@@ -264,6 +264,11 @@ public final class StockFixture {
         });
   }
 
+  /** TSF account whose {@code external_shop_id} matches the tenant {@code tsf_shop_id}. */
+  public UUID tsfChannelAccount(Shop shop, String mode, String status) {
+    return channelAccount(shop, mode, status);
+  }
+
   public void channelListing(
       Shop shop, UUID channelAccountId, String externalSkuId, UUID skuId, boolean stockControl) {
     channelListing(shop, channelAccountId, externalSkuId, skuId, stockControl, true);

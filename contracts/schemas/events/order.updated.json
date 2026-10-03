@@ -11,7 +11,54 @@
       "minLength": 1
     },
     "note": {
-      "type": "string"
+      "type": "string",
+      "description": "Seller note from TSF. OMS intake logs and does not persist this field (deviation documented in T12 PR)."
+    },
+    "recipient": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "phone",
+        "address"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "phone": {
+          "type": "string"
+        },
+        "address": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "line1",
+            "district",
+            "province",
+            "postcode"
+          ],
+          "properties": {
+            "line1": {
+              "type": "string",
+              "minLength": 1
+            },
+            "district": {
+              "type": "string",
+              "minLength": 1
+            },
+            "province": {
+              "type": "string",
+              "minLength": 1
+            },
+            "postcode": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
     }
   }
 }

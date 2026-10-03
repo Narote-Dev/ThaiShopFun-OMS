@@ -17,6 +17,8 @@ public class InboxProperties {
   private Duration handlerTimeout = Duration.ofSeconds(30);
   private Duration suspendDefer = Duration.ofMinutes(5);
   private double jitterRatio = 0.2;
+  private Duration deferDelay = Duration.ofSeconds(30);
+  private Duration maxDefer = Duration.ofHours(24);
 
   public List<String> secrets() {
     // Step 1: Split on comma so a rotation window can list the current key and the previous one.
@@ -95,5 +97,21 @@ public class InboxProperties {
 
   public void setJitterRatio(double jitterRatio) {
     this.jitterRatio = jitterRatio;
+  }
+
+  public Duration getDeferDelay() {
+    return deferDelay;
+  }
+
+  public void setDeferDelay(Duration deferDelay) {
+    this.deferDelay = deferDelay;
+  }
+
+  public Duration getMaxDefer() {
+    return maxDefer;
+  }
+
+  public void setMaxDefer(Duration maxDefer) {
+    this.maxDefer = maxDefer;
   }
 }

@@ -1,5 +1,10 @@
 package com.thaishopfun.oms.inbox;
 
+import com.thaishopfun.oms.order.OrderOptimisticLockException;
+import com.thaishopfun.oms.order.ReconciliationIssueRepository;
+import com.thaishopfun.oms.stock.StockBusyException;
+import com.thaishopfun.oms.stock.StockConflictException;
+import com.thaishopfun.oms.stock.StockRetry;
 import com.thaishopfun.oms.tenant.TenantContext;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -55,7 +60,7 @@ public class InboxWorker {
 
   private static final Logger log = LoggerFactory.getLogger(InboxWorker.class);
 
-  private static final String LAST_PROCESSED_VERSION =
+  private static final String LAST_PROCESSED_AGGREGATE =
       """
       SELECT MAX(aggregate_version)
       FROM inbox_event
@@ -69,9 +74,25 @@ public class InboxWorker {
       """
           .formatted(InboxEntitlementPolicy.entVerOrderedTypeLiterals());
 
+  private static final String LAST_PROCESSED_FOR_EVENT_TYPE =
+      """
+      SELECT MAX(aggregate_version)
+      FROM inbox_event
+      WHERE tenant_id = ?
+        AND source = ?
+        AND aggregate_id = ?
+        AND status = 'PROCESSED'
+        AND aggregate_version > 0
+        AND id <> ?
+        AND event_type = ?
+        AND event_type NOT IN (%s)
+      """
+          .formatted(InboxEntitlementPolicy.entVerOrderedTypeLiterals());
+
   private final InboxProperties properties;
   private final InboxHandlerRegistry registry;
   private final InboxEntitlementPolicy policy;
+  private final ReconciliationIssueRepository reconciliation;
   private final JdbcTemplate jdbc;
   private final TransactionTemplate claimTx;
   private final TransactionTemplate applyTx;
@@ -84,6 +105,7 @@ public class InboxWorker {
       InboxProperties properties,
       InboxHandlerRegistry registry,
       InboxEntitlementPolicy policy,
+      ReconciliationIssueRepository reconciliation,
       JdbcTemplate jdbc,
       PlatformTransactionManager transactions,
       JsonMapper json,
@@ -91,6 +113,7 @@ public class InboxWorker {
     this.properties = properties;
     this.registry = registry;
     this.policy = policy;
+    this.reconciliation = reconciliation;
     this.jdbc = jdbc;
     this.claimTx = new TransactionTemplate(transactions);
     // Step 1: TransactionTemplate takes whole seconds and truncates. Ceil so 1.1s is 2s, not 1s.
@@ -159,21 +182,80 @@ public class InboxWorker {
   private void processClaim(Claimed claimed) {
     TenantContext.set(claimed.tenantId(), null);
     try {
-      try {
-        applyTx.executeWithoutResult(
-            status -> {
-              // Step 1: Kill a stuck statement well before the lease expires.
-              jdbc.execute(
-                  "SET LOCAL statement_timeout = " + properties.getHandlerTimeout().toMillis());
-              apply(claimed);
-            });
-      } catch (RuntimeException ex) {
-        // Step 2: The handler transaction is gone. Record FAILED or DEAD on its own.
-        recordFailure(claimed, ex);
+      int attempts = 0;
+      while (true) {
+        try {
+          applyTx.executeWithoutResult(
+              status -> {
+                jdbc.execute(
+                    "SET LOCAL statement_timeout = " + properties.getHandlerTimeout().toMillis());
+                apply(claimed);
+              });
+          break;
+        } catch (InboxDeferException defer) {
+          handleDefer(claimed, defer);
+          break;
+        } catch (RuntimeException ex) {
+          if (attempts < 3 && retryableTransaction(ex)) {
+            attempts++;
+            continue;
+          }
+          recordFailure(claimed, ex);
+          break;
+        }
       }
     } finally {
       TenantContext.clear();
     }
+  }
+
+  private void handleDefer(Claimed claimed, InboxDeferException defer) {
+    failureTx.executeWithoutResult(
+        status -> {
+          InboxRow row = lock(claimed.id());
+          if (row == null) {
+            return;
+          }
+          if (!"RECEIVED".equals(row.status()) && !"FAILED".equals(row.status())) {
+            return;
+          }
+          if (!leaseMatches(row.nextAttemptAt(), claimed.leaseUntil())) {
+            return;
+          }
+          Instant received = row.receivedAt();
+          if (received != null
+              && received.isBefore(
+                  jdbc.queryForObject("SELECT now()", OffsetDateTime.class)
+                      .toInstant()
+                      .minus(properties.getMaxDefer()))) {
+            upsertOrderEventWithoutOrder(row);
+            recordFailure(
+                new Claimed(row.id(), row.tenantId(), claimed.leaseUntil()),
+                new RuntimeException("ORDER_EVENT_WITHOUT_ORDER"));
+            return;
+          }
+          pushBack(row, defer.delay() == null ? properties.getDeferDelay() : defer.delay());
+        });
+  }
+
+  private void upsertOrderEventWithoutOrder(InboxRow row) {
+    TenantContext.set(row.tenantId(), null);
+    try {
+      String externalOrderId = row.payload().path("data").path("order_id").asString(null);
+      reconciliation.upsertOpenWithoutOrder(row.id(), "ORDER_EVENT_WITHOUT_ORDER", externalOrderId);
+    } finally {
+      TenantContext.clear();
+    }
+  }
+
+  private static boolean retryableTransaction(RuntimeException ex) {
+    if (ex instanceof StockConflictException || ex instanceof OrderOptimisticLockException) {
+      return true;
+    }
+    if (ex instanceof StockBusyException) {
+      return true;
+    }
+    return StockRetry.classify(ex) != null;
   }
 
   private void apply(Claimed claimed) {
@@ -214,20 +296,21 @@ public class InboxWorker {
     // Step 5: One aggregate at a time, then drop a version that is already applied.
     // Events ordered by ent_ver are not part of this history, and do not use it.
     lockAggregate(row);
-    Long lastVersion = lastProcessedVersion(row);
+    Long lastForStale = lastProcessedVersionForStale(row);
+    Long lastAggregate = lastProcessedVersionAggregate(row);
     boolean entVerOrdered = InboxEntitlementPolicy.ordersByEntVer(row.eventType());
     boolean stale =
         !entVerOrdered
             && row.aggregateVersion() > 0
-            && lastVersion != null
-            && row.aggregateVersion() <= lastVersion;
+            && lastForStale != null
+            && row.aggregateVersion() <= lastForStale;
     // TODO: Handlers must apply the full snapshot in data until REST refetch exists (T10).
     // gap=true means aggregate_version skipped at least one version. Do not assume a delta.
     boolean gap =
         !stale
             && row.aggregateVersion() > 0
-            && lastVersion != null
-            && row.aggregateVersion() > lastVersion + 1;
+            && lastAggregate != null
+            && row.aggregateVersion() > lastAggregate + 1;
     if (!stale) {
       // Step 6: Handler writes and PROCESSED commit together. A throw rolls both back.
       handler.handle(row.message(gap));
@@ -240,7 +323,7 @@ public class InboxWorker {
         """
         SELECT e.id, e.tenant_id, e.source, e.event_id, e.event_type, e.aggregate_id,
                e.aggregate_version, e.payload::text AS payload, e.status, e.attempts,
-               e.next_attempt_at, t.entitlement_status, t.entitlement_expires_at
+               e.next_attempt_at, e.received_at, t.entitlement_status, t.entitlement_expires_at
         FROM inbox_event AS e
         JOIN tenant AS t ON t.id = e.tenant_id
         WHERE e.id = ?
@@ -251,6 +334,7 @@ public class InboxWorker {
             return null;
           }
           OffsetDateTime expires = rs.getObject("entitlement_expires_at", OffsetDateTime.class);
+          OffsetDateTime receivedAt = rs.getObject("received_at", OffsetDateTime.class);
           return new InboxRow(
               rs.getObject("id", UUID.class),
               rs.getObject("tenant_id", UUID.class),
@@ -263,6 +347,7 @@ public class InboxWorker {
               rs.getString("status"),
               rs.getInt("attempts"),
               rs.getObject("next_attempt_at", OffsetDateTime.class),
+              receivedAt == null ? null : receivedAt.toInstant(),
               rs.getString("entitlement_status"),
               expires == null ? null : expires.toInstant());
         },
@@ -280,10 +365,23 @@ public class InboxWorker {
         key);
   }
 
-  private Long lastProcessedVersion(InboxRow row) {
-    // Step 1: Skip ent_ver-ordered types so a membership version cannot hide a business event.
+  private Long lastProcessedVersionForStale(InboxRow row) {
+    if (InboxAggregateVersionPolicy.versionByEventType(row.eventType())) {
+      return jdbc.queryForObject(
+          LAST_PROCESSED_FOR_EVENT_TYPE,
+          Long.class,
+          row.tenantId(),
+          row.source(),
+          row.aggregateId(),
+          row.id(),
+          row.eventType());
+    }
+    return lastProcessedVersionAggregate(row);
+  }
+
+  private Long lastProcessedVersionAggregate(InboxRow row) {
     return jdbc.queryForObject(
-        LAST_PROCESSED_VERSION,
+        LAST_PROCESSED_AGGREGATE,
         Long.class,
         row.tenantId(),
         row.source(),
@@ -450,6 +548,7 @@ public class InboxWorker {
       String status,
       int attempts,
       OffsetDateTime nextAttemptAt,
+      Instant receivedAt,
       String entitlementStatus,
       Instant expiresAt) {
 

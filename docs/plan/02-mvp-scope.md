@@ -39,6 +39,8 @@
 | **CONTROL** | ✅ | ✅ | ✅ เฉพาะ SKU ใน allowlist (`stock_control=true`) | `enforced=true` เฉพาะ SKU allowlist |
 | **ACTIVE** | ✅ | ✅ | ✅ ทุก SKU + fulfillment ผ่าน OMS | `enforced=true` ทั้งหมด |
 
+**PO decision 2026-10-01 (T12 intake):** โหมด OBSERVE, ช่องทาง DISCONNECTED และ tenant ที่ OMS ไม่คุมสต๊อก — ไม่บังคับ ORDER reservation ใน guard `READY_TO_PICK`; COD/PAID ไป `READY_TO_PICK` ได้เมื่อ `hold_reason=NONE` แม้ไม่มีแถว `stock_reservation`.
+
 **เกณฑ์เลื่อนขั้น:** SHADOW → CONTROL เมื่อ diff (OMS vs ของจริง) < 0.5% ติดกัน 7 วัน และไม่มี DEAD event; CONTROL → ACTIVE เมื่อ allowlist ≥ 50% ของ SKU 7 วันไม่มี business oversell
 
 **Emergency controls** (OWNER ของร้าน + platform admin, ลง audit ทุกครั้ง)

@@ -53,7 +53,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
-@ActiveProfiles("test")
+@ActiveProfiles({"test", "inbox-api-test"})
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @Import(InboxApiTest.Handlers.class)
 class InboxApiTest {
@@ -71,6 +71,7 @@ class InboxApiTest {
     registry.add("oms.inbox.jitter-ratio", () -> "0");
     registry.add("oms.inbox.suspend-defer", () -> "1h");
     registry.add("spring.datasource.hikari.maximum-pool-size", () -> "20");
+    registry.add("oms.order-intake.enabled", () -> "false");
   }
 
   @LocalServerPort private int port;
@@ -89,6 +90,18 @@ class InboxApiTest {
   @Qualifier("orderFail")
   private EffectHandler orderFail;
 
+  @Autowired
+  @Qualifier("orderPaid")
+  private EffectHandler orderPaid;
+
+  @Autowired
+  @Qualifier("orderUpdated")
+  private EffectHandler orderUpdated;
+
+  @Autowired
+  @Qualifier("listingChanged")
+  private EffectHandler listingChanged;
+
   private String serviceToken;
 
   @BeforeEach
@@ -105,6 +118,9 @@ class InboxApiTest {
             List.of("oms"));
     orderCreated.reset();
     orderFail.reset();
+    orderPaid.reset();
+    orderUpdated.reset();
+    listingChanged.reset();
     try (Connection admin = AuthTestSupport.admin();
         var statement = admin.createStatement()) {
       statement.execute("TRUNCATE TABLE inbox_event");
@@ -348,7 +364,15 @@ class InboxApiTest {
     try {
       CountDownLatch start = new CountDownLatch(1);
       Future<Integer> left = pool.submit(() -> awaitThenProcessOne(start));
-      Future<Integer> right = pool.submit(() -> awaitThenProcessOne(start));
+      Future<Integer> right =
+          pool.submit(
+              () -> {
+                if (!start.await(5, TimeUnit.SECONDS)) {
+                  throw new IllegalStateException("start timed out");
+                }
+                assertThat(orderCreated.entered.await(10, TimeUnit.SECONDS)).isTrue();
+                return worker.processAvailable(1);
+              });
       start.countDown();
       assertThat(orderCreated.entered.await(10, TimeUnit.SECONDS)).isTrue();
       assertThat(awaitAdvisoryWaiter()).isTrue();
@@ -605,6 +629,53 @@ class InboxApiTest {
     worker.processAvailable();
     assertThat(orderCreated.calls.get()).isEqualTo(2);
     assertThat(orderCreated.gaps).containsExactly(false, true);
+  }
+
+  @Test
+  void orderUpdatedThenLowerPaidVersionStillRunsHandler() throws Exception {
+    Shop shop = seed("ACTIVE", future(), 1);
+    String aggregate = "ord-delta-" + UUID.randomUUID();
+    postBusinessEvent(shop, id(), aggregate, "order.updated", 3);
+    worker.processAvailable();
+    assertThat(orderUpdated.calls.get()).isEqualTo(1);
+    orderUpdated.reset();
+    postBusinessEvent(shop, id(), aggregate, "order.paid", 2);
+    worker.processAvailable();
+    assertThat(orderPaid.calls.get()).isEqualTo(1);
+  }
+
+  @Test
+  void nonOrderEventUsesAggregateWideStaleSkipping() throws Exception {
+    Shop shop = seed("ACTIVE", future(), 1);
+    String aggregate = "agg-wide-" + UUID.randomUUID();
+    postOrder(shop, id(), aggregate, 5);
+    worker.processAvailable();
+    assertThat(orderCreated.calls.get()).isEqualTo(1);
+    orderCreated.reset();
+    listingChanged.reset();
+    postBusinessEvent(shop, id(), aggregate, "listing.changed", 3);
+    worker.processAvailable();
+    assertThat(listingChanged.calls.get()).isZero();
+    assertThat(
+            count(
+                "SELECT count(*) FROM inbox_event WHERE aggregate_id = ? AND event_type = 'listing.changed' AND status = 'PROCESSED'",
+                aggregate))
+        .isEqualTo(1);
+  }
+
+  @Test
+  void gapDetectionUsesAggregateWideMaxAcrossOrderTypes() throws Exception {
+    Shop shop = seed("ACTIVE", future(), 1);
+    String aggregate = "agg-gap-" + UUID.randomUUID();
+    postBusinessEvent(shop, id(), aggregate, "order.updated", 1);
+    worker.processAvailable();
+    orderUpdated.reset();
+    orderPaid.reset();
+    String paidId = id();
+    postBusinessEvent(shop, paidId, aggregate, "order.paid", 3);
+    worker.processAvailable();
+    assertThat(orderPaid.calls.get()).isEqualTo(1);
+    assertThat(orderPaid.gaps).containsExactly(true);
   }
 
   @Test
@@ -890,6 +961,14 @@ class InboxApiTest {
   private void postOrder(Shop shop, String eventId, String aggregateId, long version)
       throws Exception {
     byte[] body = envelope(eventId, "order.created", shop.shopId(), aggregateId, version, Map.of());
+    assertThat(post(body, eventId, sign(CURRENT, now(), body), serviceToken).status())
+        .isEqualTo(202);
+  }
+
+  private void postBusinessEvent(
+      Shop shop, String eventId, String aggregateId, String eventType, long version)
+      throws Exception {
+    byte[] body = envelope(eventId, eventType, shop.shopId(), aggregateId, version, Map.of());
     assertThat(post(body, eventId, sign(CURRENT, now(), body), serviceToken).status())
         .isEqualTo(202);
   }
@@ -1187,6 +1266,21 @@ class InboxApiTest {
     @Bean(name = "orderFail")
     EffectHandler orderFail(JdbcTemplate jdbc) {
       return new EffectHandler("order.fail", jdbc, true);
+    }
+
+    @Bean(name = "orderPaid")
+    EffectHandler orderPaid(JdbcTemplate jdbc) {
+      return new EffectHandler("order.paid", jdbc, false);
+    }
+
+    @Bean(name = "orderUpdated")
+    EffectHandler orderUpdated(JdbcTemplate jdbc) {
+      return new EffectHandler("order.updated", jdbc, false);
+    }
+
+    @Bean(name = "listingChanged")
+    EffectHandler listingChanged(JdbcTemplate jdbc) {
+      return new EffectHandler("listing.changed", jdbc, false);
     }
   }
 

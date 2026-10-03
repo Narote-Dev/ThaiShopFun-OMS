@@ -84,7 +84,7 @@ Idempotency-Key: chk_20260929_88121
 - `checkout_id` = 1 ครั้งที่กดสั่ง; ส่งซ้ำ body เดิม = ได้ผลเดิม, body ต่าง = `409 IDEMPOTENCY_CONFLICT`
 - `enforced=false` (ระดับ item หรือทั้งก้อน) เมื่อ: mode `SHADOW`, SKU ไม่อยู่ใน allowlist ของ `CONTROL`, listing ยังไม่ map, channel `DISCONNECTED` → TSF ใช้สต๊อกตัวเองตัดสิน
 - `DELETE /internal/v1/inventory/reservations/{reservation_id}` → คืนทันที (ผู้ซื้อทิ้ง checkout) idempotent `204`
-- CHECKOUT TTL เริ่ม 15 นาที; `order.created` ต้องมี `reservation_id` → OMS โอน owner เป็น `ORDER`
+- CHECKOUT TTL เริ่ม 15 นาที; `order.created` ต้องมี `reservation_id` → OMS โอน owner เป็น `ORDER`. TSF ต้องส่ง `reservation_id` จาก checkout response ใน `order.created` และ DELETE เมื่อทิ้ง checkout ทุกครั้งที่มี item ใด `enforced=true` (รวม CONTROL แบบ mixed ที่ top-level `enforced=false`); เมื่อไม่มี item enforced ให้ส่ง `reservation_id` ที่ไม่ได้ hold อะไร (หรือ id ที่ OMS มองว่าไม่มีกลุ่มให้ adopt) และ OMS จะจอง mapped lines ใหม่
 - `order.created` มาหลังหมดอายุ → OMS พยายามจองใหม่ ไม่พอ = `hold_reason=OUT_OF_STOCK` (นับ business oversell)
 - เป้า latency (NFR): p95 < 150 ms, p99 < 300 ms; TSF ตั้ง timeout 800 ms แล้วทำตาม fallback policy
 
@@ -118,6 +118,9 @@ X-Signature: t=1790665202,v1=5f2b...e9
 - `\u0000` ใน JSON = `400`
 - event type ที่ยังไม่มี handler: คง `RECEIVED`, เลื่อน 1 ชม. โดยไม่นับ attempt (replay ได้เมื่อมี handler)
 - `aggregate_version` ≤ ที่เก็บของ event ธุรกิจ = ข้าม. แถว `membership.changed` ไม่เข้า history นั้น และไม่ใช้มัน (ลำดับอยู่ที่ `ent_ver`). มี gap = handler ใช้ snapshot เต็มจนกว่าจะมี REST refetch (T10)
+- **Order delta versioning (technical, T12 intake):** `order.created`, `order.paid`, `order.cancelled`, `order.updated` เปรียบเทียบ stale แยกตาม `event_type` (paid v2 ยัง apply ได้หลัง updated v3 บน aggregate เดียวกัน). event type อื่น (`listing.changed`, `shipment.status_changed`, …) ยังใช้ `MAX(aggregate_version)` ข้าม type บน aggregate เดียวกัน. **Gap detection** ยังใช้ `MAX` รวมทุก type (ยกเว้น `membership.changed` / ent_ver) — ข้าม version อย่างน้อย 1 ยังตั้ง `gap=true`
+- **PO decision 2026-10-01 (T12 intake / READY_TO_PICK):** โหมด OBSERVE, ช่องทาง DISCONNECTED และ tenant ที่ OMS ไม่บังคับสต๊อก — guard `READY_TO_PICK` ไม่บังคับ ORDER reservation; COD/PAID ไป `READY_TO_PICK` ได้เมื่อ `hold_reason=NONE` แม้ไม่มีแถว `stock_reservation`
+- **SHADOW ที่ checkout vs intake:** checkout reserve ตอบ `enforced=false` (TSF ใช้สต๊อกตัวเอง). **ที่ intake** OMS ยังพยายามจอง mapped lines ตาม engine; ไม่พอ → `hold_reason=OUT_OF_STOCK` + นับ business oversell (เฉพาะ mode ที่ enforce) และ mode SHADOW ยังเขียน `shadow_diff` เปรียบเทียบ
 - event ที่ aggregate เดียวกัน ประมวลผลทีละตัว (`pg_advisory_xact_lock(aggregate)`)
 - **GRACE:** event ขาเข้ายังประมวลผลระหว่าง `GRACE` ที่ยังไม่หมดอายุ (ออเดอร์ไม่หาย). การเขียนของ user ยังถูกบล็อก. `SUSPENDED` หรือหมดอายุเลื่อน event ธุรกิจไว้ (`last_error = ENTITLEMENT_DEFERRED`) ไม่ลบ และไม่ทำให้ `DEAD` แค่เพราะร้านถูกระงับ. กลับมา `ACTIVE`/`GRACE` แล้วปลุกเฉพาะแถวที่มี marker นั้น (`next_attempt_at = now()`). backoff ของ `FAILED` ปกติไม่ถูกปลุก
 - `claim_inbox_batch` เรียง `COALESCE(next_attempt_at, received_at)` จากเก่าไปใหม่ (index `inbox_event_due_idx`) เพื่อไม่ให้ retry ที่ถึงเวลาถูกแซงโดย event ใหม่ตลอด. lease ที่ส่งคือค่าที่ตั้ง ปัดขึ้นเป็นมิลลิวินาที (`InboxLimits.claimedLease`) ไม่ให้สั้นกว่าที่ guard ตรวจ. สูงสุด 1 ชั่วโมง (`InboxLimits.MAX_LEASE`) เท่ากับที่ฟังก์ชันปฏิเสธ. ค่าที่ยาวกว่านั้นทำให้ process ไม่บูต
