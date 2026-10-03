@@ -22,6 +22,7 @@ class ChannelListingApiTest extends OrderIntegrationTest {
   CatalogHttp.Shop shop;
   UUID accountId;
   UUID skuId;
+  UUID listingId;
 
   @BeforeEach
   void seed() throws Exception {
@@ -35,7 +36,7 @@ class ChannelListingApiTest extends OrderIntegrationTest {
     accountId = OrderFixture.shopFor(shop).channelAccountId();
     UUID productId = UuidV7.generate();
     skuId = UuidV7.generate();
-    UUID listing = UuidV7.generate();
+    listingId = UuidV7.generate();
     try (Connection admin = AuthTestSupport.admin()) {
       try (PreparedStatement product =
           admin.prepareStatement(
@@ -62,7 +63,7 @@ class ChannelListingApiTest extends OrderIntegrationTest {
                 id, tenant_id, channel_account_id, external_sku_id, seller_sku, name, stock_control
               ) VALUES (?, ?, ?, 'L-api', 'API-SKU', 'API listing', true)
               """)) {
-        statement.setObject(1, listing);
+        statement.setObject(1, listingId);
         statement.setObject(2, shop.tenantId());
         statement.setObject(3, accountId);
         statement.executeUpdate();
@@ -72,9 +73,7 @@ class ChannelListingApiTest extends OrderIntegrationTest {
 
   @Test
   void staffCannotPutDeleteMappingOrSync() throws Exception {
-    UUID listing =
-        jdbc.queryForObject(
-            "SELECT id FROM channel_listing WHERE external_sku_id = 'L-api'", UUID.class);
+    UUID listing = listingId;
     UUID sku = this.skuId;
     String staff = http.catalog().member(shop, "STAFF");
     assertThat(

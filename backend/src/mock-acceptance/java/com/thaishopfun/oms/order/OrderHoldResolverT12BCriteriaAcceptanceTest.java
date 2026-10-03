@@ -8,6 +8,7 @@ import ch.qos.logback.core.read.ListAppender;
 import com.thaishopfun.mocktsf.MockTsfApplication;
 import com.thaishopfun.mocktsf.OmsEndpoint;
 import com.thaishopfun.mocktsf.SeedData;
+import com.thaishopfun.mocktsf.SeedData.ShopUser;
 import com.thaishopfun.mocktsf.idp.TokenIssuer;
 import com.thaishopfun.oms.auth.AuthTestSupport;
 import com.thaishopfun.oms.auth.UuidV7;
@@ -195,8 +196,7 @@ class OrderHoldResolverT12BCriteriaAcceptanceTest {
 
   @Test
   void ac02_autoMapOnListingSync() throws Exception {
-    StockFixture.Shop shop = fixture.shop("ACTIVE");
-    alignTsfShop(shop, "shop_active");
+    StockFixture.Shop shop = ensureShopActive();
     String shopId = "shop_active";
     UUID account = fixture.channelAccount(shop, shopId, "ACTIVE", "CONNECTED");
     UUID sku = fixture.sku(shop, 5);
@@ -453,8 +453,7 @@ class OrderHoldResolverT12BCriteriaAcceptanceTest {
 
   @Test
   void ac09_syncFetchesAcrossTwoPages() throws Exception {
-    StockFixture.Shop shop = fixture.shop("ACTIVE");
-    alignTsfShop(shop, "shop_active");
+    StockFixture.Shop shop = ensureShopActive();
     String shopId = "shop_active";
     UUID account = fixture.channelAccount(shop, shopId, "ACTIVE", "CONNECTED");
 
@@ -678,8 +677,7 @@ class OrderHoldResolverT12BCriteriaAcceptanceTest {
 
   @Test
   void ac14_syncChannelError502() throws Exception {
-    StockFixture.Shop shop = fixture.shop("ACTIVE");
-    alignTsfShop(shop, "shop_active");
+    StockFixture.Shop shop = ensureShopActive();
     String shopId = "shop_active";
     UUID account = fixture.channelAccount(shop, shopId, "ACTIVE", "CONNECTED");
     armFault("GET", "/internal/v1/shops/shop_active/listings", 503, 1);
@@ -907,27 +905,54 @@ class OrderHoldResolverT12BCriteriaAcceptanceTest {
     return org.assertj.core.groups.Tuple.tuple(dimension, from, to, reason, actor);
   }
 
-  private void alignTsfShop(StockFixture.Shop shop, String tsfShopId) {
-    try (Connection admin = AuthTestSupport.admin()) {
-      try (var relocate =
-          admin.prepareStatement(
-              """
-              UPDATE tenant SET tsf_shop_id = 'relocated-' || id::text
-              WHERE tsf_shop_id = ? AND id <> ?
-              """)) {
-        relocate.setString(1, tsfShopId);
-        relocate.setObject(2, shop.tenant());
-        relocate.executeUpdate();
-      }
-      try (var assign =
-          admin.prepareStatement("UPDATE tenant SET tsf_shop_id = ? WHERE id = ?")) {
-        assign.setString(1, tsfShopId);
-        assign.setObject(2, shop.tenant());
-        assign.executeUpdate();
-      }
-    } catch (Exception ex) {
-      throw new IllegalStateException(ex);
-    }
+  private StockFixture.Shop ensureShopActive() throws Exception {
+    SeedData seeds = OrderIntakeMockRuntime.mock().getBean(SeedData.class);
+    TokenIssuer issuer = OrderIntakeMockRuntime.mock().getBean(TokenIssuer.class);
+    ShopUser owner = seeds.find("owner-active").orElseThrow();
+    String token = issuer.userAccessToken(owner);
+    HttpResponse<String> me =
+        HTTP.send(
+            HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + "/api/v1/me"))
+                .header("Authorization", "Bearer " + token)
+                .GET()
+                .build(),
+            HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+    assertThat(me.statusCode()).isEqualTo(200);
+    UUID tenantId = UUID.fromString(JSON.readTree(me.body()).path("tenant").path("id").asString());
+    return shopShell(tenantId);
+  }
+
+  private StockFixture.Shop shopShell(UUID tenantId) {
+    return fixture.inTenant(
+        tenantId,
+        () -> {
+          List<UUID> products =
+              jdbc.query(
+                  "SELECT id FROM product LIMIT 1", (rs, row) -> rs.getObject("id", UUID.class));
+          UUID product = products.isEmpty() ? UuidV7.generate() : products.get(0);
+          if (products.isEmpty()) {
+            jdbc.update(
+                "INSERT INTO product (id, tenant_id, name, status) VALUES (?, ?, 'Active', 'ACTIVE')",
+                product,
+                tenantId);
+          }
+          List<UUID> warehouses =
+              jdbc.query(
+                  "SELECT id FROM warehouse WHERE tenant_id = ? LIMIT 1",
+                  (rs, row) -> rs.getObject("id", UUID.class),
+                  tenantId);
+          UUID warehouse = warehouses.isEmpty() ? UuidV7.generate() : warehouses.get(0);
+          if (warehouses.isEmpty()) {
+            jdbc.update(
+                """
+                INSERT INTO warehouse (id, tenant_id, code, name, is_default)
+                VALUES (?, ?, 'WH-MAIN', 'Main', true)
+                """,
+                warehouse,
+                tenantId);
+          }
+          return new StockFixture.Shop(tenantId, product, warehouse);
+        });
   }
 
   private UUID listingIdFromApi(
