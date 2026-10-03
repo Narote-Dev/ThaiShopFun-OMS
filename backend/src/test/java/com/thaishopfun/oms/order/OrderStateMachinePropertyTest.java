@@ -88,6 +88,7 @@ class OrderStateMachinePropertyTest {
               shop);
 
       SalesOrder current = as(shop, () -> orders.findById(order.id()).orElseThrow());
+      long versionBefore = current.version();
       long historyBefore = historyCount(shop, order.id());
       try {
         as(
@@ -102,8 +103,12 @@ class OrderStateMachinePropertyTest {
         }
         model.apply(dimension, to);
         SalesOrder updated = as(shop, () -> orders.findById(order.id()).orElseThrow());
+        if (!from.equals(to)) {
+          assertThat(updated.version()).isEqualTo(versionBefore + 1);
+        } else {
+          assertThat(updated.version()).isEqualTo(versionBefore);
+        }
         version = updated.version();
-        assertThat(updated.version()).isGreaterThanOrEqualTo(1L);
         assertThat(updated.orderStatus()).isEqualTo(model.orderStatus);
         assertThat(updated.paymentStatus()).isEqualTo(model.payment);
         assertThat(updated.fulfillmentStatus()).isEqualTo(model.fulfillment);
@@ -298,8 +303,8 @@ class OrderStateMachinePropertyTest {
             Instant.now().truncatedTo(ChronoUnit.MICROS),
             null,
             null,
-            1L,
-            0);
+            null,
+            1L);
     as(
         shop,
         () -> {
