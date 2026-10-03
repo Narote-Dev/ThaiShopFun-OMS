@@ -64,7 +64,7 @@ public class ChannelListingMappingService {
     return tx.write(
         () -> {
           ChannelListingRepository.ListingRow row =
-              listings.findById(listingId).orElseThrow(ListingApiException::notFound);
+              listings.findByIdForUpdate(listingId).orElseThrow(ListingApiException::notFound);
           UUID previous = row.skuId();
           listings.clearMapping(listingId);
           if (previous != null) {

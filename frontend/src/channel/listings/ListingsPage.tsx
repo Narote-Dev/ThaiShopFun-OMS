@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Me } from '../../auth/AuthContext'
 import { catalogApi, type Sku } from '../../catalog/api'
 import { listingsAccess } from './access'
@@ -66,6 +66,7 @@ export default function ListingsPage({ me }: { me: Me }) {
   const [skuHits, setSkuHits] = useState<Sku[]>([])
   const [activeListing, setActiveListing] = useState<ChannelListing | null>(null)
   const [busy, setBusy] = useState(false)
+  const searchDebounceBoot = useRef(true)
 
   const mappedParam = useMemo(() => {
     if (mappedFilter === 'all') return null
@@ -99,12 +100,31 @@ export default function ListingsPage({ me }: { me: Me }) {
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
+      if (searchDebounceBoot.current) {
+        searchDebounceBoot.current = false
+        if (searchDraft !== q) {
+          setQ(searchDraft)
+        }
+        return
+      }
       setQ(searchDraft)
       setOffset(0)
       writeHash(channelAccountId, mappedFilter, searchDraft, 0)
     }, 400)
     return () => window.clearTimeout(timer)
-  }, [searchDraft, channelAccountId, mappedFilter])
+  }, [searchDraft, channelAccountId, mappedFilter, q])
+
+  function openMapPicker(row: ChannelListing) {
+    setPickerSku(null)
+    setSkuQuery('')
+    setActiveListing(row)
+  }
+
+  function closeMapPicker() {
+    setActiveListing(null)
+    setPickerSku(null)
+    setSkuQuery('')
+  }
 
   useEffect(() => {
     if (!channelAccountId) return
@@ -137,8 +157,7 @@ export default function ListingsPage({ me }: { me: Me }) {
     try {
       const response = await listingsApi.putMapping(activeListing.id, pickerSku.id)
       setSummary(response.reevaluation)
-      setActiveListing(null)
-      setPickerSku(null)
+      closeMapPicker()
       const page = await listingsApi.list(channelAccountId, mappedParam, q, PAGE_SIZE, offset)
       setItems(page.items)
       setTotal(page.total)
@@ -291,7 +310,7 @@ export default function ListingsPage({ me }: { me: Me }) {
               <td>
                 {access.canWrite ? (
                   <>
-                    <button type="button" onClick={() => setActiveListing(row)}>Map</button>
+                    <button type="button" onClick={() => openMapPicker(row)}>Map</button>
                     {row.sku_id ? (
                       <button type="button" onClick={() => void unmap(row)}>Unmap</button>
                     ) : null}
@@ -345,7 +364,7 @@ export default function ListingsPage({ me }: { me: Me }) {
           <button type="button" disabled={busy || !pickerSku} onClick={() => void saveMapping()}>
             Save mapping
           </button>
-          <button type="button" onClick={() => setActiveListing(null)}>Cancel</button>
+          <button type="button" onClick={() => closeMapPicker()}>Cancel</button>
         </section>
       ) : null}
     </main>

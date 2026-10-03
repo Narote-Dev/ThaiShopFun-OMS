@@ -97,6 +97,26 @@ class ChannelListingApiTest extends OrderIntegrationTest {
   }
 
   @Test
+  void listIncludesRemovedListingWithRemovedAt() throws Exception {
+    try (Connection admin = AuthTestSupport.admin();
+        PreparedStatement statement =
+            admin.prepareStatement(
+                """
+                UPDATE channel_listing
+                SET removed_at = now(), sku_id = NULL, mapping_source = NULL, mapped_at = NULL
+                WHERE external_sku_id = 'L-api'
+                """)) {
+      statement.executeUpdate();
+    }
+    CatalogHttp.Result response =
+        http.get(
+            "/api/v1/channel-listings?channel_account_id=" + accountId + "&limit=50", shop.owner());
+    assertThat(response.status()).isEqualTo(200);
+    assertThat(response.body().path("items").size()).isGreaterThanOrEqualTo(1);
+    assertThat(response.body().path("items").get(0).path("removed_at").isNull()).isFalse();
+  }
+
+  @Test
   void listReturnsTenantListingsOverHttp() throws Exception {
     CatalogHttp.Result response =
         http.get(

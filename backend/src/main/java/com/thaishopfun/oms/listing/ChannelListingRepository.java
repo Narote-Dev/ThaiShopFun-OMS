@@ -45,7 +45,7 @@ public class ChannelListingRepository {
         """
         INSERT INTO channel_listing (
           id, tenant_id, channel_account_id, external_sku_id, seller_sku, name, stock_control, removed_at
-        ) VALUES (?, ?, ?, ?, ?, ?, true, NULL)
+        ) VALUES (?, ?, ?, ?, ?, ?, false, NULL)
         ON CONFLICT (channel_account_id, external_sku_id) DO NOTHING
         """,
         UuidV7.generate(),
@@ -124,7 +124,6 @@ public class ChannelListingRepository {
             FROM channel_listing cl
             LEFT JOIN sku s ON s.tenant_id = cl.tenant_id AND s.id = cl.sku_id
             WHERE cl.channel_account_id = ?
-              AND cl.removed_at IS NULL
             """);
     java.util.List<Object> args = new java.util.ArrayList<>();
     args.add(channelAccountId);
@@ -149,7 +148,7 @@ public class ChannelListingRepository {
         new StringBuilder(
             """
             SELECT count(*) FROM channel_listing cl
-            WHERE cl.channel_account_id = ? AND cl.removed_at IS NULL
+            WHERE cl.channel_account_id = ?
             """);
     java.util.List<Object> args = new java.util.ArrayList<>();
     args.add(channelAccountId);

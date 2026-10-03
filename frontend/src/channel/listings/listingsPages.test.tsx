@@ -129,4 +129,104 @@ describe('ListingsPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save mapping' }))
     await screen.findByText(/released 1/)
   })
+
+  it('shows removed badge when removed_at is set', async () => {
+    const { fetchImpl } = stubFetch(({ url }) => {
+      if (url.includes('/channel-accounts') && !url.includes('listing-syncs')) {
+        return { body: { items: [{ id: 'ca-1', channel: 'TSF', external_shop_id: 'shop', status: 'CONNECTED' }] } }
+      }
+      return {
+        body: {
+          items: [
+            {
+              id: 'l-removed',
+              channel_account_id: 'ca-1',
+              external_sku_id: 'L-gone',
+              seller_sku: 'GONE',
+              name: 'Gone',
+              sku_id: null,
+              sku_code: null,
+              sku_name: null,
+              mapping_source: null,
+              mapped_at: null,
+              removed_at: '2026-01-02T00:00:00Z',
+              stock_control: false,
+              held_orders: 0,
+            },
+          ],
+          total: 1,
+          limit: 25,
+          offset: 0,
+        },
+      }
+    })
+    configureApi({ getAccessToken: () => 't', fetchImpl })
+    render(<ListingsPage me={owner} />)
+    await screen.findByText('removed')
+    expect(screen.getByText('L-gone')).toBeTruthy()
+  })
+
+  it('clears SKU picker when canceling or switching listings', async () => {
+    const { fetchImpl } = stubFetch(({ url, init }) => {
+      if (url.includes('/channel-accounts') && !url.includes('listing-syncs')) {
+        return { body: { items: [{ id: 'ca-1', channel: 'TSF', external_shop_id: 'shop', status: 'CONNECTED' }] } }
+      }
+      if (url.includes('/skus?')) {
+        return {
+          body: {
+            items: [{ id: 'sku-1', sku_code: 'DEMO', name: 'Demo', product_id: 'p', product_name: 'P', barcode: null, weight_g: null, is_bundle: false, on_hand: 1, reserved: 0, component_count: 0 }],
+            total: 1,
+            limit: 10,
+            offset: 0,
+          },
+        }
+      }
+      return {
+        body: {
+          items: [
+            {
+              id: 'l1',
+              channel_account_id: 'ca-1',
+              external_sku_id: 'L-one',
+              seller_sku: 'ONE',
+              name: 'One',
+              sku_id: null,
+              mapping_source: null,
+              mapped_at: null,
+              stock_control: false,
+              held_orders: 0,
+            },
+            {
+              id: 'l2',
+              channel_account_id: 'ca-1',
+              external_sku_id: 'L-two',
+              seller_sku: 'TWO',
+              name: 'Two',
+              sku_id: null,
+              mapping_source: null,
+              mapped_at: null,
+              stock_control: false,
+              held_orders: 0,
+            },
+          ],
+          total: 2,
+          limit: 25,
+          offset: 0,
+        },
+      }
+    })
+    configureApi({ getAccessToken: () => 't', fetchImpl })
+    render(<ListingsPage me={owner} />)
+    await screen.findByText('L-one')
+    fireEvent.click(screen.getAllByRole('button', { name: 'Map' })[0])
+    fireEvent.change(screen.getByLabelText('SKU search'), { target: { value: 'DEMO' } })
+    await screen.findByRole('button', { name: /DEMO/ })
+    fireEvent.click(screen.getByRole('button', { name: /DEMO/ }))
+    expect(screen.getByText('Selected: DEMO')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByText('Selected: DEMO')).toBeNull()
+    fireEvent.click(screen.getAllByRole('button', { name: 'Map' })[1])
+    expect(screen.queryByText('Selected: DEMO')).toBeNull()
+    expect(screen.getByText('Map L-two')).toBeTruthy()
+  })
 })

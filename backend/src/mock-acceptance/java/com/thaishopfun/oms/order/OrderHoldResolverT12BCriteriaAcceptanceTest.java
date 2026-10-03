@@ -295,7 +295,8 @@ class OrderHoldResolverT12BCriteriaAcceptanceTest {
                         "SELECT count(*) FROM audit_log WHERE action = 'CHANNEL_LISTING_MAPPED'",
                         Long.class)))
         .isEqualTo(1);
-    JsonNode reeval = JSON.readTree(second.body()).path("reeval_summary");
+    JsonNode reeval = JSON.readTree(second.body()).path("reevaluation");
+    assertThat(reeval.isObject()).isTrue();
     assertThat(reeval.path("released").asInt()).isZero();
     assertThat(reeval.path("out_of_stock").asInt()).isZero();
     assertThat(reeval.path("still_held").asInt()).isZero();
@@ -676,7 +677,7 @@ class OrderHoldResolverT12BCriteriaAcceptanceTest {
   }
 
   @Test
-  void ac14_syncChannelError502() throws Exception {
+  void ac14_syncChannelError503Unavailable() throws Exception {
     StockFixture.Shop shop = ensureShopActive();
     String shopId = "shop_active";
     UUID account = fixture.channelAccount(shop, shopId, "ACTIVE", "CONNECTED");
