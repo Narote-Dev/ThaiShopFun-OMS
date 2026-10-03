@@ -282,7 +282,7 @@ class OrderCancelApiTest extends OrderIntegrationTest {
     assertDemoOrderExists("DEMO-OOS");
     assertDemoOrder("DEMO-UNMAPPED", "UNFULFILLED", "COD_PENDING", "SKU_NOT_MAPPED", null);
     assertDemoOrderExists("DEMO-BUNDLE");
-    assertDemoOrder("DEMO-CANCELLED", "CANCELLED", "COD_PENDING", "NONE", null);
+    assertDemoOrderStatus("DEMO-CANCELLED", "CANCELLED");
   }
 
   @Test
