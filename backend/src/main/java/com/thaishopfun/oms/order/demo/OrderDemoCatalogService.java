@@ -135,7 +135,10 @@ public class OrderDemoCatalogService {
             """
             SELECT t.id AS tenant_id, ca.id AS channel_account_id
             FROM tenant t
-            JOIN channel_account ca ON ca.tenant_id = t.id AND ca.channel = 'TSF'
+            JOIN channel_account ca
+              ON ca.tenant_id = t.id
+             AND ca.channel = 'TSF'
+             AND ca.external_shop_id = t.tsf_shop_id
             WHERE t.id = ?
             LIMIT 1
             """,
@@ -231,9 +234,13 @@ public class OrderDemoCatalogService {
       String name) {
     Long count =
         jdbc.queryForObject(
-            "SELECT count(*) FROM channel_listing WHERE tenant_id = ? AND external_sku_id = ?",
+            """
+            SELECT count(*) FROM channel_listing
+            WHERE tenant_id = ? AND channel_account_id = ? AND external_sku_id = ?
+            """,
             Long.class,
             shop.tenantId(),
+            shop.channelAccountId(),
             externalSkuId);
     if (count != null && count > 0) {
       return;
