@@ -3,6 +3,7 @@ package com.thaishopfun.oms.order;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.thaishopfun.mocktsf.OmsEndpoint;
+import com.thaishopfun.mocktsf.SeedData;
 import com.thaishopfun.mocktsf.idp.TokenIssuer;
 import com.thaishopfun.oms.auth.AuthTestSupport;
 import com.thaishopfun.oms.auth.UuidV7;
@@ -16,6 +17,7 @@ import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.HexFormat;
 import java.util.UUID;
 import javax.crypto.Mac;
@@ -224,16 +226,28 @@ class OrderHoldResolverT12BAcceptanceTest {
     return Long.toString(Instant.now().getEpochSecond());
   }
 
-  private static String userToken(String shopId) {
-    return AuthTestSupport.token(
-        "owner-" + UuidV7.generate(),
-        shopId,
-        "ACTIVE",
-        Instant.now().plusSeconds(3600),
-        1,
-        "oms",
-        Instant.now().plusSeconds(600),
-        java.util.List.of("oms"),
-        "OWNER");
+  private String userToken(String shopId) throws Exception {
+    TokenIssuer issuer = OrderIntakeMockRuntime.mock().getBean(TokenIssuer.class);
+    SeedData.ShopUser user =
+        new SeedData.ShopUser(
+            "owner-" + UuidV7.generate(),
+            "owner@test.local",
+            shopId,
+            "Test Shop",
+            "OWNER",
+            "PRO",
+            "ACTIVE",
+            Instant.now().plus(30, ChronoUnit.DAYS),
+            1);
+    String token = issuer.userAccessToken(user);
+    HttpResponse<String> me =
+        HTTP.send(
+            HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + "/api/v1/me"))
+                .header("Authorization", "Bearer " + token)
+                .GET()
+                .build(),
+            HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+    assertThat(me.statusCode()).isEqualTo(200);
+    return token;
   }
 }
