@@ -21,6 +21,7 @@ import org.springframework.stereotype.Service;
 public class OrderCancelService {
 
   private static final Logger log = LoggerFactory.getLogger(OrderCancelService.class);
+  private static final int MAX_CANCEL_REASON_LENGTH = 500;
 
   private final OrderAccess access;
   private final OrderTransactions tx;
@@ -57,7 +58,7 @@ public class OrderCancelService {
   public OrderViews.CancelResponseView requestCancel(
       UUID orderId, OrderViews.CancelRequestBody body) {
     OrderAccess.Actor actor = access.requireOwnerOrAdmin();
-    String reason = body == null || body.reason() == null ? "" : body.reason().trim();
+    String reason = requireCancelReason(body);
     String idempotencyKey = "cancel-request:" + orderId;
 
     CancelPlan plan =
@@ -126,6 +127,18 @@ public class OrderCancelService {
           return new OrderViews.CancelResponseView(
               channelResponse.cancelRequestId(), fresh.externalOrderId(), channelResponse.status());
         });
+  }
+
+  private static String requireCancelReason(OrderViews.CancelRequestBody body) {
+    String reason = body == null || body.reason() == null ? "" : body.reason().trim();
+    if (reason.isEmpty()) {
+      throw OrderApiException.fieldValidationFailed("reason", "reason is required");
+    }
+    if (reason.length() > MAX_CANCEL_REASON_LENGTH) {
+      throw OrderApiException.fieldValidationFailed(
+          "reason", "reason must be at most " + MAX_CANCEL_REASON_LENGTH + " characters");
+    }
+    return reason;
   }
 
   private static void validateCancellable(SalesOrder order) {

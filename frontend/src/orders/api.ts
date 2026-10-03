@@ -91,6 +91,7 @@ export type OrderFilters = {
   order_status: string
   payment_status: string
   hold_reason: string
+  channel: string
   q: string
   ordered_from: string
   ordered_to: string
@@ -114,6 +115,7 @@ export const ordersApi = {
     if (filters.order_status) params.set('order_status', filters.order_status)
     if (filters.payment_status) params.set('payment_status', filters.payment_status)
     if (filters.hold_reason) params.set('hold_reason', filters.hold_reason)
+    if (filters.channel) params.set('channel', filters.channel)
     if (filters.q) params.set('q', filters.q)
     if (filters.ordered_from) params.set('ordered_from', filters.ordered_from)
     if (filters.ordered_to) params.set('ordered_to', filters.ordered_to)

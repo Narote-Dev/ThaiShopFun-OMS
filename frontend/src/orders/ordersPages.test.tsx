@@ -72,11 +72,19 @@ describe('OrdersListPage', () => {
 
     fireEvent.change(screen.getByLabelText('Search'), { target: { value: 'ORD' } })
     fireEvent.change(screen.getByLabelText('Hold'), { target: { value: 'OUT_OF_STOCK' } })
+    fireEvent.change(screen.getByLabelText('Order status'), { target: { value: 'ACTIVE' } })
+    fireEvent.change(screen.getByLabelText('Payment status'), { target: { value: 'PAID' } })
+    fireEvent.change(screen.getByLabelText('Channel'), { target: { value: 'TSF' } })
     fireEvent.click(screen.getByRole('button', { name: 'Apply' }))
     await waitFor(() =>
       expect(
         calls.some(
-          (c) => c.url.includes('q=ORD') && c.url.includes('hold_reason=OUT_OF_STOCK'),
+          (c) =>
+            c.url.includes('q=ORD') &&
+            c.url.includes('hold_reason=OUT_OF_STOCK') &&
+            c.url.includes('order_status=ACTIVE') &&
+            c.url.includes('payment_status=PAID') &&
+            c.url.includes('channel=TSF'),
         ),
       ).toBe(true),
     )
@@ -164,6 +172,9 @@ describe('OrderDetailPage', () => {
     expect(screen.getByRole('heading', { name: 'Reservations' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Shipments' })).toBeInTheDocument()
     expect(screen.getByRole('list', { name: 'Status timeline' })).toHaveTextContent('fulfillment_status')
+    expect(screen.getByRole('button', { name: 'Request cancel' })).toBeDisabled()
+    fireEvent.change(screen.getByLabelText('Reason'), { target: { value: 'buyer changed mind' } })
+    expect(screen.getByRole('button', { name: 'Request cancel' })).toBeEnabled()
   })
 })
 

@@ -14,7 +14,7 @@ Recipient phone is always `***-***-` + `phone_last4` for every role. Name is fir
 
 ## List
 
-`GET /orders` with offset pagination (`limit` default 50, max 200; `offset` default 0). Stable sort: `ordered_at DESC`, `id DESC`.
+`GET /orders` with cursor pagination: `limit` (default 50, max 200) and opaque `cursor` (omit on the first page). Stable sort: `ordered_at DESC`, `id DESC`.
 
 | Query | Meaning |
 |---|---|
@@ -25,7 +25,9 @@ Recipient phone is always `***-***-` + `phone_last4` for every role. Name is fir
 | `ordered_from`, `ordered_to` | Bangkok calendar date (`YYYY-MM-DD`) or ISO instant; `from` inclusive, `to` date is inclusive whole day, `to` instant is exclusive |
 | `q` | Phone (normalized hash), exact `tracking_no`, or `external_order_id` exact/prefix |
 
-Response: `{items, total, limit, offset}`. List items may include `phone_masked`.
+Response: `{items, total, limit, next_cursor}`. `total` is the count of all rows matching the filters as of the first-page snapshot. `next_cursor` is `null` on the last page. New orders that arrive while paging do not shift earlier pages.
+
+List items may include `phone_masked`.
 
 ## Detail
 
@@ -37,13 +39,15 @@ Response: `{items, total, limit, offset}`. List items may include `phone_masked`
 
 ## Request cancel
 
-`POST /orders/{id}/cancel-requests` body `{ "reason": "..." }` (optional).
+`POST /orders/{id}/cancel-requests` body `{ "reason": "..." }`.
 
+- `reason` is required: non-blank after trim, at most 500 characters. Missing, blank, or overlong → `400 VALIDATION_FAILED` with field `reason` (no channel call).
 - Active order, fulfillment not `SHIPPED`/`DELIVERED`, channel supports cancel → `202` with TSF `cancel_request_id`; sets `hold_reason=CHANNEL_CANCEL_PENDING` via the state machine, one history row, one `ORDER_CANCEL_REQUESTED` audit row.
 - Repeat while already `CHANNEL_CANCEL_PENDING` → `202`, idempotent (no extra history/audit).
 - `422 CAPABILITY_UNSUPPORTED` when the adapter does not support cancel requests.
 - `409 ORDER_NOT_CANCELLABLE` when shipped, cancelled, or not active.
-- Channel errors → `502`/`503`/`429` per channel exception mapping; order unchanged.
+- `409 CANCEL_REQUEST_CONFLICT` when the channel reports an idempotency conflict for the same cancel key with a different reason (order unchanged).
+- Other channel errors → `502`/`503`/`429` per channel exception mapping; order unchanged.
 
 ## Errors
 

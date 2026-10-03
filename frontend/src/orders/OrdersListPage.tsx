@@ -19,6 +19,7 @@ function filtersFromHash(): OrderFilters {
     order_status: params.get('order_status') ?? '',
     payment_status: params.get('payment_status') ?? '',
     hold_reason: params.get('hold_reason') ?? '',
+    channel: params.get('channel') ?? '',
     q: params.get('q') ?? '',
     ordered_from: params.get('ordered_from') ?? '',
     ordered_to: params.get('ordered_to') ?? '',
@@ -37,6 +38,7 @@ function writeHash(filters: OrderFilters, cursor: string | null) {
   if (filters.order_status) params.set('order_status', filters.order_status)
   if (filters.payment_status) params.set('payment_status', filters.payment_status)
   if (filters.hold_reason) params.set('hold_reason', filters.hold_reason)
+  if (filters.channel) params.set('channel', filters.channel)
   if (filters.q) params.set('q', filters.q)
   if (filters.ordered_from) params.set('ordered_from', filters.ordered_from)
   if (filters.ordered_to) params.set('ordered_to', filters.ordered_to)
@@ -66,6 +68,7 @@ export default function OrdersListPage() {
           prev.order_status !== next.order_status ||
           prev.payment_status !== next.payment_status ||
           prev.hold_reason !== next.hold_reason ||
+          prev.channel !== next.channel ||
           prev.q !== next.q ||
           prev.ordered_from !== next.ordered_from ||
           prev.ordered_to !== next.ordered_to
@@ -154,6 +157,45 @@ export default function OrdersListPage() {
             <option value="ANY">On hold</option>
             <option value="OUT_OF_STOCK">Out of stock</option>
             <option value="SKU_NOT_MAPPED">SKU not mapped</option>
+          </select>
+        </label>
+        <label>
+          Order status
+          <select
+            value={filters.order_status}
+            onChange={(e) => setFilters({ ...filters, order_status: e.target.value })}
+          >
+            <option value="">Any</option>
+            <option value="ACTIVE">Active</option>
+            <option value="CANCELLED">Cancelled</option>
+            <option value="COMPLETED">Completed</option>
+          </select>
+        </label>
+        <label>
+          Payment status
+          <select
+            value={filters.payment_status}
+            onChange={(e) => setFilters({ ...filters, payment_status: e.target.value })}
+          >
+            <option value="">Any</option>
+            <option value="PENDING">Pending</option>
+            <option value="PAID">Paid</option>
+            <option value="COD_PENDING">COD pending</option>
+            <option value="PARTIALLY_REFUNDED">Partially refunded</option>
+            <option value="REFUNDED">Refunded</option>
+          </select>
+        </label>
+        <label>
+          Channel
+          <select
+            value={filters.channel}
+            onChange={(e) => setFilters({ ...filters, channel: e.target.value })}
+          >
+            <option value="">Any</option>
+            <option value="TSF">TSF</option>
+            <option value="SHOPEE">Shopee</option>
+            <option value="LAZADA">Lazada</option>
+            <option value="TIKTOK">TikTok</option>
           </select>
         </label>
         <label>

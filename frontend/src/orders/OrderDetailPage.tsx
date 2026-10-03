@@ -166,9 +166,13 @@ export default function OrderDetailPage({ id, me }: { id: string; me: Me }) {
           <h2>Request cancel</h2>
           <label>
             Reason
-            <input value={reason} onChange={(e) => setReason(e.target.value)} />
+            <input value={reason} onChange={(e) => setReason(e.target.value)} required />
           </label>
-          <button type="button" disabled={busy} onClick={() => void requestCancel()}>
+          <button
+            type="button"
+            disabled={busy || reason.trim().length === 0}
+            onClick={() => void requestCancel()}
+          >
             Request cancel
           </button>
         </section>

@@ -166,6 +166,61 @@ class OrderCancelApiTest extends OrderIntegrationTest {
   }
 
   @Test
+  void blankCancelReasonRejectedBeforeChannel() throws Exception {
+    ActiveShop shop = shopActive();
+    registerMockOrder("TSF-240929-000131");
+    SalesOrder order = fixture.insert(shop.fixture(), "TSF-240929-000131", "READY_TO_PICK", "NONE");
+    clearCancelHits(order.externalOrderId());
+    CatalogHttp.Result result =
+        http.post(
+            OrderHttp.ordersPath("/" + order.id() + "/cancel-requests"),
+            shop.owner(),
+            Map.of("reason", "   "));
+    assertThat(result.status()).isEqualTo(400);
+    assertThat(result.error()).isEqualTo("VALIDATION_FAILED");
+    assertThat(result.body().path("errors").get(0).path("field").asString()).isEqualTo("reason");
+    assertThat(holdReason(order.id())).isEqualTo("NONE");
+    assertThat(cancelHits(order.externalOrderId())).isEmpty();
+    assertThat(auditCount(order.id())).isZero();
+  }
+
+  @Test
+  void missingCancelBodyRejectedBeforeChannel() throws Exception {
+    ActiveShop shop = shopActive();
+    registerMockOrder("TSF-240929-000133");
+    SalesOrder order = fixture.insert(shop.fixture(), "TSF-240929-000133", "READY_TO_PICK", "NONE");
+    clearCancelHits(order.externalOrderId());
+    CatalogHttp.Result result =
+        http.post(OrderHttp.ordersPath("/" + order.id() + "/cancel-requests"), shop.owner(), null);
+    assertThat(result.status()).isEqualTo(400);
+    assertThat(result.error()).isEqualTo("VALIDATION_FAILED");
+    assertThat(holdReason(order.id())).isEqualTo("NONE");
+    assertThat(cancelHits(order.externalOrderId())).isEmpty();
+    assertThat(auditCount(order.id())).isZero();
+  }
+
+  @Test
+  void channelIdempotencyConflictReturns409WithoutHold() throws Exception {
+    ActiveShop shop = shopActive();
+    String external = "TSF-240929-000134";
+    registerMockOrder(external);
+    SalesOrder order = fixture.insert(shop.fixture(), external, "READY_TO_PICK", "NONE");
+    clearCancelHits(external);
+    String idempotencyKey = "cancel-request:" + order.id();
+    primeMockCancel(external, idempotencyKey, "already sent");
+    assertThat(cancelHits(external)).hasSize(1);
+    CatalogHttp.Result result =
+        http.post(
+            OrderHttp.ordersPath("/" + order.id() + "/cancel-requests"),
+            shop.owner(),
+            Map.of("reason", "different reason"));
+    assertThat(result.status()).isEqualTo(409);
+    assertThat(result.error()).isEqualTo("CANCEL_REQUEST_CONFLICT");
+    assertThat(holdReason(order.id())).isEqualTo("NONE");
+    assertThat(auditCount(order.id())).isZero();
+  }
+
+  @Test
   void graceEntitlementBlocksWrite() throws Exception {
     ActiveShop shop = shopActiveGrace();
     registerMockOrder("TSF-240929-000125");
@@ -631,6 +686,44 @@ class OrderCancelApiTest extends OrderIntegrationTest {
 
   private static String now() {
     return Long.toString(Instant.now().getEpochSecond());
+  }
+
+  private void primeMockCancel(String externalOrderId, String idempotencyKey, String reason)
+      throws Exception {
+    String body = JSON.createObjectNode().put("reason", reason).toString();
+    HttpResponse<String> response =
+        HTTP.send(
+            HttpRequest.newBuilder(
+                    URI.create(
+                        "http://127.0.0.1:"
+                            + mockPort()
+                            + "/internal/v1/orders/"
+                            + externalOrderId
+                            + "/cancel-requests"))
+                .timeout(HTTP_TIMEOUT)
+                .header("Authorization", "Bearer " + mockServiceToken())
+                .header("Content-Type", "application/json")
+                .header("Idempotency-Key", idempotencyKey)
+                .POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8))
+                .build(),
+            HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+    assertThat(response.statusCode()).isEqualTo(202);
+  }
+
+  private static String mockServiceToken() throws Exception {
+    HttpResponse<String> token =
+        HTTP.send(
+            HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + mockPort() + "/tsf-idp/token"))
+                .timeout(HTTP_TIMEOUT)
+                .header("Content-Type", "application/x-www-form-urlencoded")
+                .POST(
+                    HttpRequest.BodyPublishers.ofString(
+                        "grant_type=client_credentials&client_id=oms-service&client_secret=dev-oms-service-secret",
+                        StandardCharsets.UTF_8))
+                .build(),
+            HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+    assertThat(token.statusCode()).isEqualTo(200);
+    return JSON.readTree(token.body()).path("access_token").asString();
   }
 
   private static void armFault(String method, String path, int status, int times) throws Exception {

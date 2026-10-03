@@ -4,6 +4,7 @@ import com.thaishopfun.oms.auth.TraceIds;
 import com.thaishopfun.oms.catalog.CatalogApiException;
 import com.thaishopfun.oms.catalog.SqlErrors;
 import com.thaishopfun.oms.channel.exception.ChannelClientException;
+import com.thaishopfun.oms.channel.exception.ChannelIdempotencyConflictException;
 import com.thaishopfun.oms.channel.exception.ChannelRateLimitedException;
 import com.thaishopfun.oms.channel.exception.ChannelServerErrorException;
 import com.thaishopfun.oms.channel.exception.ChannelUnavailableException;
@@ -31,7 +32,18 @@ class OrderErrorHandler {
 
   @ExceptionHandler(OrderApiException.class)
   ResponseEntity<Map<String, Object>> order(OrderApiException ex, HttpServletRequest request) {
-    return body(request, ex.status(), ex.code(), ex.getMessage(), List.of());
+    return body(request, ex.status(), ex.code(), ex.getMessage(), ex.details());
+  }
+
+  @ExceptionHandler(ChannelIdempotencyConflictException.class)
+  ResponseEntity<Map<String, Object>> idempotencyConflict(
+      ChannelIdempotencyConflictException ex, HttpServletRequest request) {
+    return body(
+        request,
+        409,
+        "CANCEL_REQUEST_CONFLICT",
+        "A cancel request with a different reason was already sent for this order",
+        List.of());
   }
 
   @ExceptionHandler({OrderStateException.class, OrderOptimisticLockException.class})
