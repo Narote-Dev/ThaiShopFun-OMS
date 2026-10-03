@@ -74,20 +74,20 @@ public class OrderQueryService {
       Integer offset) {
     int pageLimit = PageResult.limit(limit);
     int pageOffset = PageResult.offset(offset);
-    SearchClause search = resolveSearch(q);
-    Filter filter =
-        Filter.build(
-            orderStatus,
-            paymentStatus,
-            fulfillmentStatus,
-            holdReason,
-            channel,
-            channelAccountId,
-            orderedFrom,
-            orderedTo,
-            search);
     return tx.read(
         () -> {
+          SearchClause search = resolveSearch(q);
+          Filter filter =
+              Filter.build(
+                  orderStatus,
+                  paymentStatus,
+                  fulfillmentStatus,
+                  holdReason,
+                  channel,
+                  channelAccountId,
+                  orderedFrom,
+                  orderedTo,
+                  search);
           long total =
               jdbc.queryForObject(
                   "SELECT count(*) FROM sales_order o" + filter.joins() + filter.where(),
