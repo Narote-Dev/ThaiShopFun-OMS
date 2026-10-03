@@ -82,7 +82,11 @@ public class OrderHoldRecheckService {
             summary.outOfStock(),
             summary.stillHeld());
     ObjectNode body = json.valueToTree(response);
-    idempotency.complete(actor.tenantId(), key, 200, body);
+    tx.write(
+        () -> {
+          idempotency.complete(actor.tenantId(), key, 200, body);
+          return null;
+        });
     return response;
   }
 

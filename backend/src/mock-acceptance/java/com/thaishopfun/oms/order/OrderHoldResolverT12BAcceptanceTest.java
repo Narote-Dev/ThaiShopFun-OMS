@@ -186,7 +186,8 @@ class OrderHoldResolverT12BAcceptanceTest {
                     "http://127.0.0.1:" + port + "/api/v1/orders/" + orderId + "/hold-rechecks"))
             .header("Authorization", "Bearer " + token)
             .header("Idempotency-Key", key)
-            .POST(HttpRequest.BodyPublishers.noBody())
+            .header("Content-Type", "application/json")
+            .POST(HttpRequest.BodyPublishers.ofString("{}"))
             .build();
     HttpResponse<String> first =
         HTTP.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));

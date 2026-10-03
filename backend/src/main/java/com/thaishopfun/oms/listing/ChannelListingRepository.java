@@ -231,7 +231,7 @@ public class ChannelListingRepository {
           AND ol.external_sku_id = ?
           AND so.order_status = 'ACTIVE'
           AND so.hold_reason IN ('SKU_NOT_MAPPED', 'OUT_OF_STOCK')
-        ORDER BY so.ordered_at, so.id
+        ORDER BY so.id
         LIMIT ?
         """,
         (rs, row) -> rs.getObject("id", UUID.class),
