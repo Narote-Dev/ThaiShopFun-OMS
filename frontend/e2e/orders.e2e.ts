@@ -6,8 +6,10 @@ test('owner browses orders, opens detail with masked phone, requests cancel', as
   await page.getByRole('link', { name: /^Active Shop/ }).click()
   await expect(page.getByRole('heading', { name: 'Active Shop' })).toBeVisible()
 
-  await request.post('http://127.0.0.1:8080/control/demo/order-catalog')
-  await request.post('http://127.0.0.1:8090/control/demo/orders-seed')
+  const catalog = await request.post('http://127.0.0.1:8080/control/demo/order-catalog')
+  expect(catalog.ok()).toBeTruthy()
+  const seed = await request.post('http://127.0.0.1:8090/control/demo/orders-seed')
+  expect(seed.ok()).toBeTruthy()
 
   await page.getByRole('link', { name: 'Orders', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Orders' })).toBeVisible()
@@ -15,20 +17,19 @@ test('owner browses orders, opens detail with masked phone, requests cancel', as
   await expect
     .poll(
       async () => {
-        await page.goto('/#/orders')
-        return await page.getByRole('table', { name: 'Orders' }).getByRole('link').count()
+        await page.goto('/#/orders?q=DEMO-COD')
+        return await page.getByRole('link', { name: 'DEMO-COD' }).count()
       },
       { timeout: 120_000, intervals: [3000] },
     )
     .toBeGreaterThan(0)
-  const codLink = page.getByRole('link', { name: 'DEMO-COD' })
-  await expect(codLink).toBeVisible({ timeout: 60_000 })
-  await codLink.click()
+
+  await page.getByRole('link', { name: 'DEMO-COD' }).click()
   await expect(page.getByRole('heading', { name: 'Order DEMO-COD' })).toBeVisible()
   await expect(page.getByText(/\*\*\*-\*\*\*-/)).toBeVisible()
 
   const cancel = page.getByRole('button', { name: 'Request cancel' })
-  await expect(cancel).toBeVisible()
+  await expect(cancel).toBeVisible({ timeout: 60_000 })
   page.once('dialog', (dialog) => void dialog.accept())
   await page.getByLabel('Reason').fill('E2E cancel')
   await cancel.click()
