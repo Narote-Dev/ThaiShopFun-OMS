@@ -314,14 +314,15 @@ public final class StockFixture {
           jdbc.update(
               "INSERT INTO channel_listing (id, tenant_id, channel_account_id, sku_id, "
                   + "external_sku_id, safety_buffer, mapping_source, mapped_at) "
-                  + "VALUES (?, ?, ?, ?, ?, ?, 'MANUAL', ?)",
+                  + "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
               listing,
               shop.tenant(),
               account,
               sku,
               "ext-sku-" + listing,
               safetyBuffer,
-              java.time.OffsetDateTime.now());
+              sku == null ? null : "MANUAL",
+              sku == null ? null : java.time.OffsetDateTime.now());
         });
     return listing;
   }

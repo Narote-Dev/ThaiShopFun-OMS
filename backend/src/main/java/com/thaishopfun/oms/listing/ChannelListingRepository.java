@@ -6,6 +6,7 @@ import java.sql.SQLException;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.time.OffsetDateTime;
 import java.util.UUID;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -135,6 +136,7 @@ public class ChannelListingRepository {
             channelAccountId,
             externalSkuId);
     UUID autoSku = tryAutoMapSku(tenantId, sellerSku);
+    OffsetDateTime mappedAt = autoSku == null ? null : OffsetDateTime.now();
     Boolean inserted =
         jdbc.query(
             """
@@ -142,7 +144,7 @@ public class ChannelListingRepository {
               id, tenant_id, channel_account_id, external_sku_id, seller_sku, name,
               sku_id, mapping_source, mapped_at, last_seen_channel_qty, last_pushed_version,
               removed_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CASE WHEN ? IS NOT NULL THEN now() END, ?, ?, NULL)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
             ON CONFLICT (channel_account_id, external_sku_id) DO UPDATE SET
               seller_sku = EXCLUDED.seller_sku,
               name = EXCLUDED.name,
@@ -167,7 +169,7 @@ public class ChannelListingRepository {
             name,
             autoSku,
             autoSku == null ? null : "AUTO",
-            autoSku,
+            mappedAt,
             lastSeenQty,
             stockVersion);
     UUID id =
