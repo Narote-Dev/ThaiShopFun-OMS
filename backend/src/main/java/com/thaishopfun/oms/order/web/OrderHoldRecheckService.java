@@ -50,7 +50,7 @@ public class OrderHoldRecheckService {
     String key = "hold-recheck:" + orderId;
     String hash = sha256(orderId + "|" + idempotencyKeyHeader);
     OrderHoldRecheckIdempotency.Stored stored =
-        idempotency.claim(actor.tenantId(), key, hash);
+        tx.write(() -> idempotency.claim(actor.tenantId(), key, hash));
     if (stored != null) {
       return json.treeToValue(stored.body(), OrderViews.HoldRecheckResponse.class);
     }

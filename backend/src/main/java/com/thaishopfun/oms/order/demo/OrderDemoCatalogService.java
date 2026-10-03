@@ -81,6 +81,8 @@ public class OrderDemoCatalogService {
         "OK",
         "tenant_id",
         shop.tenantId().toString(),
+        "channel_account_id",
+        shop.channelAccountId().toString(),
         "listings",
         List.of(
             "L-demo-ready",

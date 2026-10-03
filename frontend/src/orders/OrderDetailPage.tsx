@@ -187,7 +187,7 @@ export default function OrderDetailPage({ id, me }: { id: string; me: Me }) {
         </ol>
       </section>
       {showRecheck ? (
-        <section aria-label="Re-check order hold">
+        <section aria-label="Hold recheck actions">
           <button type="button" disabled={busy} onClick={() => void holdRecheck()}>
             Re-check hold
           </button>
