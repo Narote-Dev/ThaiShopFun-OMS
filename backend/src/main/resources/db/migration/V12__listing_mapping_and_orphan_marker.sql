@@ -11,17 +11,17 @@ ALTER TABLE channel_listing
   ADD CONSTRAINT channel_listing_mapping_source_check
     CHECK (mapping_source IS NULL OR mapping_source IN ('AUTO', 'MANUAL'));
 
+UPDATE channel_listing
+SET mapping_source = 'MANUAL',
+    mapped_at = pg_catalog.now()
+WHERE sku_id IS NOT NULL;
+
 ALTER TABLE channel_listing
   ADD CONSTRAINT channel_listing_mapping_source_sku_check
     CHECK (
       (sku_id IS NULL AND mapping_source IS NULL AND mapped_at IS NULL)
       OR (sku_id IS NOT NULL AND mapping_source IS NOT NULL AND mapped_at IS NOT NULL)
     );
-
-UPDATE channel_listing
-SET mapping_source = 'MANUAL',
-    mapped_at = pg_catalog.now()
-WHERE sku_id IS NOT NULL;
 
 CREATE INDEX channel_listing_unmapped_account_idx
   ON channel_listing (tenant_id, channel_account_id)

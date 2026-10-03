@@ -9,6 +9,9 @@ import org.springframework.stereotype.Service;
 @Service
 public class ChannelListingMappingService {
 
+  private record WriteResult(
+      ChannelListingRepository.ListingRow row, boolean mappingChanged) {}
+
   private final ChannelListingAccess access;
   private final ListingTransactions tx;
   private final ChannelListingRepository listings;
@@ -33,30 +36,30 @@ public class ChannelListingMappingService {
 
   public ChannelListingViews.MappingPutResponse putMapping(UUID listingId, UUID skuId) {
     ChannelListingAccess.Actor actor = access.requireWriter();
-    ChannelListingRepository.ListingRow before =
-        tx.read(() -> listings.findById(listingId).orElseThrow(ListingApiException::notFound));
-    if (skuId.equals(before.skuId())) {
-      return new ChannelListingViews.MappingPutResponse(
-          ChannelListingViews.from(before), toView(ReevalSummary.zero()));
-    }
-    tx.read(
-        () -> {
-          ensureSku(skuId);
-          return null;
-        });
-    UUID channelAccountId = before.channelAccountId();
-    String externalSkuId = before.externalSkuId();
-    tx.write(
-        () -> {
-          listings.putManualMapping(listingId, skuId);
-          audit.mapped(actor, listingId, skuId);
-          return null;
-        });
-    ReevalSummary summary = resolverJob.reevalAfterMapping(channelAccountId, externalSkuId);
-    ChannelListingRepository.ListingRow after =
-        tx.read(() -> listings.findById(listingId).orElseThrow(ListingApiException::notFound));
+    WriteResult written =
+        tx.write(
+            () -> {
+              ChannelListingRepository.ListingRow row =
+                  listings
+                      .findByIdForUpdate(listingId)
+                      .orElseThrow(ListingApiException::notFound);
+              if (skuId.equals(row.skuId())) {
+                return new WriteResult(row, false);
+              }
+              ensureSku(skuId);
+              listings.putManualMapping(listingId, skuId);
+              audit.mapped(actor, listingId, skuId);
+              ChannelListingRepository.ListingRow after =
+                  listings.findById(listingId).orElseThrow(ListingApiException::notFound);
+              return new WriteResult(after, true);
+            });
+    ReevalSummary summary =
+        written.mappingChanged()
+            ? resolverJob.reevalAfterMapping(
+                written.row().channelAccountId(), written.row().externalSkuId())
+            : ReevalSummary.zero();
     return new ChannelListingViews.MappingPutResponse(
-        ChannelListingViews.from(after), toView(summary));
+        ChannelListingViews.from(written.row()), toView(summary));
   }
 
   public ChannelListingViews.ListingView deleteMapping(UUID listingId) {
@@ -75,7 +78,6 @@ public class ChannelListingMappingService {
   }
 
   private void ensureSku(UUID skuId) {
-    // Step 1: SKU lookup must run under a tenant-scoped transaction (RLS).
     Long count = jdbc.queryForObject("SELECT count(*) FROM sku WHERE id = ?", Long.class, skuId);
     if (count == null || count == 0) {
       throw new ListingApiException(404, "NOT_FOUND", "SKU not found");

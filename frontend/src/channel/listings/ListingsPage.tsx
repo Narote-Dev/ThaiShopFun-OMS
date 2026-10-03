@@ -6,29 +6,44 @@ import { listingsApi, listingsMessage, type ChannelListing, type ReevalSummary }
 
 const PAGE_SIZE = 25
 
-function parseHash(): { channelAccountId: string; mapped: 'unmapped' | 'mapped' | 'all'; q: string } {
+function parseHash(): {
+  channelAccountId: string
+  mapped: 'unmapped' | 'mapped' | 'all'
+  q: string
+  offset: number
+} {
   const raw = window.location.hash.replace(/^#\/?/, '')
   const [path, query = ''] = raw.split('?')
   if (!path.startsWith('channel/listings')) {
-    return { channelAccountId: '', mapped: 'unmapped', q: '' }
+    return { channelAccountId: '', mapped: 'unmapped', q: '', offset: 0 }
   }
   const params = new URLSearchParams(query)
   const mappedParam = params.get('mapped')
   const mapped =
-    mappedParam === 'true' ? 'mapped' : mappedParam === 'false' ? 'unmapped' : 'unmapped'
+    mappedParam === 'true'
+      ? 'mapped'
+      : mappedParam === 'false'
+        ? 'unmapped'
+        : mappedParam === 'all'
+          ? 'all'
+          : 'unmapped'
+  const offset = Number.parseInt(params.get('offset') ?? '0', 10)
   return {
     channelAccountId: params.get('channel_account_id') ?? '',
     mapped,
     q: params.get('q') ?? '',
+    offset: Number.isFinite(offset) && offset >= 0 ? offset : 0,
   }
 }
 
-function writeHash(channelAccountId: string, mapped: string, q: string) {
+function writeHash(channelAccountId: string, mapped: string, q: string, offset: number) {
   const params = new URLSearchParams()
   if (channelAccountId) params.set('channel_account_id', channelAccountId)
   if (mapped === 'mapped') params.set('mapped', 'true')
   else if (mapped === 'unmapped') params.set('mapped', 'false')
+  else if (mapped === 'all') params.set('mapped', 'all')
   if (q) params.set('q', q)
+  if (offset > 0) params.set('offset', String(offset))
   const qs = params.toString()
   window.location.hash = qs ? `#/channel/listings?${qs}` : '#/channel/listings'
 }
@@ -40,7 +55,9 @@ export default function ListingsPage({ me }: { me: Me }) {
   const [q, setQ] = useState(() => parseHash().q)
   const [items, setItems] = useState<ChannelListing[]>([])
   const [total, setTotal] = useState(0)
-  const [offset, setOffset] = useState(0)
+  const [offset, setOffset] = useState(() => parseHash().offset)
+  const [accounts, setAccounts] = useState<{ id: string; external_shop_id: string }[]>([])
+  const [searchDraft, setSearchDraft] = useState(() => parseHash().q)
   const [error, setError] = useState('')
   const [summary, setSummary] = useState<ReevalSummary | null>(null)
   const [syncResult, setSyncResult] = useState<string>('')
@@ -56,16 +73,34 @@ export default function ListingsPage({ me }: { me: Me }) {
   }, [mappedFilter])
 
   useEffect(() => {
+    listingsApi
+      .listAccounts()
+      .then((page) => {
+        setAccounts(page.items.map((row) => ({ id: row.id, external_shop_id: row.external_shop_id })))
+        if (!channelAccountId && page.items[0]) {
+          setChannelAccountId(page.items[0].id)
+        }
+      })
+      .catch(() => setAccounts([]))
+  }, [])
+
+  useEffect(() => {
     const onHash = () => {
       const parsed = parseHash()
       setChannelAccountId(parsed.channelAccountId)
       setMappedFilter(parsed.mapped)
       setQ(parsed.q)
-      setOffset(0)
+      setSearchDraft(parsed.q)
+      setOffset(parsed.offset)
     }
     window.addEventListener('hashchange', onHash)
     return () => window.removeEventListener('hashchange', onHash)
   }, [])
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setQ(searchDraft), 400)
+    return () => window.clearTimeout(timer)
+  }, [searchDraft])
 
   useEffect(() => {
     if (!channelAccountId) return
@@ -88,7 +123,7 @@ export default function ListingsPage({ me }: { me: Me }) {
 
   async function applyFilters() {
     setOffset(0)
-    writeHash(channelAccountId, mappedFilter, q)
+    writeHash(channelAccountId, mappedFilter, searchDraft, 0)
   }
 
   async function saveMapping() {
@@ -133,7 +168,7 @@ export default function ListingsPage({ me }: { me: Me }) {
     try {
       const result = await listingsApi.syncListings(channelAccountId)
       setSyncResult(
-        `Synced ${result.upserted} listings (${result.mapping_changes} mapping changes)`,
+        `Fetched ${result.fetched}, created ${result.created}, updated ${result.updated}, auto-mapped ${result.auto_mapped}, re-evaluated ${result.reevaluated_orders} orders`,
       )
       const page = await listingsApi.list(channelAccountId, mappedParam, q, PAGE_SIZE, offset)
       setItems(page.items)
@@ -169,12 +204,19 @@ export default function ListingsPage({ me }: { me: Me }) {
       <p><a href="#/orders">← Orders</a></p>
       <h1>Channel listings</h1>
       <label>
-        Channel account id
-        <input
+        Channel account
+        <select
+          aria-label="Channel account"
           value={channelAccountId}
           onChange={(e) => setChannelAccountId(e.target.value)}
-          aria-label="Channel account id"
-        />
+        >
+          <option value="">Select account…</option>
+          {accounts.map((row) => (
+            <option key={row.id} value={row.id}>
+              {row.external_shop_id} ({row.id.slice(0, 8)}…)
+            </option>
+          ))}
+        </select>
       </label>
       <label>
         Mapped
@@ -190,7 +232,11 @@ export default function ListingsPage({ me }: { me: Me }) {
       </label>
       <label>
         Search
-        <input value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search listings" />
+        <input
+          value={searchDraft}
+          onChange={(e) => setSearchDraft(e.target.value)}
+          aria-label="Search listings"
+        />
       </label>
       <button type="button" onClick={() => void applyFilters()}>Apply</button>
       {access.canWrite ? (
@@ -226,7 +272,11 @@ export default function ListingsPage({ me }: { me: Me }) {
               <td>{row.external_sku_id}</td>
               <td>{row.seller_sku ?? '—'}</td>
               <td>{row.name ?? '—'}</td>
-              <td>{row.sku_id ? 'Mapped' : 'Not mapped'}</td>
+              <td>
+                {row.sku_id
+                  ? `${row.sku_code ?? row.sku_id}${row.sku_name ? ` — ${row.sku_name}` : ''}`
+                  : 'Not mapped'}
+              </td>
               <td>{row.mapping_source ?? '—'}</td>
               <td>{row.held_orders}</td>
               <td>
@@ -244,13 +294,25 @@ export default function ListingsPage({ me }: { me: Me }) {
         </tbody>
       </table>
       <p>{total} listings</p>
-      <button type="button" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}>
+      <button
+        type="button"
+        disabled={offset === 0}
+        onClick={() => {
+          const next = Math.max(0, offset - PAGE_SIZE)
+          setOffset(next)
+          writeHash(channelAccountId, mappedFilter, searchDraft, next)
+        }}
+      >
         Previous
       </button>
       <button
         type="button"
         disabled={offset + PAGE_SIZE >= total}
-        onClick={() => setOffset(offset + PAGE_SIZE)}
+        onClick={() => {
+          const next = offset + PAGE_SIZE
+          setOffset(next)
+          writeHash(channelAccountId, mappedFilter, searchDraft, next)
+        }}
       >
         Next
       </button>

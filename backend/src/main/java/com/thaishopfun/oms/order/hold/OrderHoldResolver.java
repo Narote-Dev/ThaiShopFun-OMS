@@ -88,8 +88,11 @@ public class OrderHoldResolver {
    * {@code order.remap} or {@code order.recheck}.
    */
   public Outcome resolveHeldOrder(
-      UUID orderId, String idempotencyPrefix, String recheckIdempotencyKey) {
-    // Step 1: Load the order and skip work that does not apply.
+      UUID orderId, String idempotencyPrefix, String recheckIdempotencyKey, UUID attemptId) {
+    boolean manualRecheck = "order.recheck".equals(idempotencyPrefix);
+    String historyReason = manualRecheck ? "hold recheck" : "sku mapped";
+    String historyActor = manualRecheck ? "USER" : "SYSTEM";
+
     SalesOrder order = orders.findById(orderId).orElse(null);
     if (order == null || !"ACTIVE".equals(order.orderStatus())) {
       return Outcome.STILL_HELD;
@@ -97,12 +100,11 @@ public class OrderHoldResolver {
     if (!"UNFULFILLED".equals(order.fulfillmentStatus())) {
       return Outcome.STILL_HELD;
     }
-    if ("CHANNEL_CANCEL_PENDING".equals(order.holdReason())
-        && order.holdNote() != null
-        && order.holdNote().contains("previous hold: SKU_NOT_MAPPED")) {
+    if (!manualRecheck && !"SKU_NOT_MAPPED".equals(order.holdReason())) {
       return Outcome.STILL_HELD;
     }
-    if (!"SKU_NOT_MAPPED".equals(order.holdReason())
+    if (manualRecheck
+        && !"SKU_NOT_MAPPED".equals(order.holdReason())
         && !"OUT_OF_STOCK".equals(order.holdReason())) {
       return Outcome.STILL_HELD;
     }
@@ -111,14 +113,24 @@ public class OrderHoldResolver {
       return Outcome.STILL_HELD;
     }
     TsfAccount tsf = account.get();
-    // Step 2: Same aggregate lock as inbox intake for this external order id.
     aggregateLock.lockOrder(jdbc, order.tenantId(), order.externalOrderId());
     order = orders.findById(orderId).orElseThrow();
-    if (!"SKU_NOT_MAPPED".equals(order.holdReason())
+    if (!"ACTIVE".equals(order.orderStatus()) || !"UNFULFILLED".equals(order.fulfillmentStatus())) {
+      return Outcome.STILL_HELD;
+    }
+    if ("CHANNEL_CANCEL_PENDING".equals(order.holdReason())) {
+      return Outcome.STILL_HELD;
+    }
+    if (!manualRecheck && !"SKU_NOT_MAPPED".equals(order.holdReason())) {
+      return Outcome.STILL_HELD;
+    }
+    if (manualRecheck
+        && !"SKU_NOT_MAPPED".equals(order.holdReason())
         && !"OUT_OF_STOCK".equals(order.holdReason())) {
       return Outcome.STILL_HELD;
     }
-    // Step 3: Refresh line sku_id from current channel_listing mappings.
+
+    boolean wasOutOfStock = "OUT_OF_STOCK".equals(order.holdReason());
     lines.updateSkuIdsFromListings(orderId, order.channelAccountId());
     List<HoldLine> holdLines = holdLines(order);
     boolean hasUnmapped = holdLines.stream().anyMatch(line -> !line.mapped());
@@ -126,14 +138,12 @@ public class OrderHoldResolver {
         holdLines.stream().filter(HoldLine::mapped).map(HoldLine::reserveItem).toList();
     boolean stockEnforced = OrderStockEnforcement.enforced(tsf.mode(), tsf.status());
     Instant now = clock.instant();
-    // Step 4: Still-unmapped lines keep SKU_NOT_MAPPED.
     if (hasUnmapped) {
       if (!"SKU_NOT_MAPPED".equals(order.holdReason())) {
-        order = effects.applyHold(order, "SKU_NOT_MAPPED", null);
+        order = effects.applyHold(order, "SKU_NOT_MAPPED", null, historyReason, historyActor);
       }
       return Outcome.STILL_HELD;
     }
-    // Step 5: Componentless bundle is OUT_OF_STOCK without calling the engine.
     boolean componentlessBundle =
         stockEnforced
             && !reserveItems.isEmpty()
@@ -141,29 +151,35 @@ public class OrderHoldResolver {
                 .componentlessBundleSkus(reserveItems.stream().map(ReserveItem::skuId).toList())
                 .isEmpty();
     if (componentlessBundle) {
-      order =
-          effects.applyHold(order, "OUT_OF_STOCK", OrderHoldEffects.BUNDLE_WITHOUT_COMPONENTS_NOTE);
-      if ("SHADOW".equals(tsf.mode())) {
-        shadowDiff.insertOrderDiff(
-            tsf.id(),
-            order.externalOrderId(),
-            effects.componentlessBundleShadowJson(reserveItems),
-            now);
+      if (!wasOutOfStock) {
+        order =
+            effects.applyHold(
+                order,
+                "OUT_OF_STOCK",
+                OrderHoldEffects.BUNDLE_WITHOUT_COMPONENTS_NOTE,
+                historyReason,
+                historyActor);
+        if ("SHADOW".equals(tsf.mode())) {
+          shadowDiff.insertOrderDiff(
+              tsf.id(),
+              order.externalOrderId(),
+              effects.componentlessBundleShadowJson(reserveItems),
+              now);
+        }
       }
       return Outcome.OUT_OF_STOCK;
     }
     if (!stockEnforced || reserveItems.isEmpty()) {
       if (!"NONE".equals(order.holdReason())) {
-        order = effects.applyHold(order, "NONE", null);
+        order = effects.applyHold(order, "NONE", null, historyReason, historyActor);
       }
       effects.maybeReadyToPick(orders.findById(orderId).orElseThrow(), tsf, reserveItems, now);
       return Outcome.RELEASED;
     }
-    // Step 6: Try to ensure ORDER reservation with a stable idempotency key.
     String engineKey =
-        "order.recheck".equals(idempotencyPrefix) && recheckIdempotencyKey != null
-            ? idempotencyPrefix + ":" + orderId + ":" + recheckIdempotencyKey
-            : engineKey(idempotencyPrefix, orderId, reserveItems);
+        manualRecheck && recheckIdempotencyKey != null
+            ? "order.recheck:" + orderId + ":" + recheckIdempotencyKey
+            : engineKey(idempotencyPrefix, orderId, reserveItems, attemptId);
     hooks.beforeEngineWrite();
     try {
       EnsureHoldResult held =
@@ -171,18 +187,26 @@ public class OrderHoldResolver {
       order = orders.findById(orderId).orElseThrow();
       if (held.held()) {
         if (!"NONE".equals(order.holdReason())) {
-          order = effects.applyHold(order, "NONE", null);
+          order = effects.applyHold(order, "NONE", null, historyReason, historyActor);
         }
         effects.maybeReadyToPick(orders.findById(orderId).orElseThrow(), tsf, reserveItems, now);
         return Outcome.RELEASED;
       }
       List<Shortfall> shortfalls = held.shortfalls();
-      effects.recordOversell(tsf, holdLines, shortfalls);
-      if ("SHADOW".equals(tsf.mode())) {
-        shadowDiff.insertOrderDiff(
-            tsf.id(), order.externalOrderId(), effects.shadowDiffJson(holdLines, shortfalls), now);
+      if (!wasOutOfStock) {
+        effects.recordOversell(tsf, holdLines, shortfalls);
+        if ("SHADOW".equals(tsf.mode())) {
+          shadowDiff.insertOrderDiff(
+              tsf.id(), order.externalOrderId(), effects.shadowDiffJson(holdLines, shortfalls), now);
+        }
       }
-      order = effects.applyHold(order, "OUT_OF_STOCK", OrderHoldEffects.shortfallNote(shortfalls));
+      order =
+          effects.applyHold(
+              order,
+              "OUT_OF_STOCK",
+              OrderHoldEffects.shortfallNote(shortfalls),
+              historyReason,
+              historyActor);
       return Outcome.OUT_OF_STOCK;
     } catch (StockOperationException ex) {
       if (ex.error() != StockError.UNKNOWN_SKU) {
@@ -193,12 +217,15 @@ public class OrderHoldResolver {
               order,
               "SKU_NOT_MAPPED",
               effects.unknownSkuHoldNoteFromLines(
-                  orderId, effects.missingSkuIdsForUnknownSku(ex, reserveItems)));
+                  orderId, effects.missingSkuIdsForUnknownSku(ex, reserveItems)),
+              historyReason,
+              historyActor);
       return Outcome.STILL_HELD;
     }
   }
 
-  static String engineKey(String prefix, UUID orderId, List<ReserveItem> items) {
+  static String engineKey(
+      String prefix, UUID orderId, List<ReserveItem> items, UUID attemptId) {
     List<ReserveItem> sorted = new ArrayList<>(items);
     sorted.sort(
         Comparator.comparing((ReserveItem item) -> item.skuId().toString())
@@ -211,7 +238,7 @@ public class OrderHoldResolver {
       canonical.append(item.skuId()).append(':').append(item.qty());
     }
     String hash = sha256(canonical.toString());
-    return prefix + ":" + orderId + ":" + hash;
+    return prefix + ":" + orderId + ":" + attemptId + ":" + hash;
   }
 
   private static String sha256(String canonical) {

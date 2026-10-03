@@ -8,6 +8,8 @@ export type ChannelListing = {
   seller_sku: string | null
   name: string | null
   sku_id: string | null
+  sku_code: string | null
+  sku_name: string | null
   mapping_source: string | null
   mapped_at: string | null
   stock_control: boolean
@@ -27,12 +29,24 @@ export type MappingPutResponse = {
 }
 
 export type ListingSyncResponse = {
-  upserted: number
-  removed: number
-  mapping_changes: number
+  fetched: number
+  created: number
+  updated: number
+  auto_mapped: number
+  reevaluated_orders: number
+}
+
+export type ChannelAccount = {
+  id: string
+  channel: string
+  external_shop_id: string
+  status: string
 }
 
 export const listingsApi = {
+  listAccounts(): Promise<{ items: ChannelAccount[] }> {
+    return apiRequest('/api/v1/channel-accounts')
+  },
   list(
     channelAccountId: string,
     mapped: boolean | null,

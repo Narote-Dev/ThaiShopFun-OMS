@@ -118,6 +118,7 @@ public final class OrderViews {
   public record HoldSample(
       UUID id,
       @JsonProperty("external_order_id") String externalOrderId,
+      @JsonProperty("channel_account_id") UUID channelAccountId,
       @JsonProperty("ordered_at") Instant orderedAt) {}
 
   public record HoldsView(List<HoldGroup> groups) {}

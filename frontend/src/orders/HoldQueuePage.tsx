@@ -43,7 +43,13 @@ export default function HoldQueuePage() {
               <td>{group.hold_reason}</td>
               <td>
                 {group.hold_reason === 'SKU_NOT_MAPPED' ? (
-                  <a href="#/channel/listings?mapped=false">Map unmapped listings</a>
+                  <a
+                    href={`#/channel/listings?channel_account_id=${encodeURIComponent(
+                      group.samples[0]?.channel_account_id ?? '',
+                    )}&mapped=false`}
+                  >
+                    Map unmapped listings
+                  </a>
                 ) : (
                   group.hold_detail ?? '—'
                 )}

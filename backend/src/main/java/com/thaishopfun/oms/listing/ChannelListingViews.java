@@ -18,6 +18,8 @@ final class ChannelListingViews {
       @JsonProperty("seller_sku") String sellerSku,
       String name,
       @JsonProperty("sku_id") UUID skuId,
+      @JsonProperty("sku_code") String skuCode,
+      @JsonProperty("sku_name") String skuName,
       @JsonProperty("mapping_source") String mappingSource,
       @JsonProperty("mapped_at") Instant mappedAt,
       @JsonProperty("stock_control") boolean stockControl,
@@ -34,7 +36,11 @@ final class ChannelListingViews {
   record MappingPutResponse(ListingView listing, ReevalSummary reevaluation) {}
 
   record SyncResponse(
-      int upserted, int removed, @JsonProperty("mapping_changes") int mappingChanges) {}
+      int fetched,
+      int created,
+      int updated,
+      @JsonProperty("auto_mapped") int autoMapped,
+      @JsonProperty("reevaluated_orders") int reevaluatedOrders) {}
 
   static ListingView from(ChannelListingRepository.ListingRow row) {
     return new ListingView(
@@ -44,6 +50,8 @@ final class ChannelListingViews {
         row.sellerSku(),
         row.name(),
         row.skuId(),
+        row.skuCode(),
+        row.skuName(),
         row.mappingSource(),
         row.mappedAt(),
         row.stockControl(),

@@ -83,4 +83,12 @@ class OrderHoldRecheckIdempotency {
       throw new IllegalStateException("idempotency key row is missing");
     }
   }
+
+  void abandon(UUID tenantId, String key) {
+    jdbc.update(
+        "DELETE FROM idempotency_key WHERE tenant_id = ? AND scope = ? AND \"key\" = ?",
+        tenantId,
+        SCOPE,
+        key);
+  }
 }

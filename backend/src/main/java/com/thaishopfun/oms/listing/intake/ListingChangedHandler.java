@@ -44,9 +44,7 @@ public class ListingChangedHandler implements InboxHandler {
           account.id(),
           listingSkuId,
           optionalText(data, "seller_sku"),
-          optionalText(data, "name"),
-          null,
-          null);
+          optionalText(data, "name"));
       return;
     }
     if ("DELETE".equals(action)) {

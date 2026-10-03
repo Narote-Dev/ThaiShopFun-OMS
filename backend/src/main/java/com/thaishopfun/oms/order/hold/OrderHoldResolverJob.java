@@ -9,6 +9,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -27,7 +28,8 @@ public class OrderHoldResolverJob {
   private final OrderHoldResolver resolver;
   private final ChannelListingRepository listings;
   private final OrderHoldProperties properties;
-  private final TransactionTemplate tenantTx;
+  private final TransactionTemplate tenantReadTx;
+  private final TransactionTemplate tenantWriteTx;
 
   public OrderHoldResolverJob(
       OrderHoldResolver resolver,
@@ -37,43 +39,51 @@ public class OrderHoldResolverJob {
     this.resolver = resolver;
     this.listings = listings;
     this.properties = properties;
-    this.tenantTx = new TransactionTemplate(transactions);
+    this.tenantReadTx = new TransactionTemplate(transactions);
+    this.tenantReadTx.setReadOnly(true);
+    this.tenantReadTx.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
+    this.tenantWriteTx = new TransactionTemplate(transactions);
+    this.tenantWriteTx.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+    this.tenantWriteTx.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
   }
 
   public ReevalSummary reevalAfterMapping(UUID channelAccountId, String externalSkuId) {
+    assertNoActiveTransaction("reevalAfterMapping");
     return reevalForListing(channelAccountId, externalSkuId, properties.getReevalCap());
   }
 
   public ReevalSummary reevalForListing(UUID channelAccountId, String externalSkuId, int cap) {
+    assertNoActiveTransaction("reevalForListing");
     UUID tenantId = TenantContext.requireTenantId();
-    return tenantTx.execute(
-        status -> {
-          // Step 1: Held-order lookup must run under app.tenant_id (RLS).
-          List<UUID> orderIds =
-              listings.findHeldOrderIdsForListing(channelAccountId, externalSkuId, cap + 1);
-          int deferred = Math.max(0, orderIds.size() - cap);
-          if (orderIds.size() > cap) {
-            orderIds = orderIds.subList(0, cap);
-          }
-          return resolveOrders(tenantId, orderIds, deferred, "order.remap", null);
-        });
+    List<UUID> orderIds =
+        tenantReadTx.execute(
+            status ->
+                listings.findSkuNotMappedOrderIdsForListing(channelAccountId, externalSkuId, cap + 1));
+    int deferred = Math.max(0, orderIds.size() - cap);
+    if (orderIds.size() > cap) {
+      orderIds = orderIds.subList(0, cap);
+    }
+    return resolveOrders(tenantId, orderIds, deferred, "order.remap", null, false);
   }
 
   public int runScheduledBatch() {
-    if (TransactionSynchronizationManager.isActualTransactionActive()) {
-      throw new IllegalStateException("hold resolver batch must run outside a transaction");
-    }
+    assertNoActiveTransaction("runScheduledBatch");
     UUID previousTenant = TenantContext.tenantId();
     UUID previousUser = TenantContext.userId();
     int processed = 0;
     try {
       TenantContext.clear();
-      List<UUID> tenants = listings.tenantsWithResolvableHolds(properties.getBatchSize());
+      List<UUID> tenants = listings.listActiveTenantIds();
       for (UUID tenantId : tenants) {
         TenantContext.set(tenantId, null);
         try {
-          List<UUID> orderIds = listings.findHeldOrderIds(tenantId, properties.getBatchSize());
-          ReevalSummary summary = resolveOrders(tenantId, orderIds, 0, "order.remap", null);
+          List<UUID> orderIds =
+              tenantReadTx.execute(
+                  status ->
+                      listings.findResolvableSkuNotMappedOrderIds(
+                          tenantId, properties.getBatchSize()));
+          ReevalSummary summary =
+              resolveOrders(tenantId, orderIds, 0, "order.remap", null, false);
           processed += summary.released() + summary.outOfStock() + summary.stillHeld();
         } catch (RuntimeException ex) {
           log.error("hold resolver failed for tenant {}", tenantId, ex);
@@ -88,8 +98,10 @@ public class OrderHoldResolverJob {
   }
 
   public ReevalSummary resolveOrderRecheck(UUID orderId, String clientIdempotencyKey) {
+    assertNoActiveTransaction("resolveOrderRecheck");
     UUID tenantId = TenantContext.requireTenantId();
-    return resolveOrders(tenantId, List.of(orderId), 0, "order.recheck", clientIdempotencyKey);
+    return resolveOrders(
+        tenantId, List.of(orderId), 0, "order.recheck", clientIdempotencyKey, true);
   }
 
   private ReevalSummary resolveOrders(
@@ -97,12 +109,15 @@ public class OrderHoldResolverJob {
       List<UUID> orderIds,
       int deferred,
       String keyPrefix,
-      String recheckIdempotencyKey) {
+      String recheckIdempotencyKey,
+      boolean surfaceErrors) {
     int released = 0;
     int outOfStock = 0;
     int stillHeld = 0;
     for (UUID orderId : orderIds) {
-      Outcome outcome = resolveOneWithRetries(tenantId, orderId, keyPrefix, recheckIdempotencyKey);
+      Outcome outcome =
+          resolveOneWithRetries(
+              orderId, keyPrefix, recheckIdempotencyKey, surfaceErrors);
       switch (outcome) {
         case RELEASED -> released++;
         case OUT_OF_STOCK -> outOfStock++;
@@ -115,20 +130,40 @@ public class OrderHoldResolverJob {
   }
 
   private Outcome resolveOneWithRetries(
-      UUID tenantId, UUID orderId, String keyPrefix, String recheckIdempotencyKey) {
+      UUID orderId,
+      String keyPrefix,
+      String recheckIdempotencyKey,
+      boolean surfaceErrors) {
     int attempts = properties.getLockRetries();
+    UUID attemptId = UUID.randomUUID();
     for (int attempt = 1; attempt <= attempts; attempt++) {
       try {
-        return tenantTx.execute(
-            status -> resolver.resolveHeldOrder(orderId, keyPrefix, recheckIdempotencyKey));
+        return tenantWriteTx.execute(
+            status ->
+                resolver.resolveHeldOrder(
+                    orderId, keyPrefix, recheckIdempotencyKey, attemptId));
       } catch (RuntimeException ex) {
         if (OrderHoldResolver.retryableLock(ex) && attempt < attempts) {
           continue;
         }
-        throw ex;
+        if (surfaceErrors) {
+          throw ex;
+        }
+        log.warn(
+            "hold resolver deferred orderId={} after {} attempts: {}",
+            orderId,
+            attempt,
+            ex.getClass().getSimpleName());
+        return Outcome.DEFERRED;
       }
     }
-    return Outcome.STILL_HELD;
+    return Outcome.DEFERRED;
+  }
+
+  private static void assertNoActiveTransaction(String operation) {
+    if (TransactionSynchronizationManager.isActualTransactionActive()) {
+      throw new IllegalStateException(operation + " must run outside a transaction");
+    }
   }
 
   private static void restore(UUID tenantId, UUID userId) {

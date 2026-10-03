@@ -460,7 +460,7 @@ class ChannelResilienceTest {
             new RecordingSleeper(),
             Clock.systemUTC(),
             () -> sampleOrder(),
-            new ChannelCapabilities(false, false, false, false, false, false, false, false));
+            new ChannelCapabilities(false, false, false, false, false, false, false, false, false));
     // Step 1: Capability check runs before any HTTP or resilience decoration.
     assertThatThrownBy(() -> adapter.listOrders(accountRef(), null, null, 10))
         .isInstanceOf(UnsupportedCapabilityException.class);
@@ -1162,7 +1162,7 @@ class ChannelResilienceTest {
           sleeper,
           clock,
           behavior,
-          new ChannelCapabilities(true, true, true, true, true, true, false, true));
+          new ChannelCapabilities(true, true, true, true, true, true, true, false, true));
     }
 
     TestChannelAdapter(

@@ -82,7 +82,7 @@ public class OrderLineRepository {
           AND cl.external_sku_id = ol.external_sku_id
           AND cl.removed_at IS NULL
           AND cl.sku_id IS NOT NULL
-          AND (ol.sku_id IS DISTINCT FROM cl.sku_id)
+          AND ol.sku_id IS NULL
         """,
         orderId,
         channelAccountId);

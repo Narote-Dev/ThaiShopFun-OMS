@@ -44,6 +44,7 @@ List items may include `phone_masked`.
 - Re-runs hold resolution for orders on `SKU_NOT_MAPPED` or `OUT_OF_STOCK`.
 - `409 HOLD_NOT_RECHECKABLE` when the order is not on a recheckable hold.
 - Idempotent per order and key; audit `ORDER_HOLD_RECHECKED`.
+- **PREPAID unpaid:** during hold recheck (and late mapping re-eval), `ensureOrderHold` may reserve stock **without** `expires_at` for unpaid PREPAID orders. TSF `order.cancelled` on payment timeout is expected to release that stock; the engine does not set a reservation expiry in this path.
 
 ## Request cancel
 

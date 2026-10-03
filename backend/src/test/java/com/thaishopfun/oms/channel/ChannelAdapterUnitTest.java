@@ -407,7 +407,7 @@ class ChannelAdapterUnitTest {
               calls.incrementAndGet();
               return sampleOrder();
             },
-            new ChannelCapabilities(false, false, false, false, false, false, false, false));
+            new ChannelCapabilities(false, false, false, false, false, false, false, false, false));
     ChannelAccountRef account = accountRef();
     // Step 1: Each disabled flag rejects before the HTTP stub runs.
     assertThatThrownBy(() -> adapter.listOrders(account, null, null, 10))

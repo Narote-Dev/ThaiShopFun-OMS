@@ -101,7 +101,12 @@ export type HoldGroup = {
   hold_reason: string
   hold_detail: string | null
   count: number
-  samples: { id: string; external_order_id: string; ordered_at: string }[]
+  samples: {
+    id: string
+    external_order_id: string
+    channel_account_id: string
+    ordered_at: string
+  }[]
 }
 
 export const ORDER_PAGE_SIZE = 25

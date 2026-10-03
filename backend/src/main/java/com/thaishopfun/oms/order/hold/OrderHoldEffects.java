@@ -98,8 +98,13 @@ public class OrderHoldEffects {
   }
 
   public SalesOrder applyHold(SalesOrder order, String holdReason, String holdNote) {
+    return applyHold(order, holdReason, holdNote, "intake", "SYSTEM");
+  }
+
+  public SalesOrder applyHold(
+      SalesOrder order, String holdReason, String holdNote, String reason, String actor) {
     TransitionResult hold =
-        stateMachine.applyHoldReason(order, holdReason, holdNote, "intake", "SYSTEM");
+        stateMachine.applyHoldReason(order, holdReason, holdNote, reason, actor);
     return hold.order();
   }
 
@@ -185,18 +190,6 @@ public class OrderHoldEffects {
     UUID skuId = ex.skuId();
     if (skuId != null) {
       return Set.of(skuId);
-    }
-    String message = ex.getMessage();
-    if (message != null) {
-      int marker = message.indexOf("unknown sku ");
-      if (marker >= 0) {
-        try {
-          return Set.of(
-              UUID.fromString(message.substring(marker + "unknown sku ".length()).trim()));
-        } catch (IllegalArgumentException ignored) {
-          // fall through
-        }
-      }
     }
     return missingCatalogSkuIds(items.stream().map(ReserveItem::skuId).toList());
   }

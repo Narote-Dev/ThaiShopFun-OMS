@@ -74,7 +74,8 @@ class OrderController {
 
   @PostMapping("/{id}/hold-rechecks")
   ResponseEntity<OrderViews.HoldRecheckResponse> holdRecheck(
-      @PathVariable UUID id, @RequestHeader(name = "Idempotency-Key") String idempotencyKey) {
+      @PathVariable UUID id,
+      @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey) {
     return ok(holdRecheck.recheck(id, idempotencyKey));
   }
 

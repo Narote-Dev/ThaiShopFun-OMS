@@ -4,6 +4,7 @@ import com.thaishopfun.oms.order.SalesOrder;
 import com.thaishopfun.oms.order.SalesOrderRepository;
 import com.thaishopfun.oms.order.hold.OrderHoldResolverJob;
 import com.thaishopfun.oms.order.hold.OrderHoldResolverJob.ReevalSummary;
+import com.thaishopfun.oms.stock.IdempotencyConflictException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -48,46 +49,58 @@ public class OrderHoldRecheckService {
       throw OrderApiException.fieldValidationFailed(
           "Idempotency-Key", "Idempotency-Key is required");
     }
-    String key = "hold-recheck:" + orderId;
-    String hash = sha256(orderId + "|" + idempotencyKeyHeader);
+    String clientKey = idempotencyKeyHeader.trim();
+    String key = orderId + ":" + clientKey;
+    String hash = sha256(orderId + "|" + clientKey);
+
+    SalesOrder before =
+        tx.read(() -> orders.findById(orderId).orElseThrow(OrderApiException::notFound));
+    if (!"ACTIVE".equals(before.orderStatus())
+        || !"UNFULFILLED".equals(before.fulfillmentStatus())
+        || (!"SKU_NOT_MAPPED".equals(before.holdReason())
+            && !"OUT_OF_STOCK".equals(before.holdReason()))) {
+      throw OrderApiException.conflict("HOLD_NOT_RECHECKABLE", "Order hold is not recheckable");
+    }
+
     OrderHoldRecheckIdempotency.Stored stored =
         tx.write(() -> idempotency.claim(actor.tenantId(), key, hash));
     if (stored != null) {
       return json.treeToValue(stored.body(), OrderViews.HoldRecheckResponse.class);
     }
-    SalesOrder before =
-        tx.read(() -> orders.findById(orderId).orElseThrow(OrderApiException::notFound));
-    if (!"SKU_NOT_MAPPED".equals(before.holdReason())
-        && !"OUT_OF_STOCK".equals(before.holdReason())) {
-      throw OrderApiException.conflict("HOLD_NOT_RECHECKABLE", "Order hold is not recheckable");
+
+    try {
+      ReevalSummary summary = resolverJob.resolveOrderRecheck(orderId, clientKey);
+      return tx.write(
+          () -> {
+            SalesOrder after =
+                orders.findById(orderId).orElseThrow(OrderApiException::notFound);
+            audit.write(
+                actor,
+                "ORDER_HOLD_RECHECKED",
+                orderId,
+                Map.of("hold_reason", before.holdReason()),
+                Map.of("hold_reason", after.holdReason()));
+            OrderViews.HoldRecheckResponse response =
+                new OrderViews.HoldRecheckResponse(
+                    after.id(),
+                    after.holdReason(),
+                    summary.released(),
+                    summary.outOfStock(),
+                    summary.stillHeld());
+            ObjectNode body = json.valueToTree(response);
+            idempotency.complete(actor.tenantId(), key, 200, body);
+            return response;
+          });
+    } catch (IdempotencyConflictException ex) {
+      throw ex;
+    } catch (RuntimeException ex) {
+      tx.write(
+          () -> {
+            idempotency.abandon(actor.tenantId(), key);
+            return null;
+          });
+      throw ex;
     }
-    ReevalSummary summary = resolverJob.resolveOrderRecheck(orderId, idempotencyKeyHeader.trim());
-    SalesOrder after =
-        tx.write(
-            () -> {
-              SalesOrder fresh = orders.findById(orderId).orElseThrow(OrderApiException::notFound);
-              audit.write(
-                  actor,
-                  "ORDER_HOLD_RECHECKED",
-                  orderId,
-                  Map.of("hold_reason", before.holdReason()),
-                  Map.of("hold_reason", fresh.holdReason()));
-              return fresh;
-            });
-    OrderViews.HoldRecheckResponse response =
-        new OrderViews.HoldRecheckResponse(
-            after.id(),
-            after.holdReason(),
-            summary.released(),
-            summary.outOfStock(),
-            summary.stillHeld());
-    ObjectNode body = json.valueToTree(response);
-    tx.write(
-        () -> {
-          idempotency.complete(actor.tenantId(), key, 200, body);
-          return null;
-        });
-    return response;
   }
 
   private static String sha256(String canonical) {

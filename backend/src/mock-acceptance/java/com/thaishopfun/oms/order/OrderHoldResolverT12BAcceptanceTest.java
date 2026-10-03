@@ -117,6 +117,7 @@ class OrderHoldResolverT12BAcceptanceTest {
                     externalOrderId));
     assertThat(hold).isEqualTo("SKU_NOT_MAPPED");
 
+    String token = userToken(shopId);
     UUID listingId =
         fixture.inTenant(
             shop.tenant(),
@@ -125,12 +126,23 @@ class OrderHoldResolverT12BAcceptanceTest {
                     "SELECT id FROM channel_listing WHERE external_sku_id = 'L-unmapped'",
                     UUID.class));
 
-    fixture.inTenant(
-        shop.tenant(),
-        () -> {
-          listings.putManualMapping(listingId, sku);
-          return resolverJob.reevalAfterMapping(account, "L-unmapped");
-        });
+    HttpRequest mapRequest =
+        HttpRequest.newBuilder(
+                URI.create(
+                    "http://127.0.0.1:"
+                        + port
+                        + "/api/v1/channel-listings/"
+                        + listingId
+                        + "/mapping"))
+            .header("Authorization", "Bearer " + token)
+            .header("Content-Type", "application/json")
+            .PUT(
+                HttpRequest.BodyPublishers.ofString(
+                    "{\"sku_id\":\"" + sku + "\"}", StandardCharsets.UTF_8))
+            .build();
+    HttpResponse<String> mapResponse =
+        HTTP.send(mapRequest, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+    assertThat(mapResponse.statusCode()).isEqualTo(200);
 
     hold =
         fixture.inTenant(

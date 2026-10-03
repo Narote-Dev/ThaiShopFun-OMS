@@ -27,6 +27,9 @@ afterEach(() => {
 describe('ListingsPage', () => {
   it('maps filters to query string and hides write controls for STAFF', async () => {
     const { fetchImpl, calls } = stubFetch(({ url, init }) => {
+      if (url.includes('/channel-accounts') && !url.includes('listing-syncs')) {
+        return { body: { items: [{ id: 'ca-1', channel: 'TSF', external_shop_id: 'shop', status: 'CONNECTED' }] } }
+      }
       if (url.includes('/channel-listings') && !init?.method) {
         return {
           body: {

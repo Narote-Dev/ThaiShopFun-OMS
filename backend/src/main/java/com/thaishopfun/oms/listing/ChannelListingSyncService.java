@@ -5,7 +5,11 @@ import com.thaishopfun.oms.channel.ChannelAccountRef;
 import com.thaishopfun.oms.channel.ChannelAdapter;
 import com.thaishopfun.oms.channel.ChannelAdapterRegistry;
 import com.thaishopfun.oms.channel.api.ListingPage;
+import com.thaishopfun.oms.channel.exception.ChannelClientException;
+import com.thaishopfun.oms.channel.exception.ChannelServerErrorException;
+import com.thaishopfun.oms.channel.exception.ChannelUnavailableException;
 import com.thaishopfun.oms.order.hold.OrderHoldResolverJob;
+import com.thaishopfun.oms.order.hold.OrderHoldResolverJob.ReevalSummary;
 import com.thaishopfun.oms.tenant.TenantContext;
 import java.util.ArrayList;
 import java.util.List;
@@ -18,12 +22,13 @@ public class ChannelListingSyncService {
 
   private record AccountRow(ChannelAccountRef ref, String channel, String status) {}
 
-  public record SyncResult(int upserted, int removed, int mappingChanges, List<String> mappedSkus) {
-
-    SyncResult(int upserted, int removed, int mappingChanges) {
-      this(upserted, removed, mappingChanges, List.of());
-    }
-  }
+  public record SyncResult(
+      int fetched,
+      int created,
+      int updated,
+      int autoMapped,
+      int reevaluatedOrders,
+      List<String> mappedSkus) {}
 
   private final ChannelListingAccess access;
   private final ListingTransactions tx;
@@ -55,22 +60,29 @@ public class ChannelListingSyncService {
       throw ListingApiException.disconnected();
     }
     ChannelAdapter adapter = adapters.optional(Channel.valueOf(account.channel()));
-    if (adapter == null || !adapter.capabilities().supportsStockPush()) {
+    if (adapter == null || !adapter.capabilities().supportsListingSync()) {
       throw ListingApiException.capabilityUnsupported("Listing sync is not supported");
     }
     List<ListingPage.Listing> fetched = new ArrayList<>();
-    String cursor = null;
-    do {
-      ListingPage page = adapter.listListings(account.ref(), cursor);
-      fetched.addAll(page.listings());
-      cursor = page.nextCursor();
-    } while (cursor != null && !cursor.isBlank());
+    try {
+      String cursor = null;
+      do {
+        ListingPage page = adapter.listListings(account.ref(), cursor);
+        fetched.addAll(page.listings());
+        cursor = page.nextCursor();
+      } while (cursor != null && !cursor.isBlank());
+    } catch (ChannelServerErrorException | ChannelClientException ex) {
+      throw new ListingApiException(502, "CHANNEL_ERROR", "Channel listing sync failed");
+    } catch (ChannelUnavailableException ex) {
+      throw new ListingApiException(503, "CHANNEL_UNAVAILABLE", "Channel is temporarily unavailable");
+    }
     SyncResult written =
         tx.write(
             () -> {
               UUID tenantId = TenantContext.requireTenantId();
-              int upserted = 0;
-              int mappingChanges = 0;
+              int created = 0;
+              int updated = 0;
+              int autoMapped = 0;
               List<String> mappedSkus = new ArrayList<>();
               for (ListingPage.Listing listing : fetched) {
                 ChannelListingRepository.UpsertResult result =
@@ -79,24 +91,37 @@ public class ChannelListingSyncService {
                         channelAccountId,
                         listing.listingSkuId(),
                         listing.sellerSku(),
-                        listing.name(),
-                        listing.available(),
-                        listing.stockVersion());
-                upserted++;
+                        listing.name());
+                if (result.newlyMapped()) {
+                  autoMapped++;
+                }
+                if (result.inserted()) {
+                  created++;
+                } else {
+                  updated++;
+                }
                 if (result.mappingChanged()) {
-                  mappingChanges++;
                   mappedSkus.add(listing.listingSkuId());
                 }
               }
               jdbc.update(
                   "UPDATE channel_account SET last_synced_at = now() WHERE id = ?",
                   channelAccountId);
-              return new SyncResult(upserted, 0, mappingChanges, mappedSkus);
+              return new SyncResult(
+                  fetched.size(), created, updated, autoMapped, 0, mappedSkus);
             });
+    int reevaluated = 0;
     for (String externalSkuId : written.mappedSkus()) {
-      resolverJob.reevalAfterMapping(channelAccountId, externalSkuId);
+      ReevalSummary summary = resolverJob.reevalAfterMapping(channelAccountId, externalSkuId);
+      reevaluated += summary.released() + summary.outOfStock();
     }
-    return new SyncResult(written.upserted(), written.removed(), written.mappingChanges());
+    return new SyncResult(
+        written.fetched(),
+        written.created(),
+        written.updated(),
+        written.autoMapped(),
+        reevaluated,
+        written.mappedSkus());
   }
 
   private java.util.Optional<AccountRow> loadAccount(UUID channelAccountId) {

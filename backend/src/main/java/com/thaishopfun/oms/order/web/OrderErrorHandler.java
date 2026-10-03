@@ -10,6 +10,7 @@ import com.thaishopfun.oms.channel.exception.ChannelServerErrorException;
 import com.thaishopfun.oms.channel.exception.ChannelUnavailableException;
 import com.thaishopfun.oms.order.OrderOptimisticLockException;
 import com.thaishopfun.oms.order.OrderStateException;
+import com.thaishopfun.oms.stock.IdempotencyConflictException;
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -33,6 +34,17 @@ class OrderErrorHandler {
   @ExceptionHandler(OrderApiException.class)
   ResponseEntity<Map<String, Object>> order(OrderApiException ex, HttpServletRequest request) {
     return body(request, ex.status(), ex.code(), ex.getMessage(), ex.details());
+  }
+
+  @ExceptionHandler(IdempotencyConflictException.class)
+  ResponseEntity<Map<String, Object>> holdRecheckIdempotency(
+      IdempotencyConflictException ex, HttpServletRequest request) {
+    return body(
+        request,
+        422,
+        "IDEMPOTENCY_KEY_REUSED",
+        "Idempotency-Key was already used with a different request",
+        List.of());
   }
 
   @ExceptionHandler(ChannelIdempotencyConflictException.class)
