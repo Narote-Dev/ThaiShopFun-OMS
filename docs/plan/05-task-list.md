@@ -92,6 +92,9 @@ flowchart LR
   T15-->T23 & T40
   T22-->T40 & T26
   T16-->T50
+  Q2[Q2 hosting] --> T26
+  HOST[Public HTTPS host] --> T28
+  TSF1012[TSF-10..12] --> T21
 ```
 
 ---
@@ -245,8 +248,8 @@ flowchart LR
 - Playwright + mock TSF: reserve → created → paid → pick → pack → label → ship → delivered → คืนบางชิ้น → refund; และ cancel ตอน PACKED
 - AC: รันใน CI < 5 นาที · InvariantChecker ผ่านท้ายทุก scenario
 
-**T28 · Cursor · deps: T04** Public product page + demo tenant
-- หน้า HTTPS สาธารณะอธิบาย OMS + demo account สำหรับ reviewer marketplace
+**T28 · Cursor · deps: T04, public HTTPS hosting (Q2)** Public product page + demo tenant
+- หน้า HTTPS สาธารณะอธิบาย OMS + demo account สำหรับ reviewer marketplace (งาน launch ใน MVP 39 task)
 - AC: เปิดได้ไม่ต้อง login · demo tenant มีข้อมูลตัวอย่าง ไม่มี PII จริง
 
 ## Phase 4: Pilot (สัปดาห์ 14–22)
@@ -258,9 +261,9 @@ flowchart LR
 - เก็บ diff stock/order/reservation (OMS vs TSF จริง), คำนวณเกณฑ์เลื่อน mode
 - AC: หน้า report แสดง diff % รายวัน · เกณฑ์ใน 02 (diff < 0.5% 7 วัน) คำนวณถูกจาก fixture
 
-**T26 · Cursor · deps: T22** Prod deploy + observability + PITR
-- prod env, JSON log + `trace_id`, metrics (reserve latency, inbox lag, DEAD, stock propagation lag, business oversell, hold count), alert, **เปิด Railway PITR**
-- AC: prod deploy ต้องกดเอง (Narote) · alert เมื่อ DEAD > 0, inbox lag > 5 นาที, reserve p95 เกิน NFR · `railway postgres pitr status` = healthy
+**T26 · Cursor · deps: T22, Q2 (hosting + งบ)** Prod deploy + observability + PITR
+- prod/staging env, JSON log + `trace_id`, metrics (reserve latency, inbox lag, DEAD, stock propagation lag, business oversell, hold count), alert, **เปิด Railway PITR** · ตั้ง `oms.security.internal-client-ids` และ secret ตาม [MVP roadmap §5.2.1](../MVP-ROADMAP.md) · **SPA→API:** same-origin reverse proxy `/api`→backend (แนะนำ) หรือ wire `VITE_OMS_API_BASE_URL` + backend CORS · cross-host smoke (SSO + `/api/v1/me`)
+- AC: prod deploy ต้องกดเอง (Narote) · alert เมื่อ DEAD > 0, inbox lag > 5 นาที, reserve p95 เกิน NFR · `railway postgres pitr status` = healthy · deployed UI เรียก API ได้จริง (ไม่พึ่ง Vite proxy)
 
 **T24 · Cursor · deps: T17, T40** Dashboard + audit viewer
 - การ์ด: รอแพ็ก, ใกล้ ship-by, hold, DEAD events, mode ปัจจุบัน, sync paused, issue เปิด; หน้า audit
@@ -320,3 +323,6 @@ flowchart LR
 | **TSF-07** | T12A | **checkout เรียก `POST /inventory/reservations` ก่อนสร้างออเดอร์**, 409 → แสดง OUT_OF_STOCK, `DELETE` เมื่อทิ้ง checkout, ส่ง `reservation_id` ใน `order.created`, เคารพ `enforced` |
 | **TSF-08** | T01C | ใช้ spec/tag เดียวกับ OMS (in-repo `contracts/` หรือ mirror ไป `tsf-oms-contracts` ถ้าย้าย) + contract test ใน CI ของ TSF |
 | **TSF-09** | T12A | timeout 800 ms + circuit breaker ตอนเรียก reserve + fallback policy (ตัดสินใจ #6) + metric |
+| **TSF-10** | T21, launch | TSF Pay ส่ง `payment.status_changed` / `refund.status_changed` ผ่าน TSF (OMS อ่านอย่างเดียว) |
+| **TSF-11** | launch | หน้า membership/billing ใน TSF ที่ขายแพ็กเกจที่มี OMS entitlement |
+| **TSF-12** | T04 prod, launch | ลิงก์ "เข้า OMS" จากหลังบ้าน TSF + โดเมน/redirect URI prod (OIDC `oms-web`) |
