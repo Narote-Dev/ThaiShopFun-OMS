@@ -68,7 +68,6 @@ class OrderCancelApiTest extends OrderIntegrationTest {
 
   @DynamicPropertySource
   static void mockTsf(DynamicPropertyRegistry registry) {
-    AuthTestSupport.register(registry);
     startMock();
     int port = mockPort();
     registry.add("oms.tsf.base-url", () -> "http://127.0.0.1:" + port);
@@ -244,6 +243,50 @@ class OrderCancelApiTest extends OrderIntegrationTest {
     assertThat(result.status()).isEqualTo(429);
     assertThat(holdReason(order.id())).isEqualTo("NONE");
     assertThat(cancelHits(order.externalOrderId())).isEmpty();
+  }
+
+  @Test
+  void demoOrdersSeedProducesExpectedStates() throws Exception {
+    String owner =
+        CatalogHttp.token("owner-demo-" + UUID.randomUUID(), "shop_active", "OWNER", "ACTIVE");
+    assertThat(http.get("/api/v1/me", owner).status()).isEqualTo(200);
+    TenantContext.clear();
+    HttpResponse<String> catalog =
+        HTTP.send(
+            HttpRequest.newBuilder(
+                    URI.create("http://127.0.0.1:" + port + "/control/demo/order-catalog"))
+                .POST(HttpRequest.BodyPublishers.noBody())
+                .timeout(HTTP_TIMEOUT)
+                .build(),
+            HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+    assertThat(catalog.statusCode()).isEqualTo(200);
+    assertThat(JSON.readTree(catalog.body()).path("status").asString()).isEqualTo("OK");
+
+    HttpResponse<String> seed =
+        HTTP.send(
+            HttpRequest.newBuilder(
+                    URI.create("http://127.0.0.1:" + mockPort() + "/control/demo/orders-seed"))
+                .POST(HttpRequest.BodyPublishers.noBody())
+                .timeout(HTTP_TIMEOUT)
+                .build(),
+            HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+    assertThat(seed.statusCode()).isEqualTo(200);
+
+    int processed;
+    int rounds = 0;
+    do {
+      processed = worker.processAvailable(20);
+      rounds++;
+    } while (processed > 0 && rounds < 50);
+    assertThat(rounds).isLessThan(50);
+
+    assertDemoOrder("DEMO-READY", "READY_TO_PICK", "PAID", "NONE", null);
+    assertDemoOrder("DEMO-COD", "READY_TO_PICK", "COD_PENDING", "NONE", null);
+    assertDemoOrder("DEMO-OOS", "UNFULFILLED", "COD_PENDING", "OUT_OF_STOCK", null);
+    assertDemoOrder("DEMO-UNMAPPED", "UNFULFILLED", "COD_PENDING", "SKU_NOT_MAPPED", null);
+    assertDemoOrder(
+        "DEMO-BUNDLE", "UNFULFILLED", "COD_PENDING", "OUT_OF_STOCK", "bundle has no components");
+    assertDemoOrder("DEMO-CANCELLED", "CANCELLED", "COD_PENDING", "NONE", null);
   }
 
   @Test
@@ -450,6 +493,31 @@ class OrderCancelApiTest extends OrderIntegrationTest {
         throw new IllegalStateException("missing example " + name);
       }
       return (ObjectNode) JSON.readTree(in);
+    }
+  }
+
+  private void assertDemoOrder(
+      String externalId, String fulfillment, String payment, String hold, String holdNote)
+      throws Exception {
+    try (Connection admin = AuthTestSupport.admin();
+        PreparedStatement ps =
+            admin.prepareStatement(
+                """
+                SELECT fulfillment_status, payment_status, hold_reason, hold_note
+                FROM sales_order WHERE external_order_id = ?
+                """)) {
+      ps.setString(1, externalId);
+      try (var rs = ps.executeQuery()) {
+        assertThat(rs.next()).as("order %s", externalId).isTrue();
+        assertThat(rs.getString("fulfillment_status")).isEqualTo(fulfillment);
+        assertThat(rs.getString("payment_status")).isEqualTo(payment);
+        assertThat(rs.getString("hold_reason")).isEqualTo(hold);
+        if (holdNote == null) {
+          assertThat(rs.getString("hold_note")).isNull();
+        } else {
+          assertThat(rs.getString("hold_note")).isEqualTo(holdNote);
+        }
+      }
     }
   }
 

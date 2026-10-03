@@ -34,7 +34,9 @@ class OrderDemoCatalogApiTest extends OrderIntegrationTest {
   void clearTenant() throws Exception {
     TenantContext.clear();
     try (Connection admin = AuthTestSupport.admin();
-        var ps = admin.prepareStatement("DELETE FROM tenant WHERE tsf_shop_id = ?")) {
+        var ps =
+            admin.prepareStatement(
+                "UPDATE tenant SET name = 'Active Shop' WHERE tsf_shop_id = ?")) {
       ps.setString(1, "shop_active");
       ps.executeUpdate();
     }
