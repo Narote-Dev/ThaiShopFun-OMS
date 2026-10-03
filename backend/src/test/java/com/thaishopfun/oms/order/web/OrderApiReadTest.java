@@ -31,6 +31,7 @@ class OrderApiReadTest extends OrderIntegrationTest {
   private ListAppender<ILoggingEvent> logs;
   private Logger root;
   private Logger jdbc;
+  private Level jdbcLevelBefore;
 
   @BeforeEach
   void setup() {
@@ -40,13 +41,14 @@ class OrderApiReadTest extends OrderIntegrationTest {
     root = (Logger) LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME);
     root.addAppender(logs);
     jdbc = (Logger) LoggerFactory.getLogger("org.springframework.jdbc");
+    jdbcLevelBefore = jdbc.getLevel();
     jdbc.setLevel(Level.TRACE);
   }
 
   @AfterEach
   void teardownLogs() {
     root.detachAppender(logs);
-    jdbc.setLevel(Level.INFO);
+    jdbc.setLevel(jdbcLevelBefore);
   }
 
   @Test

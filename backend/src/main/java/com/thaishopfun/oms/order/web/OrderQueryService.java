@@ -97,6 +97,15 @@ public class OrderQueryService {
               cursorRaw == null || cursorRaw.isBlank()
                   ? OrderListCursor.firstPage(Instant.now())
                   : OrderListCursor.decode(cursorRaw);
+          List<Object> countParams = new ArrayList<>(filter.params());
+          StringBuilder countWhere = new StringBuilder(filter.where());
+          countWhere.append(" AND o.ordered_at <= ?");
+          countParams.add(java.sql.Timestamp.from(cursor.snapshotBefore()));
+          long total =
+              jdbc.queryForObject(
+                  "SELECT count(*) " + BASE_FROM + filter.joins() + countWhere,
+                  Long.class,
+                  countParams.toArray());
           List<Object> whereParams = new ArrayList<>(filter.params());
           StringBuilder where = new StringBuilder(filter.where());
           where.append(" AND o.ordered_at <= ?");
@@ -107,11 +116,6 @@ public class OrderQueryService {
             whereParams.add(java.sql.Timestamp.from(cursor.orderedAt()));
             whereParams.add(cursor.id());
           }
-          long total =
-              jdbc.queryForObject(
-                  "SELECT count(*) " + BASE_FROM + filter.joins() + where,
-                  Long.class,
-                  whereParams.toArray());
           List<Object> pageParams = new ArrayList<>(whereParams);
           pageParams.add(pageLimit);
           List<OrderViews.ListItem> items =
@@ -539,9 +543,14 @@ public class OrderQueryService {
     String query = q.trim();
     String digits = query.replaceAll("\\D", "");
     if (digits.length() >= 9 && digits.length() <= 15) {
-      List<UUID> ids = recipients.findOrderIdsByPhone(query);
-      if (!ids.isEmpty()) {
-        return new PhoneSearch(ids);
+      try {
+        List<UUID> ids = recipients.findOrderIdsByPhone(query);
+        if (!ids.isEmpty()) {
+          return new PhoneSearch(ids);
+        }
+      } catch (IllegalArgumentException ignored) {
+        // Normalization can reject digit strings that look like phones; fall through to
+        // tracking/id.
       }
     }
     Boolean tracking =

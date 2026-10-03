@@ -8,7 +8,7 @@ import java.util.UUID;
 import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /** Idempotent catalog rows for mock-tsf demo orders (shop_active). */
 @Service
@@ -18,60 +18,83 @@ public class OrderDemoCatalogService {
   private static final String SHOP = "shop_active";
 
   private final JdbcTemplate jdbc;
+  private final TransactionTemplate transactionTemplate;
 
-  public OrderDemoCatalogService(JdbcTemplate jdbc) {
+  public OrderDemoCatalogService(JdbcTemplate jdbc, TransactionTemplate transactionTemplate) {
     this.jdbc = jdbc;
+    this.transactionTemplate = transactionTemplate;
   }
 
   record ShopContext(UUID tenantId, UUID channelAccountId, UUID productId, UUID warehouseId) {}
 
-  @Transactional
   public Map<String, Object> ensureDemoCatalog() {
-    ShopContext shop = resolveShop();
-    if (shop == null) {
-      return Map.of("status", "SKIPPED", "reason", "shop_active tenant not provisioned");
+    boolean clearTenant = false;
+    UUID tenantId = TenantContext.tenantId();
+    if (tenantId == null) {
+      tenantId = resolveTsfShopTenantId();
+      if (tenantId == null) {
+        throw new DemoCatalogTenantMissingException();
+      }
+      TenantContext.set(tenantId, null);
+      clearTenant = true;
     }
-    TenantContext.set(shop.tenantId(), null);
     try {
-      ensureWarehouse(shop);
-      UUID ready = ensureSku(shop, "DEMO-SKU-READY", false);
-      UUID cod = ensureSku(shop, "DEMO-SKU-COD", false);
-      UUID oos = ensureSku(shop, "DEMO-SKU-OOS", false);
-      UUID bundleEmpty = ensureSku(shop, "DEMO-SKU-BUNDLE-EMPTY", true);
-      UUID component = ensureSku(shop, "DEMO-SKU-COMP", false);
-      stock(shop, ready, 50);
-      stock(shop, cod, 50);
-      stock(shop, oos, 0);
-      stock(shop, component, 50);
-      ensureListing(shop, "L-demo-ready", ready, true);
-      ensureListing(shop, "L-demo-cod", cod, true);
-      ensureListing(shop, "L-demo-oos", oos, true);
-      ensureListing(shop, "L-demo-bundle", bundleEmpty, true);
-      ensureListing(shop, "L-demo-cancel", cod, true);
-      ensureListing(shop, "L-demo-missing", null, false);
-      return Map.of(
-          "status",
-          "OK",
-          "tenant_id",
-          shop.tenantId().toString(),
-          "listings",
-          List.of(
-              "L-demo-ready",
-              "L-demo-cod",
-              "L-demo-oos",
-              "L-demo-bundle",
-              "L-demo-cancel",
-              "L-demo-missing"));
+      return transactionTemplate.execute(status -> seedCatalogInTransaction());
     } finally {
-      TenantContext.clear();
+      if (clearTenant) {
+        TenantContext.clear();
+      }
     }
   }
 
+  private UUID resolveTsfShopTenantId() {
+    List<UUID> ids =
+        jdbc.query(
+            "SELECT resolve_tenant(?, ?)",
+            (rs, rowNum) -> rs.getObject(1, UUID.class),
+            "TSF",
+            SHOP);
+    return ids.isEmpty() ? null : ids.get(0);
+  }
+
+  private Map<String, Object> seedCatalogInTransaction() {
+    ShopContext shop = resolveShop();
+    ensureWarehouse(shop);
+    UUID ready = ensureSku(shop, "DEMO-SKU-READY", false);
+    UUID cod = ensureSku(shop, "DEMO-SKU-COD", false);
+    UUID oos = ensureSku(shop, "DEMO-SKU-OOS", false);
+    UUID bundleEmpty = ensureSku(shop, "DEMO-SKU-BUNDLE-EMPTY", true);
+    UUID component = ensureSku(shop, "DEMO-SKU-COMP", false);
+    stock(shop, ready, 50);
+    stock(shop, cod, 50);
+    stock(shop, oos, 0);
+    stock(shop, component, 50);
+    ensureListing(shop, "L-demo-ready", ready, true);
+    ensureListing(shop, "L-demo-cod", cod, true);
+    ensureListing(shop, "L-demo-oos", oos, true);
+    ensureListing(shop, "L-demo-bundle", bundleEmpty, true);
+    ensureListing(shop, "L-demo-cancel", cod, true);
+    ensureListing(shop, "L-demo-missing", null, false);
+    return Map.of(
+        "status",
+        "OK",
+        "tenant_id",
+        shop.tenantId().toString(),
+        "listings",
+        List.of(
+            "L-demo-ready",
+            "L-demo-cod",
+            "L-demo-oos",
+            "L-demo-bundle",
+            "L-demo-cancel",
+            "L-demo-missing"));
+  }
+
   private ShopContext resolveShop() {
-    UUID tenantId = TenantContext.tenantId();
-    ShopContext base = tenantId != null ? resolveForTenant(tenantId) : resolveForTsfShop(SHOP);
+    UUID tenantId = TenantContext.requireTenantId();
+    ShopContext base = resolveForTenant(tenantId);
     if (base == null) {
-      return null;
+      throw new DemoCatalogTenantMissingException();
     }
     List<UUID> products =
         jdbc.query(
@@ -108,26 +131,6 @@ public class OrderDemoCatalogService {
                     null,
                     null),
             tenantId);
-    return rows.isEmpty() ? null : rows.get(0);
-  }
-
-  private ShopContext resolveForTsfShop(String tsfShopId) {
-    List<ShopContext> rows =
-        jdbc.query(
-            """
-            SELECT t.id AS tenant_id, ca.id AS channel_account_id
-            FROM tenant t
-            JOIN channel_account ca ON ca.tenant_id = t.id AND ca.channel = 'TSF'
-            WHERE t.tsf_shop_id = ?
-            LIMIT 1
-            """,
-            (rs, rowNum) ->
-                new ShopContext(
-                    rs.getObject("tenant_id", UUID.class),
-                    rs.getObject("channel_account_id", UUID.class),
-                    null,
-                    null),
-            tsfShopId);
     return rows.isEmpty() ? null : rows.get(0);
   }
 
@@ -184,8 +187,13 @@ public class OrderDemoCatalogService {
             warehouse);
     if (count != null && count > 0) {
       jdbc.update(
-          "UPDATE inventory SET on_hand = ?, stock_version = stock_version + 1 WHERE sku_id = ? AND warehouse_id = ?",
+          """
+          UPDATE inventory
+          SET on_hand = GREATEST(?, reserved), stock_version = stock_version + 1
+          WHERE tenant_id = ? AND sku_id = ? AND warehouse_id = ?
+          """,
           onHand,
+          shop.tenantId(),
           skuId,
           warehouse);
       return;

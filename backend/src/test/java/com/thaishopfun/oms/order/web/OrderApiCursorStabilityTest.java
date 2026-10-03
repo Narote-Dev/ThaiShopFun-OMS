@@ -51,7 +51,8 @@ class OrderApiCursorStabilityTest extends OrderIntegrationTest {
     assertThat(page1.status()).isEqualTo(200);
     String cursor = page1.body().path("next_cursor").asString();
     assertThat(cursor).isNotBlank();
-    stamp(fixture.insert(shop, "CUR-NEW", "READY_TO_PICK", "NONE"), Instant.now());
+    stamp(
+        fixture.insert(shop, "CUR-NEW", "READY_TO_PICK", "NONE"), base.plus(2, ChronoUnit.MINUTES));
     CatalogHttp.Result page2 =
         http.get(
             OrderHttp.ordersPath(

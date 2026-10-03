@@ -10,7 +10,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-@Profile("!prod")
+@Profile({"local", "e2e"})
 @RestController
 @RequestMapping("/control/rest")
 public class RestDebugController {

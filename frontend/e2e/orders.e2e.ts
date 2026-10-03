@@ -8,6 +8,7 @@ test('owner browses orders, opens detail with masked phone, requests cancel', as
 
   const catalog = await request.post('http://127.0.0.1:8080/control/demo/order-catalog')
   expect(catalog.ok()).toBeTruthy()
+  expect((await catalog.json()).status).toBe('OK')
   const seed = await request.post('http://127.0.0.1:8090/control/demo/orders-seed')
   expect(seed.ok()).toBeTruthy()
 
@@ -29,6 +30,20 @@ test('owner browses orders, opens detail with masked phone, requests cancel', as
   await page.getByRole('link', { name: 'DEMO-COD' }).click()
   await expect(page.getByRole('heading', { name: 'Order DEMO-COD' })).toBeVisible()
   await expect(page.getByText(/\*\*\*-\*\*\*-/)).toBeVisible()
+  await expect(page.getByRole('list', { name: 'Status timeline' })).not.toBeEmpty()
+
+  await page.getByRole('link', { name: '← Orders' }).click()
+  await page.getByLabel('Hold').selectOption('SKU_NOT_MAPPED')
+  await search.fill('')
+  await page.getByRole('button', { name: 'Apply' }).click()
+  await expect
+    .poll(
+      async () => await page.getByRole('link', { name: 'DEMO-UNMAPPED' }).count(),
+      { timeout: 60_000, intervals: [2000] },
+    )
+    .toBeGreaterThan(0)
+  await page.getByRole('link', { name: 'DEMO-UNMAPPED' }).click()
+  await expect(page.getByRole('list', { name: 'Status timeline' })).not.toBeEmpty()
 
   const cancel = page.getByRole('button', { name: 'Request cancel' })
   await expect(cancel).toBeVisible({ timeout: 60_000 })

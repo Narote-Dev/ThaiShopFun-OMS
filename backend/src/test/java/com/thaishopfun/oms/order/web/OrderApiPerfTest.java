@@ -61,7 +61,7 @@ class OrderApiPerfTest extends OrderIntegrationTest {
     assertUnder1s(shop.owner(), OrderHttp.ordersPath("?limit=50"), "warm-up");
     assertNoSeqScanOnSalesOrder(shop.tenantId());
     assertUnder1s(shop.owner(), OrderHttp.ordersPath("?limit=50"), "first page");
-    assertUnder2s(
+    assertUnder1s(
         shop.owner(),
         OrderHttp.ordersPath("?fulfillment_status=READY_TO_PICK&hold_reason=NONE&limit=50"),
         "filtered");
@@ -86,17 +86,8 @@ class OrderApiPerfTest extends OrderIntegrationTest {
             "?limit=50&cursor="
                 + URLEncoder.encode(deep == null ? "" : deep, StandardCharsets.UTF_8)),
         "deep page");
-    assertUnder2s(shop.owner(), OrderHttp.ordersPath("?q=0812345678"), "phone search");
+    assertUnder1s(shop.owner(), OrderHttp.ordersPath("?q=0812345678"), "phone search");
     assertUnder1s(shop.owner(), OrderHttp.ordersPath("?q=" + PERF_PHONE_EXTERNAL), "external id");
-  }
-
-  private void assertUnder2s(String token, String path, String label) {
-    long start = System.nanoTime();
-    CatalogHttp.Result result = http.get(path, token);
-    long ms = (System.nanoTime() - start) / 1_000_000;
-    log.info("{} {} ms status={}", label, ms, result.status());
-    assertThat(result.status()).isEqualTo(200);
-    assertThat(ms).isLessThan(2000);
   }
 
   private void assertUnder1s(String token, String path, String label) {
@@ -194,25 +185,40 @@ class OrderApiPerfTest extends OrderIntegrationTest {
   }
 
   private void assertNoSeqScanOnSalesOrder(UUID tenantId) throws Exception {
-    try (Connection admin = AuthTestSupport.admin();
-        PreparedStatement ps =
-            admin.prepareStatement(
-                """
-                EXPLAIN (FORMAT TEXT)
-                SELECT o.id FROM sales_order o
-                WHERE o.tenant_id = ?
-                ORDER BY o.ordered_at DESC, o.id DESC
-                LIMIT 50
-                """)) {
-      ps.setObject(1, tenantId);
-      StringBuilder plan = new StringBuilder();
-      try (var rs = ps.executeQuery()) {
-        while (rs.next()) {
-          plan.append(rs.getString(1)).append('\n');
-        }
+    java.sql.Timestamp snapshot = java.sql.Timestamp.from(Instant.now());
+    try (Connection app = AuthTestSupport.app()) {
+      app.setAutoCommit(false);
+      try (PreparedStatement setTenant =
+          app.prepareStatement("SELECT set_config('app.tenant_id', ?, true)")) {
+        setTenant.setString(1, tenantId.toString());
+        setTenant.execute();
       }
-      log.info("EXPLAIN plan:\n{}", plan);
-      assertThat(plan.toString().toLowerCase()).doesNotContain("seq scan on sales_order");
+      try (PreparedStatement ps =
+          app.prepareStatement(
+              """
+              EXPLAIN (FORMAT TEXT)
+              SELECT o.id, o.external_order_id, o.order_status, o.payment_status,
+                     o.fulfillment_status, o.hold_reason, o.payment_method, o.grand_total,
+                     o.ordered_at, o.ship_by, o.channel_account_id, ca.channel,
+                     r.phone_last4
+              FROM sales_order o
+              JOIN channel_account ca ON ca.tenant_id = o.tenant_id AND ca.id = o.channel_account_id
+              LEFT JOIN order_recipient r ON r.order_id = o.id
+              WHERE true AND o.ordered_at <= ?
+              ORDER BY o.ordered_at DESC, o.id DESC
+              LIMIT 50
+              """)) {
+        ps.setTimestamp(1, snapshot);
+        StringBuilder plan = new StringBuilder();
+        try (var rs = ps.executeQuery()) {
+          while (rs.next()) {
+            plan.append(rs.getString(1)).append('\n');
+          }
+        }
+        log.info("EXPLAIN plan (oms_app):\n{}", plan);
+        assertThat(plan.toString().toLowerCase()).doesNotContain("seq scan on sales_order");
+      }
+      app.commit();
     }
   }
 }

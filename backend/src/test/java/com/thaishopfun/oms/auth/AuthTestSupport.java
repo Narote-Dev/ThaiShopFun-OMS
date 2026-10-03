@@ -104,7 +104,7 @@ public final class AuthTestSupport {
     registry.add("oms.security.jwks-uri", () -> JWKS_URI);
     registry.add("oms.security.audience", () -> "oms");
     registry.add("oms.security.internal-audience", () -> "oms-internal");
-    registry.add("oms.security.internal-client-ids", () -> "tsf,tsf-checkout");
+    registry.add("oms.security.internal-client-ids", () -> "tsf-checkout");
     registry.add("oms.inbox.worker-enabled", () -> "false");
   }
 

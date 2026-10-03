@@ -33,6 +33,7 @@ services:
       - "127.0.0.1:8090:8090"
     environment:
       PORT: "8090"
+      SPRING_PROFILES_ACTIVE: local,e2e
       MOCK_TSF_ISSUER: http://localhost:8090/tsf-idp
       MOCK_OMS_BASE_URL: http://host.docker.internal:8080
     extra_hosts:

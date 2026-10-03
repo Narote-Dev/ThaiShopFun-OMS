@@ -174,6 +174,7 @@ class OrderApiFiltersTest extends OrderIntegrationTest {
     OrderFixture.Shop shop = OrderFixture.shopFor(httpShop);
     fixture.insert(shop, "ORD_T17_LIKE_1", "READY_TO_PICK", "NONE");
     fixture.insert(shop, "ORD_T17LIKE1", "READY_TO_PICK", "NONE");
+    fixture.insert(shop, "ORDX1", "READY_TO_PICK", "NONE");
     assertThat(
             http.get(
                     OrderHttp.ordersPath(
@@ -185,12 +186,35 @@ class OrderApiFiltersTest extends OrderIntegrationTest {
         .isEqualTo(1);
     assertThat(
             http.get(
+                    OrderHttp.ordersPath(
+                        "?q=" + URLEncoder.encode("ORD_1", StandardCharsets.UTF_8)),
+                    httpShop.owner())
+                .body()
+                .path("total")
+                .asInt())
+        .isZero();
+    assertThat(
+            http.get(
                     OrderHttp.ordersPath("?q=" + URLEncoder.encode("%", StandardCharsets.UTF_8)),
                     httpShop.owner())
                 .body()
                 .path("total")
                 .asInt())
         .isZero();
+  }
+
+  @Test
+  void fifteenDigitLeadingZeroPhoneQueryReturns200WithoutServerError() throws Exception {
+    CatalogHttp.Shop httpShop = http.catalog().shop();
+    OrderFixture.Shop shop = OrderFixture.shopFor(httpShop);
+    fixture.insert(shop, "TH012345678901234", "READY_TO_PICK", "NONE");
+    CatalogHttp.Result result =
+        http.get(
+            OrderHttp.ordersPath(
+                "?q=" + URLEncoder.encode("012345678901234", StandardCharsets.UTF_8)),
+            httpShop.owner());
+    assertThat(result.status()).isEqualTo(200);
+    assertThat(result.body().path("total").asInt()).isEqualTo(1);
   }
 
   @Test

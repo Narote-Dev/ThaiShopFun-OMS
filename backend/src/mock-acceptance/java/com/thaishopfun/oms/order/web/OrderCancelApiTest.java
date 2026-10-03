@@ -118,6 +118,7 @@ class OrderCancelApiTest extends OrderIntegrationTest {
     registerMockOrder("TSF-240929-000123");
     SalesOrder order = fixture.insert(shop.fixture(), "TSF-240929-000123", "READY_TO_PICK", "NONE");
     clearCancelHits(order.externalOrderId());
+    long historyBefore = historyCount(order.id());
     CatalogHttp.Result first =
         http.post(
             OrderHttp.ordersPath("/" + order.id() + "/cancel-requests"),
@@ -127,7 +128,7 @@ class OrderCancelApiTest extends OrderIntegrationTest {
     assertThat(first.body().path("status").asString()).isEqualTo("PENDING");
     long historyRows = historyCount(order.id());
     long auditRows = auditCount(order.id());
-    assertThat(historyRows).isGreaterThanOrEqualTo(1);
+    assertThat(historyRows).isEqualTo(historyBefore + 1);
     assertThat(auditRows).isEqualTo(1);
     assertThat(holdReason(order.id())).isEqualTo("CHANNEL_CANCEL_PENDING");
     assertThat(cancelHits(order.externalOrderId())).hasSize(1);
@@ -224,7 +225,7 @@ class OrderCancelApiTest extends OrderIntegrationTest {
             OrderHttp.ordersPath("/" + order.id() + "/cancel-requests"),
             shop.owner(),
             Map.of("reason", "fault"));
-    assertThat(result.status()).isIn(502, 503, 429);
+    assertThat(result.status()).isEqualTo(503);
     assertThat(holdReason(order.id())).isEqualTo("NONE");
     assertThat(auditCount(order.id())).isZero();
   }
@@ -240,7 +241,7 @@ class OrderCancelApiTest extends OrderIntegrationTest {
             OrderHttp.ordersPath("/" + order.id() + "/cancel-requests"),
             shop.owner(),
             Map.of("reason", "rate"));
-    assertThat(result.status()).isIn(502, 503, 429);
+    assertThat(result.status()).isEqualTo(429);
     assertThat(holdReason(order.id())).isEqualTo("NONE");
     assertThat(cancelHits(order.externalOrderId())).isEmpty();
   }
