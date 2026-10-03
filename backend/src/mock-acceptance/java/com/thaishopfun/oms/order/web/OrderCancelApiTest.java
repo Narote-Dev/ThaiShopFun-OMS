@@ -11,6 +11,7 @@ import com.thaishopfun.oms.order.OrderRecipientRepository;
 import com.thaishopfun.oms.order.OrderStatusHistoryRepository;
 import com.thaishopfun.oms.order.SalesOrder;
 import com.thaishopfun.oms.order.SalesOrderRepository;
+import com.thaishopfun.oms.tenant.TenantContext;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
