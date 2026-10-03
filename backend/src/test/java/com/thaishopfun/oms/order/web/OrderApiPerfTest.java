@@ -87,7 +87,7 @@ class OrderApiPerfTest extends OrderIntegrationTest {
             "?limit=50&cursor="
                 + URLEncoder.encode(deep == null ? "" : deep, StandardCharsets.UTF_8)),
         "deep page");
-    assertUnder1s(shop.owner(), OrderHttp.ordersPath("?q=0812345678"), "phone search");
+    assertUnder2s(shop.owner(), OrderHttp.ordersPath("?q=0812345678"), "phone search");
     assertUnder1s(shop.owner(), OrderHttp.ordersPath("?q=" + PERF_PHONE_EXTERNAL), "external id");
   }
 

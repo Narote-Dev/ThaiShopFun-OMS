@@ -305,14 +305,6 @@ class OrderCancelApiTest extends OrderIntegrationTest {
 
   private ActiveShop shopActive() throws Exception {
     CatalogHttp.Shop httpShop = http.catalog().shop();
-    try (Connection admin = AuthTestSupport.admin()) {
-      try (PreparedStatement ps =
-          admin.prepareStatement("UPDATE tenant SET tsf_shop_id = ? WHERE id = ?")) {
-        ps.setString(1, "shop_active");
-        ps.setObject(2, httpShop.tenantId());
-        ps.executeUpdate();
-      }
-    }
     OrderFixture.Shop shop = OrderFixture.shopFor(httpShop);
     String staff =
         CatalogHttp.token("staff-" + UUID.randomUUID(), httpShop.shopId(), "STAFF", "ACTIVE");
@@ -326,14 +318,6 @@ class OrderCancelApiTest extends OrderIntegrationTest {
     CatalogHttp.Result me = http.get("/api/v1/me", owner);
     assertThat(me.status()).isEqualTo(200);
     UUID tenantId = UUID.fromString(me.body().path("tenant").path("id").asString());
-    try (Connection admin = AuthTestSupport.admin()) {
-      try (PreparedStatement ps =
-          admin.prepareStatement("UPDATE tenant SET tsf_shop_id = ? WHERE id = ?")) {
-        ps.setString(1, "shop_active");
-        ps.setObject(2, tenantId);
-        ps.executeUpdate();
-      }
-    }
     OrderFixture.Shop base = OrderFixture.shopFor(new CatalogHttp.Shop(shopId, owner, tenantId));
     return new ActiveShop(base, owner, owner);
   }

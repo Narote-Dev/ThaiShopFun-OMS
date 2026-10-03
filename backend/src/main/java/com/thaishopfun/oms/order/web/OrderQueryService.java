@@ -641,7 +641,7 @@ public class OrderQueryService {
         params.add(tracking.trackingNo());
       } else if (search instanceof ExternalSearch external) {
         String escaped = Fields.likeEscape(external.query());
-        where.append(" AND (o.external_order_id = ? OR o.external_order_id LIKE ? ESCAPE '\\\\')");
+        where.append(" AND (o.external_order_id = ? OR o.external_order_id LIKE ? ESCAPE '\\')");
         params.add(external.query());
         params.add(escaped + "%");
       }

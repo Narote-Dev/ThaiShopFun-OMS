@@ -68,26 +68,12 @@ public class OrderDemoCatalogService {
   }
 
   private ShopContext resolveShop() {
-    List<ShopContext> rows =
-        jdbc.query(
-            """
-            SELECT t.id AS tenant_id, ca.id AS channel_account_id
-            FROM tenant t
-            JOIN channel_account ca ON ca.tenant_id = t.id AND ca.channel = 'TSF'
-            WHERE t.tsf_shop_id = ?
-            LIMIT 1
-            """,
-            (rs, rowNum) ->
-                new ShopContext(
-                    rs.getObject("tenant_id", UUID.class),
-                    rs.getObject("channel_account_id", UUID.class),
-                    null,
-                    null),
-            SHOP);
-    if (rows.isEmpty()) {
+    UUID tenantId = TenantContext.tenantId();
+    ShopContext base =
+        tenantId != null ? resolveForTenant(tenantId) : resolveForTsfShop(SHOP);
+    if (base == null) {
       return null;
     }
-    ShopContext base = rows.get(0);
     List<UUID> products =
         jdbc.query(
             """
@@ -104,6 +90,46 @@ public class OrderDemoCatalogService {
           base.tenantId());
     }
     return new ShopContext(base.tenantId(), base.channelAccountId(), product, null);
+  }
+
+  private ShopContext resolveForTenant(UUID tenantId) {
+    List<ShopContext> rows =
+        jdbc.query(
+            """
+            SELECT t.id AS tenant_id, ca.id AS channel_account_id
+            FROM tenant t
+            JOIN channel_account ca ON ca.tenant_id = t.id AND ca.channel = 'TSF'
+            WHERE t.id = ?
+            LIMIT 1
+            """,
+            (rs, rowNum) ->
+                new ShopContext(
+                    rs.getObject("tenant_id", UUID.class),
+                    rs.getObject("channel_account_id", UUID.class),
+                    null,
+                    null),
+            tenantId);
+    return rows.isEmpty() ? null : rows.get(0);
+  }
+
+  private ShopContext resolveForTsfShop(String tsfShopId) {
+    List<ShopContext> rows =
+        jdbc.query(
+            """
+            SELECT t.id AS tenant_id, ca.id AS channel_account_id
+            FROM tenant t
+            JOIN channel_account ca ON ca.tenant_id = t.id AND ca.channel = 'TSF'
+            WHERE t.tsf_shop_id = ?
+            LIMIT 1
+            """,
+            (rs, rowNum) ->
+                new ShopContext(
+                    rs.getObject("tenant_id", UUID.class),
+                    rs.getObject("channel_account_id", UUID.class),
+                    null,
+                    null),
+            tsfShopId);
+    return rows.isEmpty() ? null : rows.get(0);
   }
 
   private void ensureWarehouse(ShopContext shop) {

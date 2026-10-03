@@ -182,7 +182,7 @@ class OrderApiFiltersTest extends OrderIntegrationTest {
   void longDigitQueryFallsThroughToExternalId() throws Exception {
     CatalogHttp.Shop httpShop = http.catalog().shop();
     OrderFixture.Shop shop = OrderFixture.shopFor(httpShop);
-    String external = "9123456789012345";
+    String external = "9177777777777777";
     fixture.insert(shop, external, "READY_TO_PICK", "NONE");
     assertThat(
             http.get(
