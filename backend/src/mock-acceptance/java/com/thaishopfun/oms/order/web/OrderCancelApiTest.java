@@ -12,6 +12,7 @@ import com.thaishopfun.oms.order.OrderRecipientRepository;
 import com.thaishopfun.oms.order.OrderStatusHistoryRepository;
 import com.thaishopfun.oms.order.SalesOrder;
 import com.thaishopfun.oms.order.SalesOrderRepository;
+import com.thaishopfun.oms.order.demo.OrderDemoCatalogService;
 import com.thaishopfun.oms.tenant.TenantContext;
 import java.io.IOException;
 import java.io.InputStream;
@@ -65,6 +66,7 @@ class OrderCancelApiTest extends OrderIntegrationTest {
   @Autowired OrderStatusHistoryRepository history;
   @Autowired PlatformTransactionManager transactions;
   @Autowired JdbcTemplate jdbc;
+  @Autowired OrderDemoCatalogService demoCatalog;
   private OrderFixture fixture;
   private static final HttpClient HTTP =
       HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
@@ -255,16 +257,7 @@ class OrderCancelApiTest extends OrderIntegrationTest {
         CatalogHttp.token("owner-demo-" + UUID.randomUUID(), "shop_active", "OWNER", "ACTIVE");
     assertThat(http.get("/api/v1/me", owner).status()).isEqualTo(200);
     TenantContext.clear();
-    HttpResponse<String> catalog =
-        HTTP.send(
-            HttpRequest.newBuilder(
-                    URI.create("http://127.0.0.1:" + port + "/control/demo/order-catalog"))
-                .POST(HttpRequest.BodyPublishers.noBody())
-                .timeout(HTTP_TIMEOUT)
-                .build(),
-            HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-    assertThat(catalog.statusCode()).isEqualTo(200);
-    assertThat(JSON.readTree(catalog.body()).path("status").asString()).isEqualTo("OK");
+    assertThat(demoCatalog.ensureDemoCatalog().get("status")).isEqualTo("OK");
 
     String shop = "shop_active";
     ingest(orderCreated("DEMO-READY", shop, "res-demo-ready", "PREPAID", "L-demo-ready", 1));
@@ -286,10 +279,10 @@ class OrderCancelApiTest extends OrderIntegrationTest {
 
     assertDemoOrder("DEMO-READY", "READY_TO_PICK", "PAID", "NONE", null);
     assertDemoOrder("DEMO-COD", "READY_TO_PICK", "COD_PENDING", "NONE", null);
-    assertDemoOrder("DEMO-OOS", "READY_TO_PICK", "COD_PENDING", "OUT_OF_STOCK", null);
+    assertDemoOrder("DEMO-OOS", "UNFULFILLED", "COD_PENDING", "OUT_OF_STOCK", null);
     assertDemoOrder("DEMO-UNMAPPED", "UNFULFILLED", "COD_PENDING", "SKU_NOT_MAPPED", null);
     assertDemoOrder(
-        "DEMO-BUNDLE", "READY_TO_PICK", "COD_PENDING", "OUT_OF_STOCK", "bundle has no components");
+        "DEMO-BUNDLE", "UNFULFILLED", "COD_PENDING", "OUT_OF_STOCK", "bundle has no components");
     assertDemoOrder("DEMO-CANCELLED", "CANCELLED", "COD_PENDING", "NONE", null);
   }
 
