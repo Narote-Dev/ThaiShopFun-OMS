@@ -76,14 +76,14 @@
 | สถานะ | จำนวน | task |
 |---|---|---|
 | ✅ เสร็จ + merge แล้ว | 16 | T02, T03, T04, T05, T06, T07, T08, T08A, T10, T11, T12, T13, T14, T14B, T16, T17 |
-| 🟡 ทำแล้วบางส่วน | 4 | **T01** (CI/local ผ่าน แต่ยังไม่มี staging deploy อัตโนมัติ + health บน staging), **T01C** (in-repo `contracts/` มีแล้ว ยังขาด AsyncAPI + `oasdiff`), **T12A** (PR #15 merge: API + V9 ครบ · perf AC ยังไม่ผ่าน — ไม่นับใน ✅), **T27** (เข้ารหัส PII + `phone_hash` มากับ T10 แล้ว ส่วน lifecycle ยังไม่ทำ) |
+| 🟡 ทำแล้วบางส่วน | 4 | **T01** (CI/local ครบ · ส่วนที่เหลือ = staging auto-deploy จาก `main` + health UP → **T26 AC**), **T01C** (in-repo `contracts/` มีแล้ว ยังขาด AsyncAPI + `oasdiff`), **T12A** (PR #15 merge: API + V9 ครบ · perf AC ยังไม่ผ่าน — ไม่นับใน ✅), **T27** (เข้ารหัส PII + `phone_hash` มากับ T10 แล้ว ส่วน lifecycle ยังไม่ทำ) |
 | 🔨 กำลังทำ | 1 | T12B (branch `feat/T12B-sku-mapping` — cloud agent กำลังทำ ห้ามเปิดงานซ้ำ) |
 | ⬜ ยังไม่เริ่ม | 18 | T00, T09, T12C, T15, T18, T19, T20, T21, T22, T23, T24, T25, T26, T28, T40, T41, T42, T43 |
 
 ### งานที่เสร็จแล้ว (ตรวจกับ `git log` และ closed PRs: merge ทั้งหมด 20 PR, ไม่มี PR #2)
 | Task | PR | สิ่งที่ได้ |
 |---|---|---|
-| T01 | [#1](https://github.com/Narote-Dev/ThaiShopFun-OMS/pull/1) | Monorepo skeleton (backend/frontend), docker-compose, CI, `.railway/railway.ts` (ยังไม่ apply / ไม่มี staging health UP — นับเป็น 🟡 บางส่วน) |
+| T01 | [#1](https://github.com/Narote-Dev/ThaiShopFun-OMS/pull/1) | Monorepo skeleton (backend/frontend), docker-compose, CI, `.railway/railway.ts` — **ส่วนที่เหลือ (staging CD + health) ติดตามใน T26** ไม่ใช่ task แยก |
 | T02 | [#3](https://github.com/Narote-Dev/ThaiShopFun-OMS/pull/3) | Flyway V1: ตารางพื้นฐาน, FORCE RLS, roles `oms_migrator` / `oms_app` / `oms_maint` |
 | T03 | [#4](https://github.com/Narote-Dev/ThaiShopFun-OMS/pull/4) | JWT auth, TenantContext, RLS ต่อ transaction, entitlement gate, JIT provisioning (V2) |
 | T14 | [#5](https://github.com/Narote-Dev/ThaiShopFun-OMS/pull/5) | Outbox publisher at-least-once (lease, backoff, DEAD, หน้า admin retry) |
@@ -123,7 +123,8 @@
 | **T12C** | gap/backfill | อยู่ใน critical path ก่อน pilot (ออเดอร์ไม่หายเมื่อ webhook ล่ม) |
 | **Q2 (hosting)** | **T26** | prod/staging deploy + PITR รอ Narote เลือก host/งบ |
 | **hosting สาธารณะ + HTTPS (Q2)** | **T28** | T28 อยู่ใน launch set (39 task) · ทำได้เมื่อมีโดเมน HTTPS สาธารณะ |
-| **TSF-10…12** | **T21**, launch | Pay/refund events, billing, prod SSO entry |
+| **TSF-10** | **T21** | Pay/refund events (mock ไม่ครบจนกว่า TSF จริง) |
+| **TSF-11**, **TSF-12** | **Launch** | Billing/membership UI + prod SSO entry — ไม่บล็อก Phase 3 (OMS ใช้ `mock-tsf` ได้ถึงจบ Phase 3) |
 
 ```mermaid
 flowchart LR
@@ -139,7 +140,9 @@ flowchart LR
   T26 --> T42 & T43
   Q2[Q2 hosting] --> T26
   HOST[Public HTTPS host] --> T28
-  TSF1012[TSF-10..12] --> T21
+  TSF10[TSF-10] --> T21
+  TSF11[TSF-11] --> Launch
+  TSF12[TSF-12] --> Launch
 ```
 
 ### Phase 0–1 ที่ค้าง (**T00 ต้องทำก่อน T09/T19**)
@@ -195,7 +198,7 @@ flowchart LR
 ### Phase 4: Pilot
 | ลำดับ | Task | ผู้ทำ | Deps | ขนาด | Acceptance หลัก |
 |---|---|---|---|---|---|
-| 1 | **T26** Prod deploy + observability + PITR | Cursor | T22, **Q2** | L | prod deploy ต้องกดเอง (Narote) · JSON log + `trace_id` · alert · PITR healthy · **blocked จนกว่า Q2** · **SPA→API:** same-origin reverse proxy `/api`→backend (แนะนำ default; `frontend/nginx.conf.template` ยังไม่มี) **หรือ** implement `VITE_OMS_API_BASE_URL` ใน `apiRequest` + CORS ที่ backend · cross-host smoke (login + `GET /api/v1/me`) · startup env validation + staging smoke (หัวข้อ 5.2) |
+| 1 | **T26** Prod deploy + observability + PITR | Cursor | T22, **Q2** | L | **รวม T01 ที่เหลือ:** staging deploy อัตโนมัติจาก `main` + `GET /actuator/health` = UP บน staging (C2) · prod deploy ต้องกดเอง (Narote) · JSON log + `trace_id` · alert · PITR healthy · **SPA→API** (proxy `/api` หรือ base URL + CORS) + cross-host smoke · startup env validation (หัวข้อ 5.2) |
 | 1 | **T40** Connection modes + emergency controls | Cursor | T12A ✅, T15, T22 | L | ข้ามขั้น mode ไม่ได้ · PAUSE มีผลใน 5 วิ · DISCONNECT → `enforced=false` · RESYNC ครบ · ยืนยัน 2 ขั้น + audit |
 | 2 | **T41** Shadow diff report | Codex | T40, T23 | M | diff % รายวัน · เกณฑ์ < 0.5% 7 วันคำนวณถูก |
 | 2 | **T24** Dashboard + audit viewer | Cursor | T17 ✅, T40 | M | ตัวเลขการ์ดตรง query · audit ไม่แสดง PII |
@@ -223,25 +226,24 @@ flowchart LR
 
 ### Critical path (เส้นทางที่ช้าที่สุดถึง launch)
 ```
-T00 ────────────────────────────────┐
-T12B ─┐                             │
-T12C ─┼─ T15 ── T23 ───────────────┤
-T27 ──┴─ T18 ─┐                     │
-T20 ──────────┼─ T22 ─ T40 ─────────┼─ T41 ─┐
-T21 ──────────┘                     │      │
-       └──────────────► T19 (E2E) ───┘      │
-                         T26 ◄── Q2 hosting  │
-                         T28 (public page, ต้อง Q2)
-                         T42, T43, T25, T24 ┴─ Pilot 5 ขั้น ─ Launch
-                         ▲
-              TSF-01…12 (รวม Pay/billing/prod SSO) + GTM-01…04
+T00 ─────────────────────────────────────────┐
+T12 → T12B & T12C (คู่ขนาน)                  │
+T08 + T14 + T16 → T15 → T23                  │
+T27 → T18 ─┐                                 │
+T20 ───────┼→ T22 → T40 ─┬→ T41              │
+T21 ◄─ TSF-10            │                   │
+       └──────► T19 (E2E)┘                   │
+T26 ◄── Q2 (รวม T01 staging CD + health)     │
+T28 ◄── public HTTPS host                    │
+T42, T43, T25, T24 → Pilot 5 ขั้น → Launch   │
+         ▲ TSF-11, TSF-12 (launch) · TSF-01…09 (pilot) · GTM-01…04
 ```
 
 ---
 
 ## 4. งานฝั่ง ThaiShopFun (TSF-xx) ที่ต้องทำคู่กัน
 
-> OMS ใช้ `mock-tsf` แทนได้ถึง Phase 3 แต่ **Phase 4 (pilot) เริ่มไม่ได้** ถ้า TSF จริงยังไม่พร้อม ([02](plan/02-mvp-scope.md))
+> OMS ใช้ **`mock-tsf` แทน TSF จริงได้ครบถึงจบ Phase 3** (รวม E2E T19) · **TSF-10** ต้องมีก่อน T21 จริง · **TSF-11/12** เป็นเงื่อนไข **launch** ไม่บล็อกงาน Phase 3 ใน repo นี้ · **Phase 4 (pilot)** ต้องมี TSF-01…09 บน staging/prod ([02](plan/02-mvp-scope.md))
 > สถานะฝั่ง TSF ไม่มีใน repo นี้ → ทุกแถวเป็น **TBD** จนกว่าจะยืนยันกับทีม TSF
 
 | ID | ต้องพร้อมก่อน OMS task | งาน (สั้น) | สถานะ |
@@ -296,7 +298,7 @@ T21 ──────────┘                     │      │
 ### 5.2 Infra / Deploy
 | # | รายการ | ตัวเลือก / หมายเหตุ |
 |---|---|---|
-| I0 | **Config ต่อ environment** (ชื่อตัวแปรตรวจจาก `application.yml`, `backend/.env.example`, `frontend/.env.example`) | ดูตาราง **5.2.1** · งาน T26: startup validation (`RuntimeRoleGuard`, PII guard, **`oms.security.internal-client-ids` ไม่ว่าง**) + staging smoke (health, SSO, `GET /api/v1/me`, internal client ยิง reserve ได้) |
+| I0 | **Config ต่อ environment** (ชื่อตัวแปรตรวจจาก `application.yml`, `backend/.env.example`, `frontend/.env.example`) | ดูตาราง **5.2.1** · งาน T26: startup validation (`RuntimeRoleGuard`, PII guard, **`OMS_SECURITY_INTERNAL_CLIENT_IDS` ไม่ว่าง**) + staging smoke (health, SSO, `GET /api/v1/me`, internal client ยิง reserve ได้) |
 | I1 | **Hosting backend + Postgres** | Railway (plan แนะนำ: region Singapore, PITR, HA Postgres ก่อนร้านแรกเข้า CONTROL) หรือที่อื่นที่รัน Java container + managed Postgres ได้ → **รอ Narote ตัดสินใจ + งบ (Q2)** |
 | I2 | **Hosting frontend + API routing** | Static build (Vercel หรือ Railway `frontend`) · **`apiRequest` เรียก path สัมพัทธ์ `/api/...` เท่านั้น** (`frontend/src/api/client.ts`) — local ใช้ Vite proxy · prod ต้อง **reverse proxy `/api`** (T26) · `VITE_OMS_API_BASE_URL` ประกาศใน `.env.example` / `.railway/railway.ts` แต่ **ยังไม่ถูกอ่านในโค้ด** · backend **ไม่มี** CORS สำหรับ SPA ข้าม origin |
 | I3 | Mock TSF | ใช้ใน local/CI/staging เท่านั้น ห้ามขึ้น prod |
@@ -318,7 +320,7 @@ T21 ──────────┘                     │      │
 | `TSF_JWKS_URI` หรือ `OMS_JWKS_URI` | JWKS | mock `8090` | TSF staging JWKS | TSF prod JWKS |
 | `OMS_JWT_AUDIENCE` | User API | `oms` | `oms` | `oms` |
 | `OMS_JWT_INTERNAL_AUDIENCE` | `/internal/**` service JWT (`aud`) | `oms-internal` | `oms-internal` | `oms-internal` |
-| `oms.security.internal-client-ids` | allowlist `azp`/`client_id` สำหรับ **ทุก** `/internal/**` (รวม `POST /internal/v1/events` webhook **และ** checkout reserve) · default `[]` ใน `application.yml` = service token ทุกตัว **401** | local profile: `tsf` (`application-local.yml`) · acceptance ใช้ `tsf,tsf-checkout` | ตั้งตาม client จริงของ TSF (อย่างน้อย client ที่ยิง webhook + client ที่เรียก reserve) | prod clients ใหม่ |
+| `OMS_SECURITY_INTERNAL_CLIENT_IDS` | → `oms.security.internal-client-ids` (`List<String>`) · Spring relaxed binding: **ค่าเดียว comma-separated** (เช่น `tsf,tsf-checkout`) · allowlist `azp`/`client_id` สำหรับ **ทุก** `/internal/**` (webhook `POST /internal/v1/events` + checkout reserve) · default `[]` = service token **401** | local YAML: `tsf` · tests: `tsf,tsf-checkout` | client จริงของ TSF staging | prod clients ใหม่ |
 | `OMS_TSF_BASE_URL` | TSF REST 4.7 | mock `8090` | TSF staging API | TSF prod API |
 | `OMS_TSF_TOKEN_URI` | client credentials | mock token endpoint | TSF staging | TSF prod |
 | `OMS_TSF_CLIENT_ID` / `OMS_TSF_CLIENT_SECRET` | service client | `oms-service` + dev secret (local profile) | secret manager | prod secret |
@@ -363,7 +365,7 @@ T21 ──────────┘                     │      │
 | # | รายการ | สถานะ |
 |---|---|---|
 | C1 | CI: backend verify + mock acceptance, chaos, mock-tsf, perf, contracts, frontend, Playwright e2e | ✅ (`.github/workflows/ci.yml`) |
-| C2 | CD ไป staging อัตโนมัติจาก `main` | ⬜ (T01 AC นี้ยังไม่ได้ทำ เพราะ localhost-only) |
+| C2 | CD ไป staging อัตโนมัติจาก `main` + health UP บน staging | ⬜ — **AC อยู่ใน T26** (ส่วนที่เหลือของ T01) |
 | C3 | Promote ไป prod แบบกดเอง + rollback plan | ⬜ T26 |
 | C4 | แก้ test flaky (`InboxApiTest`) ก่อนใช้ CI เป็นด่าน deploy | ⬜ backlog |
 | C5 | Migration check: CI ใช้ bootstrap superuser ตาม Testcontainers (เหมือน local) · prod/staging ต้อง migrate ด้วย privileged bootstrap แล้วรัน app เป็น `oms_app` (S5) | ⬜ guard ใน T25/T26 |
@@ -505,7 +507,7 @@ T21 ──────────┘                     │      │
 | 18 | T17 P3: demo stock ไม่มี ledger rows | review | ต่ำ | — |
 | 19 | Orders list: snapshot commit-visibility window (ออเดอร์ที่ commit หลัง snapshot อาจโผล่หน้าถัดไป) — **บันทึกไว้แล้วใน [orders.md](api/orders.md)** ยอมรับได้ | T17 #21 | ต่ำ | — |
 | 20 | `InboxWorker` TODO: handler ต้องใช้ snapshot เต็มใน `data` จนกว่าจะมี REST refetch | โค้ด | กลาง | T12C |
-| 22 | T01 AC "deploy staging อัตโนมัติ + health UP บน staging" ยังไม่ผ่าน (localhost-only) | ตรวจพบ | ตาม Q1 | T26 |
+| 22 | T01 remainder (staging CD + health) — ติดตามใน **T26 AC** ไม่ใช่ owner แยก | ตรวจพบ | ตาม Q1/Q2 | T26 |
 | 23 | T01C: AsyncAPI + `oasdiff` ยังไม่มี | ตรวจพบ | กลาง | TSF-08 |
 
 ---

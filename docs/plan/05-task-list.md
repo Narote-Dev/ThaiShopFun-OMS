@@ -107,7 +107,7 @@ flowchart LR
 
 **T01 · Cursor · deps: —** Repo skeleton + staging
 - repo `oms`: `backend/` (Spring Boot 4.1, Java 17, Maven wrapper), `frontend/` (Vite + React + TS), `docker-compose.yml` (Postgres 16+), GitHub Actions, deploy staging (Railway) อัตโนมัติจาก `main`
-- AC: `./mvnw verify` + `npm ci && npm run build && npm test` ผ่านใน CI · `/actuator/health` = UP บน staging · README รัน local ใน 3 คำสั่ง · Spotless/ESLint บังคับ
+- AC: `./mvnw verify` + `npm ci && npm run build && npm test` ผ่านใน CI · README รัน local ใน 3 คำสั่ง · Spotless/ESLint บังคับ · **ส่วนที่เหลือ** (staging auto-deploy จาก `main` + `/actuator/health` = UP บน staging) → **T26 AC** ไม่มี owner แยก
 
 **T01C · Codex · deps: —** Contracts (in-repo)
 - in-repo `contracts/`: OpenAPI 3.1 (OMS internal + TSF internal), AsyncAPI 3 + JSON Schema ทุก event ใน 04, examples, CI (Spectral lint, validate examples, `oasdiff` breaking check); อาจย้ายไป `tsf-oms-contracts` ภายหลังแบบเดิม
