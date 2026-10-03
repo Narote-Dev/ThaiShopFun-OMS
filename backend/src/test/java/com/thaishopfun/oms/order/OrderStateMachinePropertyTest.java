@@ -119,12 +119,7 @@ class OrderStateMachinePropertyTest {
   }
 
   private boolean oracleExpectsSuccess(
-      SalesOrder order,
-      String dimension,
-      String from,
-      String to,
-      GuardContext guards,
-      Shop shop) {
+      SalesOrder order, String dimension, String from, String to, GuardContext guards, Shop shop) {
     if (!from.equals(dimensionValue(order, dimension))) {
       return false;
     }
@@ -137,7 +132,9 @@ class OrderStateMachinePropertyTest {
     if (from.equals(to) && !"HOLD".equals(dimension)) {
       return true;
     }
-    if ("ORDER".equals(dimension) && "CANCELLED".equals(order.orderStatus()) && !"CANCELLED".equals(to)) {
+    if ("ORDER".equals(dimension)
+        && "CANCELLED".equals(order.orderStatus())
+        && !"CANCELLED".equals(to)) {
       return false;
     }
     if ("ORDER".equals(dimension)
