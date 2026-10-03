@@ -95,11 +95,11 @@ public class OrderQueryService {
                   search);
           OrderListCursor cursor =
               cursorRaw == null || cursorRaw.isBlank()
-                  ? OrderListCursor.firstPage(Instant.now())
+                  ? OrderListCursor.firstPage(listSnapshotInstant())
                   : OrderListCursor.decode(cursorRaw);
           List<Object> countParams = new ArrayList<>(filter.params());
           StringBuilder countWhere = new StringBuilder(filter.where());
-          countWhere.append(" AND o.ordered_at <= ?");
+          countWhere.append(" AND o.created_at <= ?");
           countParams.add(java.sql.Timestamp.from(cursor.snapshotBefore()));
           long total =
               jdbc.queryForObject(
@@ -108,7 +108,7 @@ public class OrderQueryService {
                   countParams.toArray());
           List<Object> whereParams = new ArrayList<>(filter.params());
           StringBuilder where = new StringBuilder(filter.where());
-          where.append(" AND o.ordered_at <= ?");
+          where.append(" AND o.created_at <= ?");
           whereParams.add(java.sql.Timestamp.from(cursor.snapshotBefore()));
           if (cursor.hasKeyset()) {
             where.append(" AND (o.ordered_at < ? OR (o.ordered_at = ? AND o.id < ?))");
@@ -338,6 +338,11 @@ public class OrderQueryService {
             Boolean.class,
             orderId);
     return Boolean.TRUE.equals(bundle) ? "BUNDLE_WITHOUT_COMPONENTS" : null;
+  }
+
+  private Instant listSnapshotInstant() {
+    return jdbc.queryForObject(
+        "SELECT clock_timestamp()", (rs, rowNum) -> rs.getTimestamp(1).toInstant());
   }
 
   private OrderViews.ListItem mapListItem(ResultSet rs, int rowNum) throws SQLException {

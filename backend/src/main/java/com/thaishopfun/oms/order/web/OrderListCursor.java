@@ -4,7 +4,7 @@ import com.thaishopfun.oms.catalog.CatalogApiException;
 import java.time.Instant;
 import java.util.UUID;
 
-/** Keyset cursor with a list snapshot upper bound (ordered_at). */
+/** Keyset cursor with a list snapshot upper bound ({@code sales_order.created_at}). */
 final class OrderListCursor {
 
   private final Instant snapshotBefore;
