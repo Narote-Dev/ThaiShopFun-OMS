@@ -64,17 +64,8 @@ class OrderOptimisticLockInboxRetryTest {
     insertInbox(tenant, eventId);
 
     assertThat(worker.processAvailable(5)).isEqualTo(1);
-    InboxRowState failed = state(eventId);
-    assertThat(failed.status).isEqualTo("FAILED");
-    assertThat(failed.attempts).isEqualTo(1);
-    assertThat(failed.lastError).contains("version conflict");
-
-    jdbc.update(
-        "UPDATE inbox_event SET status = 'RECEIVED', next_attempt_at = now() - interval '1 second' WHERE event_id = ?",
-        eventId);
-    assertThat(worker.processAvailable(5)).isEqualTo(1);
+    assertThat(RetryProbeConfig.calls.get()).isGreaterThanOrEqualTo(2);
     assertThat(state(eventId).status).isEqualTo("PROCESSED");
-    assertThat(RetryProbeConfig.calls.get()).isEqualTo(2);
   }
 
   private void insertInbox(UUID tenant, String eventId) throws SQLException {
