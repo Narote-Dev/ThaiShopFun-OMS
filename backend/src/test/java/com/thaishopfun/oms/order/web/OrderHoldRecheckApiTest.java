@@ -38,7 +38,7 @@ class OrderHoldRecheckApiTest extends OrderIntegrationTest {
         http.postHoldRecheck(order.id().toString(), httpShop.owner(), key129);
     assertThat(response.status()).isEqualTo(422);
     assertThat(response.body().path("error").asString()).isEqualTo("VALIDATION_FAILED");
-    assertThat(response.body().path("details").get(0).path("field").asString())
+    assertThat(response.body().path("errors").get(0).path("field").asString())
         .isEqualTo("Idempotency-Key");
     long rows =
         CatalogHttp.count(
