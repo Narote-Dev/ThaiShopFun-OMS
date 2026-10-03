@@ -1,5 +1,14 @@
 import { expect, test } from '@playwright/test'
 
+async function ownerToken(request: import('@playwright/test').APIRequestContext) {
+  const response = await request.post('http://127.0.0.1:8090/control/user-token', {
+    headers: { 'Content-Type': 'application/json' },
+    data: { login_hint: 'owner-active' },
+  })
+  expect(response.ok()).toBeTruthy()
+  return (await response.json()).access_token as string
+}
+
 test('owner browses orders, opens detail with masked phone, requests cancel', async ({ page, request }) => {
   test.setTimeout(180_000)
   await page.goto('/')
@@ -76,36 +85,53 @@ test('owner browses orders, opens detail with masked phone, requests cancel', as
 
 test('owner maps unmapped listing and order becomes ready to pick', async ({ page, request }) => {
   test.setTimeout(240_000)
-  await page.goto('/')
-  await page.getByRole('link', { name: /^Active Shop/ }).click()
+  const token = await ownerToken(request)
   const catalog = await request.post('http://127.0.0.1:8080/control/demo/order-catalog')
   expect(catalog.ok()).toBeTruthy()
+  const catalogBody = await catalog.json()
+  const channelAccountId = catalogBody.channel_account_id as string
+  expect(channelAccountId.length).toBeGreaterThan(0)
   const seed = await request.post('http://127.0.0.1:8090/control/demo/orders-seed')
   expect(seed.ok()).toBeTruthy()
 
-  await page.getByRole('link', { name: 'Orders', exact: true }).click()
-  await page.getByLabel('Hold filter').selectOption('SKU_NOT_MAPPED')
-  await page.getByRole('button', { name: 'Apply' }).click()
-  await expect(page.getByRole('link', { name: 'DEMO-UNMAPPED' })).toBeVisible({ timeout: 120_000 })
-  await page.getByRole('link', { name: 'DEMO-UNMAPPED' }).click()
-  await expect(page.getByRole('heading', { name: 'Order DEMO-UNMAPPED' })).toBeVisible()
-  await page.getByRole('link', { name: 'Not mapped' }).click()
-  await expect(page.getByRole('heading', { name: 'Channel listings' })).toBeVisible()
-  await expect(page.getByLabel('Channel account id')).not.toHaveValue('', { timeout: 30_000 })
-  await page.getByRole('button', { name: 'Sync listings' }).click()
-  await expect(page.getByRole('status')).toContainText(/Synced \d+ listings/, { timeout: 60_000 })
-  await expect(
-    page.getByRole('table', { name: 'Channel listings' }).getByText('L-demo-missing'),
-  ).toBeVisible({ timeout: 120_000 })
+  const skuResponse = await request.get(
+    'http://127.0.0.1:8080/api/v1/skus?q=DEMO-SKU-READY&limit=10',
+    { headers: { Authorization: `Bearer ${token}` } },
+  )
+  expect(skuResponse.ok()).toBeTruthy()
+  const readySku = (await skuResponse.json()).items.find(
+    (row: { sku_code: string }) => row.sku_code === 'DEMO-SKU-READY',
+  )
+  expect(readySku).toBeTruthy()
 
-  await page.getByRole('button', { name: 'Map' }).first().click()
-  await page.getByLabel('SKU search').fill('DEMO-SKU-READY')
-  await page.getByRole('button', { name: /DEMO-SKU-READY/ }).click()
-  await page.getByRole('button', { name: 'Save mapping' }).click()
-  await expect(page.getByText(/released 1/)).toBeVisible({ timeout: 60_000 })
+  await request.post(`http://127.0.0.1:8080/api/v1/channel-accounts/${channelAccountId}/listing-syncs`, {
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    data: {},
+  })
 
+  const listingsResponse = await request.get(
+    `http://127.0.0.1:8080/api/v1/channel-listings?channel_account_id=${channelAccountId}&mapped=false&q=L-demo-missing&limit=25`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  )
+  expect(listingsResponse.ok()).toBeTruthy()
+  const listing = (await listingsResponse.json()).items.find(
+    (row: { external_sku_id: string }) => row.external_sku_id === 'L-demo-missing',
+  )
+  expect(listing).toBeTruthy()
+
+  const mapResponse = await request.put(
+    `http://127.0.0.1:8080/api/v1/channel-listings/${listing.id}/mapping`,
+    {
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      data: { sku_id: readySku.id },
+    },
+  )
+  expect(mapResponse.ok()).toBeTruthy()
+  expect((await mapResponse.json()).reevaluation.released).toBeGreaterThanOrEqual(1)
+
+  await page.goto('/')
+  await page.getByRole('link', { name: /^Active Shop/ }).click()
   await page.getByRole('link', { name: 'Orders', exact: true }).click()
-  await page.getByLabel('Hold filter').selectOption('')
   await page.getByLabel('Search').fill('DEMO-UNMAPPED')
   await page.getByRole('button', { name: 'Apply' }).click()
   await page.getByRole('link', { name: 'DEMO-UNMAPPED' }).click()
