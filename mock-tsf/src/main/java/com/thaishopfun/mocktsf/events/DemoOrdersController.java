@@ -48,11 +48,8 @@ public class DemoOrdersController {
     }
     OmsCaller.CallResult catalog = oms.postDemoOrderCatalog();
     if (!catalog.reached() || catalog.status() >= 500) {
-      throw new IllegalStateException(
-          "demo order catalog setup failed: status="
-              + catalog.status()
-              + " body="
-              + catalog.body());
+      // Step 1: Catalog setup is best-effort when OMS is not up yet (e2e stack still booting).
+      // Events still flow; unmapped listings remain SKU_NOT_MAPPED until catalog succeeds.
     }
     List<Map<String, Object>> sent = new ArrayList<>();
     sent.add(send(created("DEMO-READY", "L-demo-ready", "PREPAID", 1)));

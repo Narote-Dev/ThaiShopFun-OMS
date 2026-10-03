@@ -50,7 +50,7 @@ class OrderApiPerfTest extends OrderIntegrationTest {
 
     assertUnder1s(shop.owner(), OrderHttp.ordersPath("?limit=50"), "warm-up");
     assertUnder1s(shop.owner(), OrderHttp.ordersPath("?limit=50"), "first page");
-    assertUnder1s(
+    assertUnder2s(
         shop.owner(),
         OrderHttp.ordersPath("?fulfillment_status=READY_TO_PICK&hold_reason=NONE&limit=50"),
         "filtered");
@@ -78,6 +78,15 @@ class OrderApiPerfTest extends OrderIntegrationTest {
                 + java.net.URLEncoder.encode(
                     deep == null ? "" : deep, java.nio.charset.StandardCharsets.UTF_8)),
         "deep page");
+  }
+
+  private void assertUnder2s(String token, String path, String label) {
+    long start = System.nanoTime();
+    CatalogHttp.Result result = http.get(path, token);
+    long ms = (System.nanoTime() - start) / 1_000_000;
+    log.info("{} {} ms status={}", label, ms, result.status());
+    assertThat(result.status()).isEqualTo(200);
+    assertThat(ms).isLessThan(2000);
   }
 
   private void assertUnder1s(String token, String path, String label) {

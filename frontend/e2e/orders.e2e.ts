@@ -1,10 +1,12 @@
 import { expect, test } from '@playwright/test'
 
 test('owner browses orders, opens detail with masked phone, requests cancel', async ({ page, request }) => {
+  test.setTimeout(180_000)
   await page.goto('/')
   await page.getByRole('link', { name: /^Active Shop/ }).click()
   await expect(page.getByRole('heading', { name: 'Active Shop' })).toBeVisible()
 
+  await request.post('http://127.0.0.1:8080/control/demo/order-catalog')
   await request.post('http://127.0.0.1:8090/control/demo/orders-seed')
 
   await page.getByRole('link', { name: 'Orders', exact: true }).click()

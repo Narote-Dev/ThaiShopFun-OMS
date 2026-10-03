@@ -52,6 +52,7 @@ class OrderCancelApiTest extends OrderIntegrationTest {
 
   @DynamicPropertySource
   static void mockTsf(DynamicPropertyRegistry registry) {
+    AuthTestSupport.register(registry);
     startMock();
     int port = mockPort();
     registry.add("oms.tsf.base-url", () -> "http://127.0.0.1:" + port);
@@ -195,37 +196,56 @@ class OrderCancelApiTest extends OrderIntegrationTest {
 
   private record ActiveShop(OrderFixture.Shop fixture, String owner, String staff) {}
 
-  private String holdReason(UUID orderId) {
-    return fixture.inTenant(
-        tenantIdFor(orderId),
-        () ->
-            jdbc.queryForObject(
-                "SELECT hold_reason FROM sales_order WHERE id = ?", String.class, orderId));
+  private String holdReason(UUID orderId) throws Exception {
+    try (Connection admin = AuthTestSupport.admin();
+        PreparedStatement ps =
+            admin.prepareStatement("SELECT hold_reason FROM sales_order WHERE id = ?")) {
+      ps.setObject(1, orderId);
+      try (var rs = ps.executeQuery()) {
+        rs.next();
+        return rs.getString(1);
+      }
+    }
   }
 
-  private UUID tenantIdFor(UUID orderId) {
-    return jdbc.queryForObject(
-        "SELECT tenant_id FROM sales_order WHERE id = ?", UUID.class, orderId);
+  private UUID tenantIdFor(UUID orderId) throws Exception {
+    try (Connection admin = AuthTestSupport.admin();
+        PreparedStatement ps =
+            admin.prepareStatement("SELECT tenant_id FROM sales_order WHERE id = ?")) {
+      ps.setObject(1, orderId);
+      try (var rs = ps.executeQuery()) {
+        if (!rs.next()) {
+          throw new IllegalStateException("order not found: " + orderId);
+        }
+        return rs.getObject("tenant_id", UUID.class);
+      }
+    }
   }
 
-  private long historyCount(UUID orderId) {
-    return fixture.inTenant(
-        tenantIdFor(orderId),
-        () ->
-            jdbc.queryForObject(
-                "SELECT count(*) FROM order_status_history WHERE order_id = ?",
-                Long.class,
-                orderId));
+  private long historyCount(UUID orderId) throws Exception {
+    try (Connection admin = AuthTestSupport.admin();
+        PreparedStatement ps =
+            admin.prepareStatement(
+                "SELECT count(*) FROM order_status_history WHERE order_id = ?")) {
+      ps.setObject(1, orderId);
+      try (var rs = ps.executeQuery()) {
+        rs.next();
+        return rs.getLong(1);
+      }
+    }
   }
 
-  private long auditCount(UUID orderId) {
-    return fixture.inTenant(
-        tenantIdFor(orderId),
-        () ->
-            jdbc.queryForObject(
-                "SELECT count(*) FROM audit_log WHERE entity_type = 'sales_order' AND entity_id = ?",
-                Long.class,
-                orderId.toString()));
+  private long auditCount(UUID orderId) throws Exception {
+    try (Connection admin = AuthTestSupport.admin();
+        PreparedStatement ps =
+            admin.prepareStatement(
+                "SELECT count(*) FROM audit_log WHERE entity_type = 'sales_order' AND entity_id = ?")) {
+      ps.setObject(1, orderId.toString());
+      try (var rs = ps.executeQuery()) {
+        rs.next();
+        return rs.getLong(1);
+      }
+    }
   }
 
   private static void armFault(String method, String path, int status, int times) throws Exception {
