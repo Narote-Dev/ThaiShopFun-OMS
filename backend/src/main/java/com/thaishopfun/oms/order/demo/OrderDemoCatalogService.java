@@ -70,12 +70,31 @@ public class OrderDemoCatalogService {
     stock(shop, cod, 50);
     stock(shop, oos, 0);
     stock(shop, component, 50);
-    ensureListing(shop, "L-demo-ready", ready, true, "DEMO-SKU-READY", "Demo ready");
-    ensureListing(shop, "L-demo-cod", cod, true, "DEMO-SKU-COD", "Demo COD");
-    ensureListing(shop, "L-demo-oos", oos, true, "DEMO-SKU-OOS", "Demo OOS");
-    ensureListing(shop, "L-demo-bundle", bundleEmpty, true, "DEMO-SKU-BUNDLE-EMPTY", "Demo bundle");
-    ensureListing(shop, "L-demo-cancel", cod, true, "DEMO-SKU-COD", "Demo cancel");
-    ensureListing(shop, "L-demo-missing", null, false, "DEMO-SKU-MISSING", "Demo unmapped listing");
+    List<UUID> tsfAccounts = listTsfChannelAccounts(shop.tenantId());
+    for (UUID channelAccountId : tsfAccounts) {
+      ensureListing(
+          shop, channelAccountId, "L-demo-ready", ready, true, "DEMO-SKU-READY", "Demo ready");
+      ensureListing(shop, channelAccountId, "L-demo-cod", cod, true, "DEMO-SKU-COD", "Demo COD");
+      ensureListing(shop, channelAccountId, "L-demo-oos", oos, true, "DEMO-SKU-OOS", "Demo OOS");
+      ensureListing(
+          shop,
+          channelAccountId,
+          "L-demo-bundle",
+          bundleEmpty,
+          true,
+          "DEMO-SKU-BUNDLE-EMPTY",
+          "Demo bundle");
+      ensureListing(
+          shop, channelAccountId, "L-demo-cancel", cod, true, "DEMO-SKU-COD", "Demo cancel");
+      ensureListing(
+          shop,
+          channelAccountId,
+          "L-demo-missing",
+          null,
+          false,
+          "DEMO-SKU-MISSING",
+          "Demo unmapped listing");
+    }
     return Map.of(
         "status",
         "OK",
@@ -225,8 +244,16 @@ public class OrderDemoCatalogService {
         onHand);
   }
 
+  private List<UUID> listTsfChannelAccounts(UUID tenantId) {
+    return jdbc.query(
+        "SELECT id FROM channel_account WHERE tenant_id = ? AND channel = 'TSF' ORDER BY created_at",
+        (rs, rowNum) -> rs.getObject("id", UUID.class),
+        tenantId);
+  }
+
   private void ensureListing(
       ShopContext shop,
+      UUID channelAccountId,
       String externalSkuId,
       UUID skuId,
       boolean mapped,
@@ -260,7 +287,7 @@ public class OrderDemoCatalogService {
         """,
         UuidV7.generate(),
         shop.tenantId(),
-        shop.channelAccountId(),
+        channelAccountId,
         mapped ? skuId : null,
         externalSkuId,
         sellerSku,

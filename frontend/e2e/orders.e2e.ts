@@ -116,10 +116,14 @@ test('owner maps unmapped listing and order becomes ready to pick', async ({ pag
   )
   expect(readySku).toBeTruthy()
 
-  await request.post(`http://127.0.0.1:8080/api/v1/channel-accounts/${channelAccountId}/listing-syncs`, {
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    data: {},
-  })
+  const sync = await request.post(
+    `http://127.0.0.1:8080/api/v1/channel-accounts/${channelAccountId}/listing-syncs`,
+    {
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      data: {},
+    },
+  )
+  expect(sync.ok()).toBeTruthy()
 
   let listing: { id: string; external_sku_id: string } | undefined
   await expect
