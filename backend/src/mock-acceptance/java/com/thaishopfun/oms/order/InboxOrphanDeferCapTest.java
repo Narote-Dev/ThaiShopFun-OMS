@@ -136,6 +136,15 @@ class InboxOrphanDeferCapTest {
                           Integer.class,
                           eventId)))
           .isGreaterThanOrEqualTo(3);
+      assertThat(
+              fixture.inTenant(
+                  shop.tenant(),
+                  () ->
+                      jdbc.queryForObject(
+                          "SELECT orphan_recorded_at IS NOT NULL FROM inbox_event WHERE event_id = ?",
+                          Boolean.class,
+                          eventId)))
+          .isTrue();
     }
     java.util.Set<String> seen = new java.util.HashSet<>();
     for (tools.jackson.databind.JsonNode entry : details.path("events")) {

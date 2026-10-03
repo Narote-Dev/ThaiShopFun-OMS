@@ -70,12 +70,12 @@ public class OrderDemoCatalogService {
     stock(shop, cod, 50);
     stock(shop, oos, 0);
     stock(shop, component, 50);
-    ensureListing(shop, "L-demo-ready", ready, true);
-    ensureListing(shop, "L-demo-cod", cod, true);
-    ensureListing(shop, "L-demo-oos", oos, true);
-    ensureListing(shop, "L-demo-bundle", bundleEmpty, true);
-    ensureListing(shop, "L-demo-cancel", cod, true);
-    ensureListing(shop, "L-demo-missing", null, false);
+    ensureListing(shop, "L-demo-ready", ready, true, "DEMO-SKU-READY", "Demo ready");
+    ensureListing(shop, "L-demo-cod", cod, true, "DEMO-SKU-COD", "Demo COD");
+    ensureListing(shop, "L-demo-oos", oos, true, "DEMO-SKU-OOS", "Demo OOS");
+    ensureListing(shop, "L-demo-bundle", bundleEmpty, true, "DEMO-SKU-BUNDLE-EMPTY", "Demo bundle");
+    ensureListing(shop, "L-demo-cancel", cod, true, "DEMO-SKU-COD", "Demo cancel");
+    ensureListing(shop, "L-demo-missing", null, false, "DEMO-SKU-MISSING", "Demo unmapped listing");
     return Map.of(
         "status",
         "OK",
@@ -220,7 +220,13 @@ public class OrderDemoCatalogService {
         onHand);
   }
 
-  private void ensureListing(ShopContext shop, String externalSkuId, UUID skuId, boolean mapped) {
+  private void ensureListing(
+      ShopContext shop,
+      String externalSkuId,
+      UUID skuId,
+      boolean mapped,
+      String sellerSku,
+      String name) {
     Long count =
         jdbc.queryForObject(
             "SELECT count(*) FROM channel_listing WHERE tenant_id = ? AND external_sku_id = ?",
@@ -231,13 +237,21 @@ public class OrderDemoCatalogService {
       return;
     }
     jdbc.update(
-        "INSERT INTO channel_listing (id, tenant_id, channel_account_id, sku_id, external_sku_id, stock_control) "
-            + "VALUES (?, ?, ?, ?, ?, ?)",
+        """
+        INSERT INTO channel_listing (
+          id, tenant_id, channel_account_id, sku_id, external_sku_id, seller_sku, name,
+          stock_control, mapping_source, mapped_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CASE WHEN ? IS NOT NULL THEN now() END)
+        """,
         UuidV7.generate(),
         shop.tenantId(),
         shop.channelAccountId(),
         mapped ? skuId : null,
         externalSkuId,
-        true);
+        sellerSku,
+        name,
+        true,
+        mapped ? "MANUAL" : null,
+        mapped ? skuId : null);
   }
 }

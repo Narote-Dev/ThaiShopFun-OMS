@@ -54,6 +54,7 @@ public class TsfCatalog {
     listings.add(listing("tsf_sku_7781", "TSHIRT-BLK-M", "เสื้อยืดดำ M", 18, 1042));
     listings.add(listing("tsf_sku_9001", "MUG-WHT", "แก้วขาว", 4, 880));
     listings.add(listing("tsf_sku_5000", "SET-TSHIRT-2", "เซ็ตเสื้อ 2 ตัว", 9, 1043));
+    listings.add(listing("L-demo-missing", "DEMO-SKU-MISSING", "Demo unmapped", 0, 2001));
   }
 
   public boolean knownShop(String shopId) {

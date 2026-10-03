@@ -118,9 +118,17 @@ class StockIdempotency {
 
   /** Stores a business failure so a replay returns the same code. */
   void fail(UUID tenantId, String scope, String key, StockError error, String message) {
+    fail(tenantId, scope, key, error, message, null);
+  }
+
+  void fail(
+      UUID tenantId, String scope, String key, StockError error, String message, UUID skuId) {
     Map<String, Object> envelope = new LinkedHashMap<>();
     envelope.put("error", error.name());
     envelope.put("message", message);
+    if (skuId != null) {
+      envelope.put("sku_id", skuId.toString());
+    }
     store(tenantId, scope, key, error.status(), envelope);
   }
 
@@ -129,8 +137,19 @@ class StockIdempotency {
     JsonNode error = stored.body().get("error");
     if (error != null && !error.isNull()) {
       JsonNode message = stored.body().get("message");
+      JsonNode sku = stored.body().get("sku_id");
+      UUID skuId = null;
+      if (sku != null && sku.isString() && !sku.asString().isBlank()) {
+        try {
+          skuId = UUID.fromString(sku.asString());
+        } catch (IllegalArgumentException ignored) {
+          skuId = null;
+        }
+      }
       return Outcome.failure(
-          StockError.valueOf(error.asString()), message == null ? "" : message.asString());
+          StockError.valueOf(error.asString()),
+          message == null ? "" : message.asString(),
+          skuId);
     }
     return Outcome.success(json.treeToValue(stored.body().get("result"), type));
   }
@@ -154,19 +173,23 @@ class StockIdempotency {
   }
 
   /** The value an engine call returns, or the business failure it throws after commit. */
-  record Outcome<T>(T value, StockError error, String message) {
+  record Outcome<T>(T value, StockError error, String message, UUID skuId) {
 
     static <T> Outcome<T> success(T value) {
-      return new Outcome<>(value, null, null);
+      return new Outcome<>(value, null, null, null);
     }
 
     static <T> Outcome<T> failure(StockError error, String message) {
-      return new Outcome<>(null, error, message);
+      return failure(error, message, null);
+    }
+
+    static <T> Outcome<T> failure(StockError error, String message, UUID skuId) {
+      return new Outcome<>(null, error, message, skuId);
     }
 
     T unwrap() {
       if (error != null) {
-        throw new StockOperationException(error, message);
+        throw new StockOperationException(error, message, skuId);
       }
       return value;
     }

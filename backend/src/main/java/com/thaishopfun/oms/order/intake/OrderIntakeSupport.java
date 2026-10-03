@@ -9,6 +9,8 @@ import com.thaishopfun.oms.order.ChannelAccountLookup;
 import com.thaishopfun.oms.order.ChannelAccountLookup.TsfAccount;
 import com.thaishopfun.oms.order.OrderIntakeHooks;
 import com.thaishopfun.oms.order.OrderLineRepository;
+import com.thaishopfun.oms.order.hold.OrderHoldEffects;
+import com.thaishopfun.oms.order.hold.OrderHoldEffects.HoldLine;
 import com.thaishopfun.oms.order.OrderProperties;
 import com.thaishopfun.oms.order.OrderRecipientRepository;
 import com.thaishopfun.oms.order.OrderReservationCoverage;
@@ -22,8 +24,6 @@ import com.thaishopfun.oms.order.ReconciliationIssueRepository;
 import com.thaishopfun.oms.order.SalesOrder;
 import com.thaishopfun.oms.order.SalesOrderRepository;
 import com.thaishopfun.oms.order.ShadowDiffRepository;
-import com.thaishopfun.oms.outbox.OutboxAppender;
-import com.thaishopfun.oms.outbox.OutboxDraft;
 import com.thaishopfun.oms.stock.AdoptResult;
 import com.thaishopfun.oms.stock.EnsureHoldResult;
 import com.thaishopfun.oms.stock.ReservationEngine;
@@ -33,35 +33,28 @@ import com.thaishopfun.oms.stock.Shortfall;
 import com.thaishopfun.oms.stock.StockError;
 import com.thaishopfun.oms.stock.StockOperationException;
 import com.thaishopfun.oms.stock.StockOwner;
-import io.micrometer.core.instrument.MeterRegistry;
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
-import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.JsonNode;
-import tools.jackson.databind.json.JsonMapper;
-import tools.jackson.databind.node.ArrayNode;
-import tools.jackson.databind.node.ObjectNode;
 
 @Service
 public class OrderIntakeSupport {
 
   private static final Logger log = LoggerFactory.getLogger(OrderIntakeSupport.class);
 
-  static final String TSF_CHANNEL_ACCOUNT_MISSING = "TSF_CHANNEL_ACCOUNT_MISSING";
-  public static final String BUSINESS_OVERSELL_METRIC = "oms.order.business_oversell";
-  static final String BUNDLE_WITHOUT_COMPONENTS_NOTE = "bundle has no components";
+  public static final String TSF_CHANNEL_ACCOUNT_MISSING = "TSF_CHANNEL_ACCOUNT_MISSING";
+  public static final String BUSINESS_OVERSELL_METRIC = OrderHoldEffects.BUSINESS_OVERSELL_METRIC;
+  static final String BUNDLE_WITHOUT_COMPONENTS_NOTE = OrderHoldEffects.BUNDLE_WITHOUT_COMPONENTS_NOTE;
 
   private final ChannelAccountLookup channels;
   private final SalesOrderRepository orders;
@@ -73,14 +66,12 @@ public class OrderIntakeSupport {
   private final ReservationEngine engine;
   private final ReconciliationIssueRepository reconciliation;
   private final ShadowDiffRepository shadowDiff;
-  private final OutboxAppender outbox;
   private final OrderIntakeHooks hooks;
+  private final OrderHoldEffects holdEffects;
   private final OrderProperties orderProperties;
   private final InboxProperties inboxProperties;
   private final JdbcTemplate jdbc;
   private final Clock clock;
-  private final JsonMapper json;
-  private final MeterRegistry meters;
 
   public OrderIntakeSupport(
       ChannelAccountLookup channels,
@@ -93,14 +84,12 @@ public class OrderIntakeSupport {
       ReservationEngine engine,
       ReconciliationIssueRepository reconciliation,
       ShadowDiffRepository shadowDiff,
-      OutboxAppender outbox,
       OrderIntakeHooks hooks,
+      OrderHoldEffects holdEffects,
       OrderProperties orderProperties,
       InboxProperties inboxProperties,
       JdbcTemplate jdbc,
-      Clock clock,
-      JsonMapper json,
-      MeterRegistry meters) {
+      Clock clock) {
     this.channels = channels;
     this.orders = orders;
     this.lines = lines;
@@ -111,14 +100,12 @@ public class OrderIntakeSupport {
     this.engine = engine;
     this.reconciliation = reconciliation;
     this.shadowDiff = shadowDiff;
-    this.outbox = outbox;
     this.hooks = hooks;
+    this.holdEffects = holdEffects;
     this.orderProperties = orderProperties;
     this.inboxProperties = inboxProperties;
     this.jdbc = jdbc;
     this.clock = clock;
-    this.json = json;
-    this.meters = meters;
   }
 
   TsfAccount requireTsfAccount(InboxMessage message) {
@@ -210,7 +197,9 @@ public class OrderIntakeSupport {
           throw ex;
         }
         unknownSkuAtAdopt = true;
-        unknownSkuNote = unknownSkuHoldNote(mapped, missingSkuIdsForUnknownSku(ex, reserveItems));
+        unknownSkuNote =
+            holdEffects.unknownSkuHoldNote(
+                toHoldLines(mapped), holdEffects.missingSkuIdsForUnknownSku(ex, reserveItems));
       }
     }
 
@@ -222,29 +211,36 @@ public class OrderIntakeSupport {
     } else if (hasUnmapped) {
       holdReason = "SKU_NOT_MAPPED";
       if (!stockShortfalls.isEmpty()) {
-        holdNote = shortfallNote(stockShortfalls);
+        holdNote = OrderHoldEffects.shortfallNote(stockShortfalls);
       }
     } else if (componentlessBundle) {
       holdReason = "OUT_OF_STOCK";
       holdNote = BUNDLE_WITHOUT_COMPONENTS_NOTE;
       if ("SHADOW".equals(account.mode())) {
         shadowDiff.insertOrderDiff(
-            account.id(), payload.orderId(), componentlessBundleShadowJson(reserveItems), now);
+            account.id(),
+            payload.orderId(),
+            holdEffects.componentlessBundleShadowJson(reserveItems),
+            now);
       }
     } else if (!stockShortfalls.isEmpty()) {
       holdReason = "OUT_OF_STOCK";
-      recordOversell(account, mapped, stockShortfalls);
+      holdEffects.recordOversell(account, toHoldLines(mapped), stockShortfalls);
       if ("SHADOW".equals(account.mode())) {
         shadowDiff.insertOrderDiff(
-            account.id(), payload.orderId(), shadowDiffJson(mapped, stockShortfalls), now);
+            account.id(),
+            payload.orderId(),
+            holdEffects.shadowDiffJson(toHoldLines(mapped), stockShortfalls),
+            now);
       }
     }
 
     SalesOrder current = orders.findById(orderId).orElseThrow();
     if (!"NONE".equals(holdReason)) {
-      current = applyHold(current, holdReason, holdNote);
+      current = holdEffects.applyHold(current, holdReason, holdNote);
     }
-    maybeReadyToPick(orders.findById(orderId).orElseThrow(), account, reserveItems, now);
+    holdEffects.maybeReadyToPick(
+        orders.findById(orderId).orElseThrow(), account, reserveItems, now);
   }
 
   void handlePaid(InboxMessage message) {
@@ -279,23 +275,26 @@ public class OrderIntakeSupport {
         if (held.held()) {
           order = orders.findById(order.id()).orElseThrow();
           if ("OUT_OF_STOCK".equals(order.holdReason())) {
-            order = applyHold(order, "NONE", null);
+            order = holdEffects.applyHold(order, "NONE", null);
           }
         } else {
-          order = applyHold(order, "OUT_OF_STOCK", shortfallNote(held.shortfalls()));
+          order =
+              holdEffects.applyHold(
+                  order, "OUT_OF_STOCK", OrderHoldEffects.shortfallNote(held.shortfalls()));
         }
       } catch (StockOperationException ex) {
         if (ex.error() != StockError.UNKNOWN_SKU) {
           throw ex;
         }
         order =
-            applyHold(
+            holdEffects.applyHold(
                 order,
                 "SKU_NOT_MAPPED",
-                unknownSkuHoldNoteFromLines(order.id(), missingSkuIdsForUnknownSku(ex, items)));
+                holdEffects.unknownSkuHoldNoteFromLines(
+                    order.id(), holdEffects.missingSkuIdsForUnknownSku(ex, items)));
       }
     }
-    maybeReadyToPick(orders.findById(order.id()).orElseThrow(), account, items, paidAt);
+    holdEffects.maybeReadyToPick(orders.findById(order.id()).orElseThrow(), account, items, paidAt);
   }
 
   void handleCancelled(InboxMessage message) {
@@ -330,31 +329,6 @@ public class OrderIntakeSupport {
       log.info("order.updated note ignored for external_order_id={}", externalOrderId);
     }
     hooks.afterOutbox();
-  }
-
-  private void maybeReadyToPick(
-      SalesOrder order, TsfAccount account, List<ReserveItem> mappedItems, Instant now) {
-    if (!"NONE".equals(order.holdReason())) {
-      return;
-    }
-    GuardContext guard = guard(account, order, mappedItems);
-    try {
-      TransitionResult result =
-          stateMachine.applyFulfillmentStatus(
-              order, "READY_TO_PICK", "stock ready", "SYSTEM", guard);
-      if (result.fulfillmentChanged()) {
-        emitStatusChanged(result.order());
-        hooks.afterOutbox();
-      }
-    } catch (OrderStateException ignored) {
-      // Guards block READY_TO_PICK until payment/hold/reservation allow it.
-    }
-  }
-
-  private SalesOrder applyHold(SalesOrder order, String holdReason, String holdNote) {
-    TransitionResult hold =
-        stateMachine.applyHoldReason(order, holdReason, holdNote, "intake", "SYSTEM");
-    return hold.order();
   }
 
   private SalesOrder applyPayment(SalesOrder order, String to, Instant paidAt, TsfAccount account) {
@@ -442,62 +416,19 @@ public class OrderIntakeSupport {
         .toList();
   }
 
-  private void recordOversell(
-      TsfAccount account, List<LineMapping> mapped, List<Shortfall> shortfalls) {
-    String mode = account.mode();
-    boolean oversell =
-        mapped.stream()
-            .filter(LineMapping::mapped)
-            .filter(line -> lineInShortfall(line, shortfalls))
-            .anyMatch(
-                line -> "ACTIVE".equals(mode) || ("CONTROL".equals(mode) && line.stockControl()));
-    if (oversell) {
-      meters.counter(BUSINESS_OVERSELL_METRIC, "mode", mode).increment();
-    }
-  }
-
-  private static boolean lineInShortfall(LineMapping line, List<Shortfall> shortfalls) {
-    if (line.skuId() == null) {
-      return false;
-    }
-    return shortfalls.stream()
-        .anyMatch(sf -> sf.skuId().equals(line.skuId()) || sf.requestedBy().contains(line.skuId()));
-  }
-
-  private String shadowDiffJson(List<LineMapping> mapped, List<Shortfall> shortfalls) {
-    ArrayNode shortfallsNode = json.createArrayNode();
-    for (Shortfall sf : shortfalls) {
-      ObjectNode entry = json.createObjectNode();
-      mapped.stream()
-          .filter(
-              line ->
-                  line.skuId() != null
-                      && (line.skuId().equals(sf.skuId())
-                          || sf.requestedBy().contains(line.skuId())))
-          .findFirst()
-          .ifPresent(line -> entry.put("line_id", line.externalLineId()));
-      entry.put("sku_id", sf.skuId().toString());
-      entry.put("requested", sf.requested());
-      entry.put("available", sf.available());
-      shortfallsNode.add(entry);
-    }
-    ObjectNode root = json.createObjectNode();
-    root.set("shortfalls", shortfallsNode);
-    return json.writeValueAsString(root);
-  }
-
-  private void emitStatusChanged(SalesOrder order) {
-    outbox.append(
-        OutboxDraft.of(
-            "order",
-            order.externalOrderId(),
-            "order.status_changed",
-            Map.of(
-                "order_id",
-                order.externalOrderId(),
-                "fulfillment_status",
-                order.fulfillmentStatus()),
-            order.version()));
+  private static List<HoldLine> toHoldLines(List<LineMapping> mapped) {
+    return mapped.stream()
+        .map(
+            line ->
+                new HoldLine(
+                    line.lineId(),
+                    line.externalLineId(),
+                    line.skuId(),
+                    line.qty(),
+                    line.listingSkuId(),
+                    line.stockControl(),
+                    line.mapped()))
+        .toList();
   }
 
   private static Instant orderedAt(InboxMessage message, CreatedPayload payload) {
@@ -524,94 +455,6 @@ public class OrderIntakeSupport {
     } catch (IllegalArgumentException ex) {
       return null;
     }
-  }
-
-  private String unknownSkuHoldNote(List<LineMapping> mapped, Set<UUID> missingSkuIds) {
-    StringBuilder note = new StringBuilder("mapped sku not found");
-    for (LineMapping line : mapped) {
-      if (line.skuId() != null && missingSkuIds.contains(line.skuId())) {
-        note.append(';').append(line.listingSkuId());
-      }
-    }
-    return note.toString();
-  }
-
-  private String unknownSkuHoldNoteFromLines(UUID orderId, Set<UUID> missingSkuIds) {
-    List<LineMapping> mapped =
-        lines.findByOrderId(orderId).stream()
-            .map(
-                line ->
-                    new LineMapping(
-                        line.id(),
-                        line.externalLineId(),
-                        line.skuId(),
-                        line.qty(),
-                        line.externalSkuId(),
-                        false,
-                        line.skuId() != null))
-            .toList();
-    return unknownSkuHoldNote(mapped, missingSkuIds);
-  }
-
-  private Set<UUID> missingSkuIdsForUnknownSku(
-      StockOperationException ex, List<ReserveItem> items) {
-    String message = ex.getMessage();
-    if (message != null) {
-      int marker = message.indexOf("unknown sku ");
-      if (marker >= 0) {
-        try {
-          return Set.of(
-              UUID.fromString(message.substring(marker + "unknown sku ".length()).trim()));
-        } catch (IllegalArgumentException ignored) {
-          // fall through
-        }
-      }
-    }
-    return missingCatalogSkuIds(items.stream().map(ReserveItem::skuId).toList());
-  }
-
-  private Set<UUID> missingCatalogSkuIds(List<UUID> skuIds) {
-    if (skuIds.isEmpty()) {
-      return Set.of();
-    }
-    Set<UUID> unique = new LinkedHashSet<>(skuIds);
-    String placeholders = String.join(",", java.util.Collections.nCopies(unique.size(), "?"));
-    List<UUID> found =
-        jdbc.queryForList(
-            "SELECT id FROM sku WHERE id IN (" + placeholders + ")", UUID.class, unique.toArray());
-    Set<UUID> present = new LinkedHashSet<>(found);
-    Set<UUID> missing = new LinkedHashSet<>();
-    for (UUID skuId : unique) {
-      if (!present.contains(skuId)) {
-        missing.add(skuId);
-      }
-    }
-    return missing;
-  }
-
-  private String componentlessBundleShadowJson(List<ReserveItem> reserveItems) {
-    Set<UUID> bundleSkus =
-        demandPlanner.componentlessBundleSkus(
-            reserveItems.stream().map(ReserveItem::skuId).toList());
-    ArrayNode bundles = json.createArrayNode();
-    for (UUID skuId : bundleSkus) {
-      bundles.add(skuId.toString());
-    }
-    ObjectNode root = json.createObjectNode();
-    root.put("reason", "BUNDLE_WITHOUT_COMPONENTS");
-    root.set("bundle_skus", bundles);
-    return json.writeValueAsString(root);
-  }
-
-  private static String shortfallNote(List<Shortfall> shortfalls) {
-    StringBuilder note = new StringBuilder();
-    for (Shortfall sf : shortfalls) {
-      if (!note.isEmpty()) {
-        note.append(';');
-      }
-      note.append(sf.skuId()).append(':').append(sf.requested()).append('/').append(sf.available());
-    }
-    return note.toString();
   }
 
   private static String text(JsonNode node, String field) {

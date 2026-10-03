@@ -37,6 +37,14 @@ List items may include `phone_masked`.
 
 `GET /orders/holds` — groups with `hold_reason`, optional `hold_detail` (`BUNDLE_WITHOUT_COMPONENTS` for componentless bundles on `OUT_OF_STOCK`), `count`, and up to five sample orders per group.
 
+## Hold recheck
+
+`POST /orders/{id}/hold-rechecks` with header `Idempotency-Key` (required).
+
+- Re-runs hold resolution for orders on `SKU_NOT_MAPPED` or `OUT_OF_STOCK`.
+- `409 HOLD_NOT_RECHECKABLE` when the order is not on a recheckable hold.
+- Idempotent per order and key; audit `ORDER_HOLD_RECHECKED`.
+
 ## Request cancel
 
 `POST /orders/{id}/cancel-requests` body `{ "reason": "..." }`.

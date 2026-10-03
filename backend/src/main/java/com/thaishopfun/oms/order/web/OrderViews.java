@@ -128,4 +128,11 @@ public final class OrderViews {
       @JsonProperty("cancel_request_id") String cancelRequestId,
       @JsonProperty("order_id") String orderId,
       String status) {}
+
+  public record HoldRecheckResponse(
+      @JsonProperty("order_id") UUID orderId,
+      @JsonProperty("hold_reason") String holdReason,
+      int released,
+      @JsonProperty("out_of_stock") int outOfStock,
+      @JsonProperty("still_held") int stillHeld) {}
 }

@@ -93,6 +93,7 @@ public class InboxWorker {
   private final InboxHandlerRegistry registry;
   private final InboxEntitlementPolicy policy;
   private final ReconciliationIssueRepository reconciliation;
+  private final InboxAggregateLock aggregateLock;
   private final JdbcTemplate jdbc;
   private final TransactionTemplate claimTx;
   private final TransactionTemplate applyTx;
@@ -106,6 +107,7 @@ public class InboxWorker {
       InboxHandlerRegistry registry,
       InboxEntitlementPolicy policy,
       ReconciliationIssueRepository reconciliation,
+      InboxAggregateLock aggregateLock,
       JdbcTemplate jdbc,
       PlatformTransactionManager transactions,
       JsonMapper json,
@@ -114,6 +116,7 @@ public class InboxWorker {
     this.registry = registry;
     this.policy = policy;
     this.reconciliation = reconciliation;
+    this.aggregateLock = aggregateLock;
     this.jdbc = jdbc;
     this.claimTx = new TransactionTemplate(transactions);
     // Step 1: TransactionTemplate takes whole seconds and truncates. Ceil so 1.1s is 2s, not 1s.
@@ -228,10 +231,12 @@ public class InboxWorker {
                   jdbc.queryForObject("SELECT now()", OffsetDateTime.class)
                       .toInstant()
                       .minus(properties.getMaxDefer()))) {
-            // Change: append reconciliation only the first time this row crosses max-defer (T13
-            // B1).
-            if (!"ORDER_EVENT_WITHOUT_ORDER".equals(row.lastError())) {
+            // Change: durable orphan marker (T12B D1); ENTITLEMENT_DEFERRED no longer re-appends.
+            if (row.orphanRecordedAt() == null) {
               upsertOrderEventWithoutOrder(row);
+              jdbc.update(
+                  "UPDATE inbox_event SET orphan_recorded_at = pg_catalog.now() WHERE id = ?",
+                  row.id());
             }
             recordFailure(
                 new Claimed(row.id(), row.tenantId(), claimed.leaseUntil()),
@@ -327,8 +332,8 @@ public class InboxWorker {
         """
         SELECT e.id, e.tenant_id, e.source, e.event_id, e.event_type, e.aggregate_id,
                e.aggregate_version, e.payload::text AS payload, e.status, e.attempts,
-               e.next_attempt_at, e.received_at, e.last_error, t.entitlement_status,
-               t.entitlement_expires_at
+               e.next_attempt_at, e.received_at, e.last_error, e.orphan_recorded_at,
+               t.entitlement_status, t.entitlement_expires_at
         FROM inbox_event AS e
         JOIN tenant AS t ON t.id = e.tenant_id
         WHERE e.id = ?
@@ -340,6 +345,8 @@ public class InboxWorker {
           }
           OffsetDateTime expires = rs.getObject("entitlement_expires_at", OffsetDateTime.class);
           OffsetDateTime receivedAt = rs.getObject("received_at", OffsetDateTime.class);
+          OffsetDateTime orphanRecorded =
+              rs.getObject("orphan_recorded_at", OffsetDateTime.class);
           return new InboxRow(
               rs.getObject("id", UUID.class),
               rs.getObject("tenant_id", UUID.class),
@@ -354,6 +361,7 @@ public class InboxWorker {
               rs.getObject("next_attempt_at", OffsetDateTime.class),
               receivedAt == null ? null : receivedAt.toInstant(),
               rs.getString("last_error"),
+              orphanRecorded == null ? null : orphanRecorded.toInstant(),
               rs.getString("entitlement_status"),
               expires == null ? null : expires.toInstant());
         },
@@ -361,14 +369,7 @@ public class InboxWorker {
   }
 
   private void lockAggregate(InboxRow row) {
-    String key = row.tenantId() + "\u001f" + row.source() + "\u001f" + row.aggregateId();
-    jdbc.query(
-        "SELECT pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(?, 11))",
-        rs -> {
-          rs.next();
-          return null;
-        },
-        key);
+    aggregateLock.lock(jdbc, row.tenantId(), row.source(), row.aggregateId());
   }
 
   private Long lastProcessedVersionForStale(InboxRow row) {
@@ -556,6 +557,7 @@ public class InboxWorker {
       OffsetDateTime nextAttemptAt,
       Instant receivedAt,
       String lastError,
+      Instant orphanRecordedAt,
       String entitlementStatus,
       Instant expiresAt) {
 
