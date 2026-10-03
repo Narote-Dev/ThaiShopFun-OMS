@@ -198,9 +198,9 @@ public class OrderQueryService {
   public OrderViews.HoldsView holds() {
     return tx.read(
         () -> {
-          String bundleWithoutComponents =
+          String bundleFlag =
               """
-              (o.hold_reason = 'OUT_OF_STOCK' AND EXISTS (
+              EXISTS (
                 SELECT 1 FROM order_line ol
                 JOIN sku s ON s.id = ol.sku_id AND s.is_bundle = true
                 WHERE ol.order_id = o.id
@@ -208,20 +208,23 @@ public class OrderQueryService {
                   SELECT 1 FROM sku_bundle_component bc
                   WHERE bc.tenant_id = ol.tenant_id AND bc.bundle_sku_id = ol.sku_id
                 )
-              ))
+              )
               """;
           List<HoldGroupRow> counts =
               jdbc.query(
                   """
-                  SELECT o.hold_reason,
-                    CASE WHEN """
-                      + bundleWithoutComponents
-                      + " THEN 'BUNDLE_WITHOUT_COMPONENTS' END AS hold_detail, count(*) AS cnt"
+                  SELECT hold_reason, hold_detail, count(*) AS cnt FROM (
+                    SELECT o.hold_reason,
+                      CASE
+                        WHEN o.hold_reason = 'OUT_OF_STOCK' AND """
+                      + bundleFlag
+                      + " THEN 'BUNDLE_WITHOUT_COMPONENTS' END AS hold_detail"
                       + """
-                  FROM sales_order o
-                  WHERE o.hold_reason <> 'NONE'
-                  GROUP BY o.hold_reason, 2
-                  ORDER BY o.hold_reason, 2
+                    FROM sales_order o
+                    WHERE o.hold_reason <> 'NONE'
+                  ) held
+                  GROUP BY hold_reason, hold_detail
+                  ORDER BY hold_reason, hold_detail
                   """,
                   (rs, rowNum) ->
                       new HoldGroupRow(
@@ -233,14 +236,16 @@ public class OrderQueryService {
               """
               SELECT id, external_order_id, ordered_at, hold_reason, hold_detail FROM (
                 SELECT o.id, o.external_order_id, o.ordered_at, o.hold_reason,
-                  CASE WHEN """
-                  + bundleWithoutComponents
+                  CASE
+                    WHEN o.hold_reason = 'OUT_OF_STOCK' AND """
+                  + bundleFlag
                   + " THEN 'BUNDLE_WITHOUT_COMPONENTS' END AS hold_detail,"
                   + """
                   ROW_NUMBER() OVER (
                     PARTITION BY o.hold_reason,
-                      CASE WHEN """
-                  + bundleWithoutComponents
+                      CASE
+                        WHEN o.hold_reason = 'OUT_OF_STOCK' AND """
+                  + bundleFlag
                   + " THEN 'BUNDLE_WITHOUT_COMPONENTS' END"
                   + """
                     ORDER BY o.ordered_at DESC

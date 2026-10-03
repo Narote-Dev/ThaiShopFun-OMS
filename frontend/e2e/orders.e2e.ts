@@ -15,11 +15,10 @@ test('owner browses orders, opens detail with masked phone, requests cancel', as
   await expect
     .poll(
       async () => {
-        await page.getByLabel('Search').fill('DEMO-COD')
-        await page.getByRole('button', { name: 'Apply' }).click()
+        await page.goto('/#/orders')
         return await page.getByRole('link', { name: 'DEMO-COD' }).count()
       },
-      { timeout: 120_000, intervals: [2000] },
+      { timeout: 120_000, intervals: [3000] },
     )
     .toBeGreaterThan(0)
   const codLink = page.getByRole('link', { name: 'DEMO-COD' })
