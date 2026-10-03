@@ -127,10 +127,14 @@ class OrderApiFiltersTest extends OrderIntegrationTest {
     SalesOrder order = fixture.insert(shop, "ORD-TRACK", "SHIPPED", "NONE");
     UUID shipmentId = UuidV7.generate();
     UUID warehouseId = UuidV7.generate();
-    jdbc.update(
-        "INSERT INTO warehouse (id, tenant_id, code, name, is_default) VALUES (?, ?, 'WH1', 'Main', true)",
-        warehouseId,
-        shop.tenantId());
+    try (Connection admin = AuthTestSupport.admin();
+        PreparedStatement wh =
+            admin.prepareStatement(
+                "INSERT INTO warehouse (id, tenant_id, code, name, is_default) VALUES (?, ?, 'WH1', 'Main', true)")) {
+      wh.setObject(1, warehouseId);
+      wh.setObject(2, shop.tenantId());
+      wh.executeUpdate();
+    }
     try (Connection admin = AuthTestSupport.admin();
         PreparedStatement ps =
             admin.prepareStatement(
@@ -153,12 +157,12 @@ class OrderApiFiltersTest extends OrderIntegrationTest {
   void likeEscapeAndWildcard() throws Exception {
     CatalogHttp.Shop httpShop = http.catalog().shop();
     OrderFixture.Shop shop = OrderFixture.shopFor(httpShop);
-    fixture.insert(shop, "ORD_LIKE_1", "READY_TO_PICK", "NONE");
-    fixture.insert(shop, "ORDXLIKE1", "READY_TO_PICK", "NONE");
+    fixture.insert(shop, "ORD_T17_LIKE_1", "READY_TO_PICK", "NONE");
+    fixture.insert(shop, "ORD_T17LIKE1", "READY_TO_PICK", "NONE");
     assertThat(
             http.get(
                     OrderHttp.ordersPath(
-                        "?q=" + URLEncoder.encode("ORD_LIKE_1", StandardCharsets.UTF_8)),
+                        "?q=" + URLEncoder.encode("ORD_T17_LIKE_1", StandardCharsets.UTF_8)),
                     httpShop.owner())
                 .body()
                 .path("total")

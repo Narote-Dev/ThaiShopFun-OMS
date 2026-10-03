@@ -18,14 +18,14 @@ class OrderDemoCatalogApiTest extends OrderIntegrationTest {
   @Test
   void ensureDemoCatalogCreatesListingsForShopActive() throws Exception {
     CatalogHttp.Shop httpShop = http.catalog().shop();
+    OrderFixture.Shop shop = OrderFixture.shopFor(httpShop);
     try (Connection admin = AuthTestSupport.admin();
         PreparedStatement ps =
             admin.prepareStatement("UPDATE tenant SET tsf_shop_id = ? WHERE id = ?")) {
       ps.setString(1, "shop_active");
-      ps.setObject(2, httpShop.tenantId());
+      ps.setObject(2, shop.tenantId());
       ps.executeUpdate();
     }
-    OrderFixture.shopFor(httpShop);
     CatalogHttp.Result seed =
         http.post("/control/demo/order-catalog", httpShop.owner(), java.util.Map.of());
     assertThat(seed.status()).isEqualTo(200);

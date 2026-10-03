@@ -276,11 +276,12 @@ class OrderCancelApiTest extends OrderIntegrationTest {
       ps.setObject(2, shop.fixture().tenantId());
       ps.executeUpdate();
     }
-    registerMockOrder("TSF-240929-000131");
+    String external = "TSF-ALT-" + UUID.randomUUID().toString().substring(0, 8);
+    registerMockOrder(external);
     SalesOrder order =
         fixture.insert(
             shop.fixture(),
-            "TSF-240929-000131",
+            external,
             "ACTIVE",
             "PAID",
             "READY_TO_PICK",
@@ -514,9 +515,14 @@ class OrderCancelApiTest extends OrderIntegrationTest {
                 .POST(
                     HttpRequest.BodyPublishers.ofString(
                         """
-                        {"method":"%s","path":"%s","status":%d,"times":%d}
+                        {"method":"%s","path":"%s","status":%d,"times":%d%s}
                         """
-                            .formatted(method, path, status, times),
+                            .formatted(
+                                method,
+                                path,
+                                status,
+                                times,
+                                status == 429 ? ",\"retry_after\":30" : ""),
                         StandardCharsets.UTF_8))
                 .build(),
             HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
