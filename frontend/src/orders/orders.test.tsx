@@ -55,10 +55,9 @@ describe('ordersAccess', () => {
     expect(access.canRequestCancel({ ...order, supports_cancel_request: false })).toBe(false)
   })
 
-  it('shows hold detail on banner copy', () => {
-    expect(order.hold_detail).toBeNull()
-    expect({ ...order, hold_reason: 'CHANNEL_CANCEL_PENDING', hold_detail: null }).hold_reason).toBe(
-      'CHANNEL_CANCEL_PENDING',
-    )
+  it('exposes hold detail on order model', () => {
+    const pending = { ...order, hold_reason: 'CHANNEL_CANCEL_PENDING', hold_detail: 'note' }
+    expect(pending.hold_reason).toBe('CHANNEL_CANCEL_PENDING')
+    expect(pending.hold_detail).toBe('note')
   })
 })

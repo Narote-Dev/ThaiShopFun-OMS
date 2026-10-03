@@ -197,18 +197,6 @@ public class OrderQueryService {
   public OrderViews.HoldsView holds() {
     return tx.read(
         () -> {
-          String bundleWithoutComponents =
-              """
-              EXISTS (
-                SELECT 1 FROM order_line ol
-                JOIN sku s ON s.id = ol.sku_id AND s.is_bundle = true
-                WHERE ol.order_id = o.id
-                AND NOT EXISTS (
-                  SELECT 1 FROM sku_bundle_component bc
-                  WHERE bc.tenant_id = ol.tenant_id AND bc.bundle_sku_id = ol.sku_id
-                )
-              )
-              """;
           List<HoldGroupRow> groups =
               jdbc.query(
                   """
@@ -217,25 +205,39 @@ public class OrderQueryService {
                       o.id,
                       o.external_order_id,
                       o.ordered_at,
-                      CASE
-                        WHEN o.hold_reason = 'OUT_OF_STOCK' AND """
-                      + bundleWithoutComponents
-                      + """
-                        THEN 'OUT_OF_STOCK'
-                        ELSE o.hold_reason
-                      END AS group_reason,
-                      CASE
-                        WHEN o.hold_reason = 'OUT_OF_STOCK' AND """
-                      + bundleWithoutComponents
-                      + """
-                        THEN 'BUNDLE_WITHOUT_COMPONENTS'
-                        ELSE NULL
-                      END AS hold_detail
+                      o.hold_reason,
+                      (
+                        o.hold_reason = 'OUT_OF_STOCK'
+                        AND EXISTS (
+                          SELECT 1 FROM order_line ol
+                          JOIN sku s ON s.id = ol.sku_id AND s.is_bundle = true
+                          WHERE ol.order_id = o.id
+                          AND NOT EXISTS (
+                            SELECT 1 FROM sku_bundle_component bc
+                            WHERE bc.tenant_id = ol.tenant_id AND bc.bundle_sku_id = ol.sku_id
+                          )
+                        )
+                      ) AS bundle_without_components
                     FROM sales_order o
                     WHERE o.hold_reason <> 'NONE'
+                  ),
+                  classified AS (
+                    SELECT
+                      id,
+                      external_order_id,
+                      ordered_at,
+                      CASE
+                        WHEN bundle_without_components THEN 'OUT_OF_STOCK'
+                        ELSE hold_reason
+                      END AS group_reason,
+                      CASE
+                        WHEN bundle_without_components THEN 'BUNDLE_WITHOUT_COMPONENTS'
+                        ELSE NULL
+                      END AS hold_detail
+                    FROM held
                   )
                   SELECT group_reason, hold_detail, COUNT(*) AS cnt
-                  FROM held
+                  FROM classified
                   GROUP BY group_reason, hold_detail
                   ORDER BY group_reason, hold_detail NULLS FIRST
                   """,
@@ -254,32 +256,46 @@ public class OrderQueryService {
                         o.id,
                         o.external_order_id,
                         o.ordered_at,
-                        CASE
-                          WHEN o.hold_reason = 'OUT_OF_STOCK' AND """
-                        + bundleWithoutComponents
-                        + """
-                          THEN 'OUT_OF_STOCK'
-                          ELSE o.hold_reason
-                        END AS group_reason,
-                        CASE
-                          WHEN o.hold_reason = 'OUT_OF_STOCK' AND """
-                        + bundleWithoutComponents
-                        + """
-                          THEN 'BUNDLE_WITHOUT_COMPONENTS'
-                          ELSE NULL
-                        END AS hold_detail
+                        o.hold_reason,
+                        (
+                          o.hold_reason = 'OUT_OF_STOCK'
+                          AND EXISTS (
+                            SELECT 1 FROM order_line ol
+                            JOIN sku s ON s.id = ol.sku_id AND s.is_bundle = true
+                            WHERE ol.order_id = o.id
+                            AND NOT EXISTS (
+                              SELECT 1 FROM sku_bundle_component bc
+                              WHERE bc.tenant_id = ol.tenant_id AND bc.bundle_sku_id = ol.sku_id
+                            )
+                          )
+                        ) AS bundle_without_components
                       FROM sales_order o
                       WHERE o.hold_reason <> 'NONE'
+                    ),
+                    classified AS (
+                      SELECT
+                        id,
+                        external_order_id,
+                        ordered_at,
+                        CASE
+                          WHEN bundle_without_components THEN 'OUT_OF_STOCK'
+                          ELSE hold_reason
+                        END AS group_reason,
+                        CASE
+                          WHEN bundle_without_components THEN 'BUNDLE_WITHOUT_COMPONENTS'
+                          ELSE NULL
+                        END AS hold_detail
+                      FROM held
                     )
                     SELECT id, external_order_id, ordered_at
                     FROM (
                       SELECT
-                        h.id,
-                        h.external_order_id,
-                        h.ordered_at,
-                        ROW_NUMBER() OVER (ORDER BY h.ordered_at DESC) AS rn
-                      FROM held h
-                      WHERE h.group_reason = ? AND h.hold_detail IS NOT DISTINCT FROM ?
+                        c.id,
+                        c.external_order_id,
+                        c.ordered_at,
+                        ROW_NUMBER() OVER (ORDER BY c.ordered_at DESC) AS rn
+                      FROM classified c
+                      WHERE c.group_reason = ? AND c.hold_detail IS NOT DISTINCT FROM ?
                     ) ranked
                     WHERE rn <= 5
                     ORDER BY ordered_at DESC

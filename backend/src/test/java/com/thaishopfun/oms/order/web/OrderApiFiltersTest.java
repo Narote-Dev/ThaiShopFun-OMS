@@ -73,7 +73,7 @@ class OrderApiFiltersTest extends OrderIntegrationTest {
         shop,
         "ORD-SHOPEE",
         "ACTIVE",
-        "UNPAID",
+        "COD_PENDING",
         "UNFULFILLED",
         "NONE",
         shopee,
@@ -84,7 +84,7 @@ class OrderApiFiltersTest extends OrderIntegrationTest {
             .path("total")
             .asInt())
         .isEqualTo(1);
-    assertThat(http.get(OrderHttp.ordersPath("?payment_status=UNPAID"), httpShop.owner())
+    assertThat(http.get(OrderHttp.ordersPath("?payment_status=COD_PENDING"), httpShop.owner())
             .body()
             .path("total")
             .asInt())
@@ -124,15 +124,19 @@ class OrderApiFiltersTest extends OrderIntegrationTest {
     OrderFixture.Shop shop = OrderFixture.shopFor(httpShop);
     SalesOrder order = fixture.insert(shop, "ORD-TRACK", "SHIPPED", "NONE");
     UUID shipmentId = UuidV7.generate();
+    UUID warehouseId =
+        jdbc.queryForObject(
+            "SELECT id FROM warehouse WHERE tenant_id = ? LIMIT 1", UUID.class, shop.tenantId());
     try (Connection admin = AuthTestSupport.admin();
         PreparedStatement ps =
             admin.prepareStatement(
-                "INSERT INTO shipment (id, tenant_id, order_id, tracking_no, carrier, status) "
-                    + "VALUES (?, ?, ?, ?, 'KERRY', 'IN_TRANSIT')")) {
+                "INSERT INTO shipment (id, tenant_id, order_id, warehouse_id, tracking_no, carrier, status) "
+                    + "VALUES (?, ?, ?, ?, ?, 'KERRY', 'IN_TRANSIT')")) {
       ps.setObject(1, shipmentId);
       ps.setObject(2, shop.tenantId());
       ps.setObject(3, order.id());
-      ps.setString(4, "TH999888777");
+      ps.setObject(4, warehouseId);
+      ps.setString(5, "TH999888777");
       ps.executeUpdate();
     }
     assertThat(http.get(OrderHttp.ordersPath("?q=TH999888777"), httpShop.owner()).body().path("total").asInt())
@@ -157,7 +161,7 @@ class OrderApiFiltersTest extends OrderIntegrationTest {
   void longDigitQueryFallsThroughToExternalId() throws Exception {
     CatalogHttp.Shop httpShop = http.catalog().shop();
     OrderFixture.Shop shop = OrderFixture.shopFor(httpShop);
-    String external = "66812345678901234";
+    String external = "9123456789012345";
     fixture.insert(shop, external, "READY_TO_PICK", "NONE");
     assertThat(http.get(OrderHttp.ordersPath("?q=" + external), httpShop.owner()).body().path("total").asInt())
         .isEqualTo(1);

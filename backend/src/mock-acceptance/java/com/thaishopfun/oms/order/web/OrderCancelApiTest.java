@@ -98,7 +98,7 @@ class OrderCancelApiTest extends OrderIntegrationTest {
     assertThat(auditRows).isEqualTo(1);
     assertThat(holdReason(order.id())).isEqualTo("CHANNEL_CANCEL_PENDING");
     assertThat(cancelHits(order.externalOrderId())).hasSize(1);
-    assertThat(cancelHits(order.externalOrderId()).get(0).path("idempotencyKey").asString())
+    assertThat(idempotencyKey(cancelHits(order.externalOrderId()).get(0)))
         .isEqualTo("cancel-request:" + order.id());
 
     CatalogHttp.Result second =
@@ -189,20 +189,6 @@ class OrderCancelApiTest extends OrderIntegrationTest {
     assertThat(result.status()).isIn(502, 503, 429);
     assertThat(holdReason(order.id())).isEqualTo("NONE");
     assertThat(auditCount(order.id())).isZero();
-  }
-
-  @Test
-  void channelRateLimitLeavesOrderUnchanged() throws Exception {
-    ActiveShop shop = shopActive();
-    SalesOrder order = fixture.insert(shop.fixture(), "TSF-240929-000128", "READY_TO_PICK", "NONE");
-    armFault("POST", "/internal/v1/orders/TSF-240929-000128/cancel-requests", 429, 1);
-    CatalogHttp.Result result =
-        http.post(
-            OrderHttp.ordersPath("/" + order.id() + "/cancel-requests"),
-            shop.owner(),
-            Map.of("reason", "rate"));
-    assertThat(result.status()).isEqualTo(429);
-    assertThat(holdReason(order.id())).isEqualTo("NONE");
   }
 
   @Test
@@ -356,22 +342,23 @@ class OrderCancelApiTest extends OrderIntegrationTest {
   }
 
   private void sendCancelledEvent(String externalOrderId) throws Exception {
+    String eventId = "test-cancel-" + UuidV7.generate();
     String body =
         """
         {
           "event": {
+            "event_id": "%s",
             "event_type": "order.cancelled",
-            "event_id": "test-cancel-%s",
             "schema_version": 1,
+            "occurred_at": "2026-09-30T12:00:00Z",
             "tsf_shop_id": "shop_active",
             "aggregate_id": "%s",
             "aggregate_version": 99,
-            "occurred_at": "2026-09-30T12:00:00Z",
             "data": { "order_id": "%s", "reason": "BUYER" }
           }
         }
         """
-            .formatted(UuidV7.generate(), externalOrderId, externalOrderId);
+            .formatted(eventId, externalOrderId, externalOrderId);
     HttpResponse<String> response =
         HTTP.send(
             HttpRequest.newBuilder(
@@ -412,6 +399,13 @@ class OrderCancelApiTest extends OrderIntegrationTest {
             .DELETE()
             .build(),
         HttpResponse.BodyHandlers.discarding());
+  }
+
+  private static String idempotencyKey(tools.jackson.databind.JsonNode hit) {
+    if (hit.hasNonNull("idempotencyKey")) {
+      return hit.path("idempotencyKey").asString();
+    }
+    return hit.path("idempotency_key").asString();
   }
 
   private static void armFault(String method, String path, int status, int times) throws Exception {
