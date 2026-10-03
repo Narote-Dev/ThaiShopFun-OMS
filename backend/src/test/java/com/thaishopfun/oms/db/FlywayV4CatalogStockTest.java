@@ -1300,8 +1300,8 @@ class FlywayV4CatalogStockTest {
       throws SQLException {
     insert(
         connection,
-        "INSERT INTO channel_listing (id, tenant_id, channel_account_id, sku_id, external_sku_id) "
-            + "VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO channel_listing (id, tenant_id, channel_account_id, sku_id, external_sku_id, "
+            + "mapping_source, mapped_at) VALUES (?, ?, ?, ?, ?, 'MANUAL', now())",
         id,
         tenantId,
         channelAccountId,

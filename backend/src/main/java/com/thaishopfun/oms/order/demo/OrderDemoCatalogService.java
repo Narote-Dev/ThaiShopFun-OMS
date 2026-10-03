@@ -236,12 +236,13 @@ public class OrderDemoCatalogService {
     if (count != null && count > 0) {
       return;
     }
+    java.time.OffsetDateTime mappedAt = mapped ? java.time.OffsetDateTime.now() : null;
     jdbc.update(
         """
         INSERT INTO channel_listing (
           id, tenant_id, channel_account_id, sku_id, external_sku_id, seller_sku, name,
           stock_control, mapping_source, mapped_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CASE WHEN ? IS NOT NULL THEN now() END)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         UuidV7.generate(),
         shop.tenantId(),
@@ -252,6 +253,6 @@ public class OrderDemoCatalogService {
         name,
         true,
         mapped ? "MANUAL" : null,
-        mapped ? skuId : null);
+        mappedAt);
   }
 }

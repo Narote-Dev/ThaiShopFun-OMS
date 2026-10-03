@@ -86,8 +86,9 @@ public final class CheckoutPerfSeeder {
           b);
       exec(
           conn,
-          "INSERT INTO channel_listing (id, tenant_id, channel_account_id, sku_id, external_sku_id, stock_control) "
-              + "VALUES (?, ?, ?, ?, 'L-bundle', true)",
+          "INSERT INTO channel_listing (id, tenant_id, channel_account_id, sku_id, external_sku_id, "
+              + "stock_control, mapping_source, mapped_at) "
+              + "VALUES (?, ?, ?, ?, 'L-bundle', true, 'MANUAL', now())",
           UuidV7.generate(),
           tenant,
           account,
@@ -97,8 +98,9 @@ public final class CheckoutPerfSeeder {
       UUID sku = insertSku(conn, tenant, product, warehouse, 10_000);
       exec(
           conn,
-          "INSERT INTO channel_listing (id, tenant_id, channel_account_id, sku_id, external_sku_id, stock_control) "
-              + "VALUES (?, ?, ?, ?, ?, true)",
+          "INSERT INTO channel_listing (id, tenant_id, channel_account_id, sku_id, external_sku_id, "
+              + "stock_control, mapping_source, mapped_at) "
+              + "VALUES (?, ?, ?, ?, ?, true, 'MANUAL', now())",
           UuidV7.generate(),
           tenant,
           account,
