@@ -132,6 +132,15 @@ class OrderIntakeT13AcceptanceTest {
                 shop.tenant(),
                 () ->
                     jdbc.queryForObject(
+                        "SELECT fulfillment_status FROM sales_order WHERE external_order_id = ?",
+                        String.class,
+                        externalOrderId)))
+        .isEqualTo("UNFULFILLED");
+    assertThat(
+            fixture.inTenant(
+                shop.tenant(),
+                () ->
+                    jdbc.queryForObject(
                         """
                         SELECT count(*) FROM stock_reservation
                         WHERE owner_type = 'ORDER' AND status = 'ACTIVE'
@@ -190,41 +199,26 @@ class OrderIntakeT13AcceptanceTest {
   }
 
   @Test
-  void unknownSkuAtCreatedSetsSkuNotMappedWithoutDeadInbox() throws Exception {
+  void activeModeComponentlessBundleHasHoldWithoutShadowDiff() throws Exception {
     StockFixture.Shop shop = fixture.shop("ACTIVE");
     String shopId = fixture.tsfShopId(shop);
     UUID account = fixture.tsfChannelAccount(shop, "ACTIVE", "CONNECTED");
-    UUID ghostSku = UuidV7.generate();
-    try (Connection admin = AuthTestSupport.admin();
-        var statement = admin.createStatement()) {
-      statement.execute("SET session_replication_role = replica");
-      try (PreparedStatement insert =
-          admin.prepareStatement(
-              """
-              INSERT INTO channel_listing (
-                id, tenant_id, channel_account_id, external_sku_id, sku_id, stock_control
-              ) VALUES (?, ?, ?, ?, ?, true)
-              """)) {
-        insert.setObject(1, UuidV7.generate());
-        insert.setObject(2, shop.tenant());
-        insert.setObject(3, account);
-        insert.setString(4, "L-ghost");
-        insert.setObject(5, ghostSku);
-        insert.executeUpdate();
-      }
-      statement.execute("SET session_replication_role = DEFAULT");
-    }
-    String externalOrderId = "TSF-T13-UNK-C-" + UUID.randomUUID();
-    ObjectNode created =
+    UUID bundle = fixture.componentlessBundle(shop);
+    fixture.channelListing(shop, account, "L-t13-act", bundle, true);
+    String externalOrderId = "TSF-T13-ACT-" + UUID.randomUUID();
+    ingest(
         OrderIntakeScenarioSupport.orderCreated(
-            JSON, externalOrderId, shopId, UuidV7.generate().toString(), "COD", "L-ghost", 1, 1);
-    ingest(created);
+            JSON, externalOrderId, shopId, UuidV7.generate().toString(), "COD", "L-t13-act", 1, 1));
     assertThat(worker.processAvailable(10)).isEqualTo(1);
     assertThat(
-            text(
-                "SELECT status FROM inbox_event WHERE event_id = ?",
-                created.path("event_id").asString()))
-        .isEqualTo("PROCESSED");
+            fixture.inTenant(
+                shop.tenant(),
+                () ->
+                    jdbc.queryForObject(
+                        "SELECT count(*) FROM shadow_diff WHERE ref = ?",
+                        Long.class,
+                        externalOrderId)))
+        .isZero();
     assertThat(
             fixture.inTenant(
                 shop.tenant(),
@@ -233,64 +227,53 @@ class OrderIntakeT13AcceptanceTest {
                         "SELECT hold_reason FROM sales_order WHERE external_order_id = ?",
                         String.class,
                         externalOrderId)))
-        .isEqualTo("SKU_NOT_MAPPED");
-    String note =
-        fixture.inTenant(
-            shop.tenant(),
-            () ->
-                jdbc.queryForObject(
-                    "SELECT hold_note FROM sales_order WHERE external_order_id = ?",
-                    String.class,
-                    externalOrderId));
-    assertThat(note).startsWith("mapped sku not found");
-    assertThat(note).contains("L-ghost");
+        .isEqualTo("OUT_OF_STOCK");
   }
 
   @Test
-  void unknownSkuAtPaidSetsSkuNotMappedWithoutFailedRetries() throws Exception {
+  void controlModeComponentlessBundleHasHoldWithoutShadowDiff() throws Exception {
     StockFixture.Shop shop = fixture.shop("ACTIVE");
     String shopId = fixture.tsfShopId(shop);
-    UUID account = fixture.tsfChannelAccount(shop, "ACTIVE", "CONNECTED");
-    UUID ghostSku = UuidV7.generate();
-    try (Connection admin = AuthTestSupport.admin();
-        var statement = admin.createStatement()) {
-      statement.execute("SET session_replication_role = replica");
-      try (PreparedStatement insert =
-          admin.prepareStatement(
-              """
-              INSERT INTO channel_listing (
-                id, tenant_id, channel_account_id, external_sku_id, sku_id, stock_control
-              ) VALUES (?, ?, ?, ?, ?, true)
-              """)) {
-        insert.setObject(1, UuidV7.generate());
-        insert.setObject(2, shop.tenant());
-        insert.setObject(3, account);
-        insert.setString(4, "L-ghost-paid");
-        insert.setObject(5, ghostSku);
-        insert.executeUpdate();
-      }
-      statement.execute("SET session_replication_role = DEFAULT");
-    }
-    String externalOrderId = "TSF-T13-UNK-P-" + UUID.randomUUID();
+    UUID account = fixture.tsfChannelAccount(shop, "CONTROL", "CONNECTED");
+    UUID bundle = fixture.componentlessBundle(shop);
+    fixture.channelListing(shop, account, "L-t13-ctl", bundle, true);
+    String externalOrderId = "TSF-T13-CTL-" + UUID.randomUUID();
     ingest(
         OrderIntakeScenarioSupport.orderCreated(
-            JSON,
-            externalOrderId,
-            shopId,
-            UuidV7.generate().toString(),
-            "PREPAID",
-            "L-ghost-paid",
-            1,
-            1));
-    assertThat(worker.processAvailable(10)).isEqualTo(1);
-    ObjectNode paid = OrderIntakeScenarioSupport.orderPaid(JSON, externalOrderId, shopId, 2);
-    ingest(paid);
+            JSON, externalOrderId, shopId, UuidV7.generate().toString(), "COD", "L-t13-ctl", 1, 1));
     assertThat(worker.processAvailable(10)).isEqualTo(1);
     assertThat(
-            text(
-                "SELECT status FROM inbox_event WHERE event_id = ?",
-                paid.path("event_id").asString()))
-        .isEqualTo("PROCESSED");
+            fixture.inTenant(
+                shop.tenant(),
+                () ->
+                    jdbc.queryForObject(
+                        "SELECT count(*) FROM shadow_diff WHERE ref = ?",
+                        Long.class,
+                        externalOrderId)))
+        .isZero();
+  }
+
+  @Test
+  void observeModeComponentlessBundleUnchanged() throws Exception {
+    StockFixture.Shop shop = fixture.shop("ACTIVE");
+    String shopId = fixture.tsfShopId(shop);
+    UUID account = fixture.tsfChannelAccount(shop, "OBSERVE", "CONNECTED");
+    UUID bundle = fixture.componentlessBundle(shop);
+    fixture.channelListing(shop, account, "L-t13-obs", bundle, true);
+    String externalOrderId = "TSF-T13-OBS-" + UUID.randomUUID();
+    ingest(
+        OrderIntakeScenarioSupport.orderCreated(
+            JSON, externalOrderId, shopId, UuidV7.generate().toString(), "COD", "L-t13-obs", 1, 1));
+    assertThat(worker.processAvailable(10)).isEqualTo(1);
+    assertThat(
+            fixture.inTenant(
+                shop.tenant(),
+                () ->
+                    jdbc.queryForObject(
+                        "SELECT count(*) FROM shadow_diff WHERE ref = ?",
+                        Long.class,
+                        externalOrderId)))
+        .isZero();
     assertThat(
             fixture.inTenant(
                 shop.tenant(),
@@ -299,7 +282,7 @@ class OrderIntakeT13AcceptanceTest {
                         "SELECT hold_reason FROM sales_order WHERE external_order_id = ?",
                         String.class,
                         externalOrderId)))
-        .isEqualTo("SKU_NOT_MAPPED");
+        .isEqualTo("NONE");
   }
 
   private void ingest(ObjectNode event) throws Exception {

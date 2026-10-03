@@ -126,6 +126,22 @@ class InboxOrphanDeferCapTest {
                         String.class)));
     assertThat(details.path("count").asInt()).isEqualTo(105);
     assertThat(details.path("events").size()).isEqualTo(100);
+    for (String eventId : eventIds) {
+      assertThat(
+              fixture.inTenant(
+                  shop.tenant(),
+                  () ->
+                      jdbc.queryForObject(
+                          "SELECT attempts FROM inbox_event WHERE event_id = ?",
+                          Integer.class,
+                          eventId)))
+          .isGreaterThanOrEqualTo(3);
+    }
+    java.util.Set<String> seen = new java.util.HashSet<>();
+    for (tools.jackson.databind.JsonNode entry : details.path("events")) {
+      String inboxEventId = entry.path("inbox_event_id").asString();
+      assertThat(seen.add(inboxEventId)).isTrue();
+    }
   }
 
   private void ingest(ObjectNode event) throws Exception {

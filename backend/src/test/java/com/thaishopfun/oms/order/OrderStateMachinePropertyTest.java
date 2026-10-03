@@ -12,9 +12,8 @@ import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Random;
 import java.util.Set;
 import java.util.UUID;
@@ -35,6 +34,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 class OrderStateMachinePropertyTest {
 
   private static final int RUNS = 200;
+  private static final Instant NOW = Instant.parse("2026-10-03T12:00:00Z");
 
   @DynamicPropertySource
   static void properties(DynamicPropertyRegistry registry) {
@@ -43,6 +43,7 @@ class OrderStateMachinePropertyTest {
 
   @Autowired OrderStateMachine stateMachine;
   @Autowired SalesOrderRepository orders;
+  @Autowired OrderStatusHistoryRepository history;
   @Autowired JdbcTemplate jdbc;
   @Autowired PlatformTransactionManager transactionManager;
 
@@ -52,7 +53,7 @@ class OrderStateMachinePropertyTest {
   }
 
   @Test
-  void legalTransitionSequencesKeepModelAndHistoryInSync() {
+  void randomTransitionsMatchExpectedMatrixModel() {
     for (int repetition = 0; repetition < RUNS; repetition++) {
       runPropertySequence(repetition);
     }
@@ -60,53 +61,63 @@ class OrderStateMachinePropertyTest {
 
   private void runPropertySequence(int repetition) {
     Shop shop = shop();
-    SalesOrder order = seedOrder(shop, "COD_PENDING", "UNFULFILLED", "NONE");
-    Model model = new Model("COD_PENDING", "UNFULFILLED", "NONE");
+    SalesOrder order = seedOrder(shop);
+    Model model = new Model("ACTIVE", "COD_PENDING", "UNFULFILLED", "NONE");
     Random random = new Random(17_431L * repetition);
-    GuardContext guards = new GuardContext(false, true, Instant.now());
+    GuardContext guards = new GuardContext(false, true, NOW, false);
     long version = order.version();
-    int steps = 1 + random.nextInt(10);
 
+    int steps = 1 + random.nextInt(12);
     for (int i = 0; i < steps; i++) {
-      Step step = randomStep(model, random);
-      if (step == null) {
-        break;
-      }
+      String dimension = pickDimension(random);
+      String from = model.value(dimension);
+      String to =
+          OrderStateMachine.allowedValues(dimension)
+              .get(random.nextInt(OrderStateMachine.allowedValues(dimension).size()));
+      boolean legal =
+          oracleExpectsSuccess(
+              model.orderStatus,
+              model.payment,
+              model.fulfillment,
+              model.hold,
+              dimension,
+              from,
+              to,
+              guards,
+              order.id(),
+              shop);
+
       SalesOrder current = as(shop, () -> orders.findById(order.id()).orElseThrow());
       long historyBefore = historyCount(shop, order.id());
       try {
-        SalesOrder updated =
-            as(
-                shop,
-                () -> {
-                  switch (step.dimension) {
-                    case "PAYMENT" -> {
-                      return stateMachine
-                          .applyPaymentStatus(
-                              current, step.to, "prop", "TEST", Instant.now(), guards)
-                          .order();
-                    }
-                    case "FULFILLMENT" -> {
-                      return stateMachine
-                          .applyFulfillmentStatus(current, step.to, "prop", "TEST", guards)
-                          .order();
-                    }
-                    case "HOLD" -> {
-                      return stateMachine
-                          .applyHoldReason(current, step.to, "prop-note", "prop", "TEST")
-                          .order();
-                    }
-                    default -> throw new IllegalStateException(step.dimension);
-                  }
-                });
-        model.apply(step);
+        as(
+            shop,
+            () -> {
+              applyStep(stateMachine, current, dimension, to, guards);
+              return null;
+            });
+        if (!legal) {
+          throw new AssertionError(
+              "expected rejection for " + dimension + " " + from + " -> " + to);
+        }
+        model.apply(dimension, to);
         version++;
+        SalesOrder updated = as(shop, () -> orders.findById(order.id()).orElseThrow());
         assertThat(updated.version()).isEqualTo(version);
+        assertThat(updated.orderStatus()).isEqualTo(model.orderStatus);
         assertThat(updated.paymentStatus()).isEqualTo(model.payment);
         assertThat(updated.fulfillmentStatus()).isEqualTo(model.fulfillment);
         assertThat(updated.holdReason()).isEqualTo(model.hold);
-        assertThat(historyCount(shop, order.id())).isEqualTo(historyBefore + 1);
-      } catch (OrderStateException ignored) {
+        if (!from.equals(to) || "HOLD".equals(dimension)) {
+          assertThat(historyCount(shop, order.id())).isEqualTo(historyBefore + 1);
+          assertLastHistory(shop, order.id(), dimension, from, to);
+        } else {
+          assertThat(historyCount(shop, order.id())).isEqualTo(historyBefore);
+        }
+      } catch (OrderStateException ex) {
+        if (legal) {
+          throw new AssertionError("unexpected rejection: " + ex.getMessage(), ex);
+        }
         assertThat(historyCount(shop, order.id())).isEqualTo(historyBefore);
         SalesOrder unchanged = as(shop, () -> orders.findById(order.id()).orElseThrow());
         assertThat(unchanged.version()).isEqualTo(version);
@@ -114,50 +125,143 @@ class OrderStateMachinePropertyTest {
     }
   }
 
-  private Step randomStep(Model model, Random random) {
-    List<Step> options = new ArrayList<>();
-    addEdges(options, "PAYMENT", model.payment);
-    if ("NONE".equals(model.hold) && Set.of("PAID", "COD_PENDING").contains(model.payment)) {
-      addEdges(options, "FULFILLMENT", model.fulfillment);
+  private boolean oracleExpectsSuccess(
+      String orderStatus,
+      String payment,
+      String fulfillment,
+      String hold,
+      String dimension,
+      String from,
+      String to,
+      GuardContext guards,
+      UUID orderId,
+      Shop shop) {
+    if (!from.equals(modelValue(dimension, orderStatus, payment, fulfillment, hold))) {
+      return false;
     }
-    addEdges(options, "HOLD", model.hold);
-    if (options.isEmpty()) {
-      return null;
+    if (!OrderStateMachineExpectedTransitions.isLegalEdge(dimension, from, to)) {
+      return false;
     }
-    return options.get(random.nextInt(options.size()));
-  }
-
-  private void addEdges(List<Step> options, String dimension, String from) {
-    Set<String> targets =
-        OrderStateMachine.transitionTable()
-            .getOrDefault(dimension, Map.of())
-            .getOrDefault(from, Set.of());
-    for (String to : targets) {
-      if (!from.equals(to)) {
-        options.add(new Step(dimension, to));
+    if (from.equals(to) && !"HOLD".equals(dimension)) {
+      return true;
+    }
+    if ("ORDER".equals(dimension) && "CANCELLED".equals(orderStatus) && !"CANCELLED".equals(to)) {
+      return false;
+    }
+    if ("ORDER".equals(dimension)
+        && "CANCELLED".equals(to)
+        && Set.of("SHIPPED", "DELIVERED").contains(fulfillment)) {
+      return false;
+    }
+    if ("ORDER".equals(dimension) && "COMPLETED".equals(to)) {
+      if (!"DELIVERED".equals(fulfillment)) {
+        return false;
+      }
+      Optional<Instant> delivered =
+          as(shop, () -> history.transitionedAt(orderId, "FULFILLMENT", "DELIVERED"));
+      if (delivered.isEmpty() || delivered.get().isAfter(NOW.minus(7, ChronoUnit.DAYS))) {
+        return false;
       }
     }
+    if (("FULFILLMENT".equals(dimension) || "HOLD".equals(dimension))
+        && ("CANCELLED".equals(orderStatus) || "COMPLETED".equals(orderStatus))) {
+      return false;
+    }
+    if ("FULFILLMENT".equals(dimension) && !"NONE".equals(hold) && !from.equals(to)) {
+      return false;
+    }
+    if ("FULFILLMENT".equals(dimension) && "READY_TO_PICK".equals(to)) {
+      if (!"ACTIVE".equals(orderStatus)) {
+        return false;
+      }
+      if (!Set.of("PAID", "COD_PENDING").contains(payment)) {
+        return false;
+      }
+      if (guards.stockEnforced() && !guards.reservationCoversMappedLines()) {
+        return false;
+      }
+    }
+    return true;
   }
 
-  private record Step(String dimension, String to) {}
+  private static String modelValue(
+      String dimension, String orderStatus, String payment, String fulfillment, String hold) {
+    return switch (dimension) {
+      case "ORDER" -> orderStatus;
+      case "PAYMENT" -> payment;
+      case "FULFILLMENT" -> fulfillment;
+      case "HOLD" -> hold;
+      default -> throw new IllegalArgumentException(dimension);
+    };
+  }
+
+  private static String pickDimension(Random random) {
+    String[] dimensions = {"ORDER", "PAYMENT", "FULFILLMENT", "HOLD"};
+    return dimensions[random.nextInt(dimensions.length)];
+  }
+
+  private static void applyStep(
+      OrderStateMachine machine,
+      SalesOrder order,
+      String dimension,
+      String to,
+      GuardContext guards) {
+    switch (dimension) {
+      case "ORDER" -> machine.applyOrderStatus(order, to, "prop", "TEST", guards);
+      case "PAYMENT" -> machine.applyPaymentStatus(order, to, "prop", "TEST", NOW, guards);
+      case "FULFILLMENT" -> machine.applyFulfillmentStatus(order, to, "prop", "TEST", guards);
+      case "HOLD" -> {
+        String note = to.equals(order.holdReason()) ? order.holdNote() : "prop-note";
+        machine.applyHoldReason(order, to, note, "prop", "TEST");
+      }
+      default -> throw new IllegalStateException(dimension);
+    }
+  }
+
+  private void assertLastHistory(
+      Shop shop, UUID orderId, String dimension, String from, String to) {
+    Map<String, Object> row =
+        as(
+            shop,
+            () ->
+                jdbc.queryForMap(
+                    """
+                    SELECT dimension, from_status, to_status
+                    FROM order_status_history
+                    WHERE order_id = ?
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                    """,
+                    orderId));
+    assertThat(row.get("dimension")).isEqualTo(dimension);
+    assertThat(row.get("from_status")).isEqualTo(from);
+    assertThat(row.get("to_status")).isEqualTo(to);
+  }
 
   private static final class Model {
+    String orderStatus;
     String payment;
     String fulfillment;
     String hold;
 
-    Model(String payment, String fulfillment, String hold) {
+    Model(String orderStatus, String payment, String fulfillment, String hold) {
+      this.orderStatus = orderStatus;
       this.payment = payment;
       this.fulfillment = fulfillment;
       this.hold = hold;
     }
 
-    void apply(Step step) {
-      switch (step.dimension) {
-        case "PAYMENT" -> payment = step.to;
-        case "FULFILLMENT" -> fulfillment = step.to;
-        case "HOLD" -> hold = step.to;
-        default -> throw new IllegalStateException(step.dimension);
+    String value(String dimension) {
+      return modelValue(dimension, orderStatus, payment, fulfillment, hold);
+    }
+
+    void apply(String dimension, String to) {
+      switch (dimension) {
+        case "ORDER" -> orderStatus = to;
+        case "PAYMENT" -> payment = to;
+        case "FULFILLMENT" -> fulfillment = to;
+        case "HOLD" -> hold = to;
+        default -> throw new IllegalStateException(dimension);
       }
     }
   }
@@ -172,8 +276,7 @@ class OrderStateMachinePropertyTest {
                 orderId));
   }
 
-  private SalesOrder seedOrder(
-      Shop shop, String paymentStatus, String fulfillmentStatus, String holdReason) {
+  private SalesOrder seedOrder(Shop shop) {
     SalesOrder order =
         new SalesOrder(
             UuidV7.generate(),
@@ -181,9 +284,9 @@ class OrderStateMachinePropertyTest {
             shop.channelAccount(),
             "TSF-" + UuidV7.generate(),
             "ACTIVE",
-            paymentStatus,
-            fulfillmentStatus,
-            holdReason,
+            "COD_PENDING",
+            "UNFULFILLED",
+            "NONE",
             null,
             null,
             "COD",

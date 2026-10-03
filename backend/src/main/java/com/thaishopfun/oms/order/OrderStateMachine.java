@@ -96,7 +96,6 @@ public class OrderStateMachine {
       String actor,
       Instant paidAt,
       GuardContext guards) {
-    requireMutable(order);
     requireAllowed("PAYMENT", to);
     requireTransition("PAYMENT", order.paymentStatus(), to);
     return persist(order, "PAYMENT", order.paymentStatus(), to, reason, actor, null, paidAt, null);
@@ -104,7 +103,7 @@ public class OrderStateMachine {
 
   public TransitionResult applyFulfillmentStatus(
       SalesOrder order, String to, String reason, String actor, GuardContext guards) {
-    requireMutable(order);
+    requireFulfillmentAndHoldMutable(order);
     requireAllowed("FULFILLMENT", to);
     requireTransition("FULFILLMENT", order.fulfillmentStatus(), to);
     if (!"NONE".equals(order.holdReason()) && !to.equals(order.fulfillmentStatus())) {
@@ -119,7 +118,7 @@ public class OrderStateMachine {
 
   public TransitionResult applyHoldReason(
       SalesOrder order, String to, String holdNote, String reason, String actor) {
-    requireMutable(order);
+    requireFulfillmentAndHoldMutable(order);
     requireAllowed("HOLD", to);
     requireTransition("HOLD", order.holdReason(), to);
     if (!Objects.equals(to, order.holdReason())) {
@@ -131,13 +130,15 @@ public class OrderStateMachine {
     return new TransitionResult(order, false);
   }
 
-  private static void requireMutable(SalesOrder order) {
+  /**
+   * Fulfillment and hold are frozen on terminal order statuses; payment refunds may still apply.
+   */
+  private static void requireFulfillmentAndHoldMutable(SalesOrder order) {
     if ("CANCELLED".equals(order.orderStatus())) {
-      throw new OrderStateException("cancelled order is immutable");
+      throw new OrderStateException("cancelled order is immutable for fulfillment and hold");
     }
-    // Change: COMPLETED is terminal for payment/fulfillment/hold (T13 matrix vs 01-process-map).
     if ("COMPLETED".equals(order.orderStatus())) {
-      throw new OrderStateException("completed order is immutable");
+      throw new OrderStateException("completed order is immutable for fulfillment and hold");
     }
   }
 

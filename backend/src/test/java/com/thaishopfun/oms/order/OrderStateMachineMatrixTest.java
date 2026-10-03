@@ -6,7 +6,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -33,14 +33,9 @@ class OrderStateMachineMatrixTest {
 
   @BeforeEach
   void setup() {
-    orders = mock(SalesOrderRepository.class);
-    history = mock(OrderStatusHistoryRepository.class);
+    orders = Mockito.mock(SalesOrderRepository.class);
+    history = Mockito.mock(OrderStatusHistoryRepository.class);
     machine = new OrderStateMachine(orders, history);
-  }
-
-  @org.junit.jupiter.api.AfterEach
-  void resetMocks() {
-    Mockito.reset(orders, history);
   }
 
   @Test
@@ -70,9 +65,7 @@ class OrderStateMachineMatrixTest {
       List<String> values = OrderStateMachine.allowedValues(dimension);
       for (String from : values) {
         for (String to : values) {
-          if (from.equals(to)) {
-            continue;
-          }
+          clearInvocations(orders, history);
           boolean legal = OrderStateMachineExpectedTransitions.isLegalEdge(dimension, from, to);
           SalesOrder order = baseOrderForDimensionTest(dimension, from);
           if ("ORDER".equals(dimension) && "COMPLETED".equals(to)) {
@@ -81,32 +74,38 @@ class OrderStateMachineMatrixTest {
                 .thenReturn(Optional.of(NOW.minus(8, ChronoUnit.DAYS)));
           }
           final SalesOrder orderForApply = order;
+          GuardContext guards = guard(false, true, false);
           if (legal) {
+            if (from.equals(to) && !"HOLD".equals(dimension)) {
+              apply(dimension, orderForApply, to, guards);
+              verifyNoRepositoryWrites();
+              continue;
+            }
+            if (from.equals(to) && "HOLD".equals(dimension)) {
+              machine.applyHoldReason(orderForApply, to, orderForApply.holdNote(), "t", "A");
+              verifyNoRepositoryWrites();
+              continue;
+            }
             stubSuccessfulUpdate(orderForApply, dimension, to);
-            apply(dimension, orderForApply, to, guard(false, true, false));
+            apply(dimension, orderForApply, to, guards);
+            verify(history)
+                .append(
+                    eq(orderForApply.id()),
+                    eq(dimension),
+                    eq(from),
+                    eq(to),
+                    anyString(),
+                    anyString());
           } else {
-            assertThatThrownBy(() -> apply(dimension, orderForApply, to, guard(false, true, false)))
-                .isInstanceOf(OrderStateException.class);
+            assertRejected(() -> apply(dimension, orderForApply, to, guards));
           }
         }
       }
     }
   }
 
-  private SalesOrder baseOrderForDimensionTest(String dimension, String from) {
-    SalesOrder order = sampleOrder("ACTIVE", "PAID", "UNFULFILLED", "NONE");
-    order = withDimension(order, dimension, from);
-    if ("ORDER".equals(dimension) && "CANCELLED".equals(from)) {
-      order = withDimension(order, "PAYMENT", "PENDING");
-    }
-    if ("FULFILLMENT".equals(dimension) && Set.of("SHIPPED", "DELIVERED").contains(from)) {
-      order = withDimension(order, "PAYMENT", "PAID");
-    }
-    return order;
-  }
-
   @Test
-  void readyToPickGuardOracleAcrossFullStateSpace() {
+  void guardOracleAcrossFullStateSpaceUsesExpectedMatrixTargets() {
     List<String> orderStatuses = OrderStateMachine.allowedValues("ORDER");
     List<String> payments = OrderStateMachine.allowedValues("PAYMENT");
     List<String> fulfillments = OrderStateMachine.allowedValues("FULFILLMENT");
@@ -115,35 +114,30 @@ class OrderStateMachineMatrixTest {
     for (String orderStatus : orderStatuses) {
       for (String payment : payments) {
         for (String fulfillment : fulfillments) {
-          if ("READY_TO_PICK".equals(fulfillment)) {
-            continue;
-          }
           for (String hold : holds) {
             for (boolean[] flags : stockFlags) {
-              Mockito.reset(orders, history);
-              SalesOrder order = sampleOrder(orderStatus, payment, fulfillment, hold);
-              GuardContext guards = guard(flags[0], flags[1], false);
-              boolean expectOk = oracleReadyToPick(order, guards);
-              if (expectOk) {
-                stubSuccessfulUpdate(order, "FULFILLMENT", "READY_TO_PICK");
-              }
-              if ("CANCELLED".equals(orderStatus)) {
-                assertThatThrownBy(
-                        () ->
-                            machine.applyFulfillmentStatus(
-                                order, "READY_TO_PICK", "t", "A", guards))
-                    .isInstanceOf(OrderStateException.class);
-                continue;
-              }
-              if (expectOk) {
-                stubSuccessfulUpdate(order, "FULFILLMENT", "READY_TO_PICK");
-                machine.applyFulfillmentStatus(order, "READY_TO_PICK", "t", "A", guards);
-              } else {
-                assertThatThrownBy(
-                        () ->
-                            machine.applyFulfillmentStatus(
-                                order, "READY_TO_PICK", "t", "A", guards))
-                    .isInstanceOfAny(OrderStateException.class, OrderOptimisticLockException.class);
+              for (String to : OrderStateMachine.allowedValues("FULFILLMENT")) {
+                if (to.equals(fulfillment)) {
+                  continue;
+                }
+                clearInvocations(orders, history);
+                SalesOrder order = sampleOrder(orderStatus, payment, fulfillment, hold);
+                GuardContext guards = guard(flags[0], flags[1], false);
+                boolean expectOk = oracleFulfillmentTarget(order, fulfillment, to, guards);
+                if (expectOk) {
+                  stubSuccessfulUpdate(order, "FULFILLMENT", to);
+                  machine.applyFulfillmentStatus(order, to, "t", "A", guards);
+                  verify(history)
+                      .append(
+                          eq(order.id()),
+                          eq("FULFILLMENT"),
+                          eq(fulfillment),
+                          eq(to),
+                          anyString(),
+                          anyString());
+                } else {
+                  assertRejected(() -> machine.applyFulfillmentStatus(order, to, "t", "A", guards));
+                }
               }
             }
           }
@@ -153,29 +147,11 @@ class OrderStateMachineMatrixTest {
   }
 
   @Test
-  void holdBlocksAnyFulfillmentAdvanceAcrossStateSpace() {
-    for (String hold : OrderStateMachine.allowedValues("HOLD")) {
-      if ("NONE".equals(hold)) {
-        continue;
-      }
-      for (String fulfillment : OrderStateMachine.allowedValues("FULFILLMENT")) {
-        String target =
-            OrderStateMachine.transitionTable()
-                .get("FULFILLMENT")
-                .getOrDefault(fulfillment, Set.of())
-                .stream()
-                .filter(t -> !t.equals(fulfillment))
-                .findFirst()
-                .orElse(null);
-        if (target == null) {
-          continue;
-        }
-        SalesOrder order = sampleOrder("ACTIVE", "PAID", fulfillment, hold);
-        GuardContext guards = guard(false, true, false);
-        assertThatThrownBy(() -> machine.applyFulfillmentStatus(order, target, "t", "A", guards))
-            .isInstanceOf(OrderStateException.class)
-            .hasMessageContaining("hold blocks");
-      }
+  void cancelAfterShippedGuardAcrossFulfillmentStates() {
+    for (String fulfillment : List.of("SHIPPED", "DELIVERED")) {
+      SalesOrder order = sampleOrder("ACTIVE", "PAID", fulfillment, "NONE");
+      assertRejected(
+          () -> machine.applyOrderStatus(order, "CANCELLED", "t", "A", guard(true, true, false)));
     }
   }
 
@@ -215,10 +191,10 @@ class OrderStateMachineMatrixTest {
     when(history.transitionedAt(order.id(), "FULFILLMENT", "DELIVERED"))
         .thenReturn(Optional.of(NOW.minus(7, ChronoUnit.DAYS).plus(1, ChronoUnit.SECONDS)));
     final SalesOrder completedOrder = order;
-    GuardContext tooSoon = guard(true, true, false);
-    assertThatThrownBy(
-            () -> machine.applyOrderStatus(completedOrder, "COMPLETED", "t", "A", tooSoon))
-        .hasMessageContaining("7 days");
+    assertRejected(
+        () ->
+            machine.applyOrderStatus(
+                completedOrder, "COMPLETED", "t", "A", guard(true, true, false)));
 
     when(history.transitionedAt(completedOrder.id(), "FULFILLMENT", "DELIVERED"))
         .thenReturn(Optional.of(NOW.minus(7, ChronoUnit.DAYS)));
@@ -227,13 +203,85 @@ class OrderStateMachineMatrixTest {
   }
 
   @Test
-  void forbiddenTransitionDoesNotTouchRepositories() {
-    SalesOrder order = sampleOrder("ACTIVE", "PAID", "UNFULFILLED", "NONE");
-    assertThatThrownBy(
-            () ->
-                machine.applyPaymentStatus(
-                    order, "PENDING", "t", "A", null, guard(true, true, false)))
-        .isInstanceOf(OrderStateException.class);
+  void cancelledAndCompletedOrdersAllowRefundPaymentTransitions() {
+    SalesOrder cancelled = sampleOrder("CANCELLED", "PAID", "DELIVERED", "NONE");
+    stubSuccessfulUpdate(cancelled, "PAYMENT", "REFUNDED");
+    machine.applyPaymentStatus(cancelled, "REFUNDED", "refund", "A", NOW, guard(true, true, false));
+    verify(history)
+        .append(
+            eq(cancelled.id()),
+            eq("PAYMENT"),
+            eq("PAID"),
+            eq("REFUNDED"),
+            anyString(),
+            anyString());
+
+    SalesOrder completed = sampleOrder("COMPLETED", "PAID", "DELIVERED", "NONE");
+    stubSuccessfulUpdate(completed, "PAYMENT", "PARTIALLY_REFUNDED");
+    machine.applyPaymentStatus(
+        completed, "PARTIALLY_REFUNDED", "refund", "A", NOW, guard(true, true, false));
+  }
+
+  @Test
+  void cancelledAndCompletedOrdersRejectFulfillmentAndHoldWithoutDbWrites() {
+    SalesOrder cancelled = sampleOrder("CANCELLED", "PAID", "UNFULFILLED", "NONE");
+    assertRejected(
+        () ->
+            machine.applyFulfillmentStatus(
+                cancelled, "READY_TO_PICK", "t", "A", guard(false, true, false)));
+    assertRejected(() -> machine.applyHoldReason(cancelled, "MANUAL", "n", "t", "A"));
+
+    SalesOrder completed = sampleOrder("COMPLETED", "PAID", "DELIVERED", "NONE");
+    assertRejected(
+        () ->
+            machine.applyFulfillmentStatus(
+                completed, "SHIPPED", "t", "A", guard(false, true, false)));
+    assertRejected(() -> machine.applyHoldReason(completed, "MANUAL", "n", "t", "A"));
+  }
+
+  @Test
+  void terminalOrderStatusesRejectFurtherOrderChangesWithoutDbWrites() {
+    for (String terminal : List.of("CANCELLED", "COMPLETED")) {
+      SalesOrder order = sampleOrder(terminal, "PAID", "UNFULFILLED", "NONE");
+      assertRejected(
+          () -> machine.applyOrderStatus(order, "ACTIVE", "t", "A", guard(true, true, false)));
+    }
+  }
+
+  private static boolean oracleFulfillmentTarget(
+      SalesOrder order, String fromFulfillment, String to, GuardContext guards) {
+    if (!OrderStateMachineExpectedTransitions.isLegalEdge("FULFILLMENT", fromFulfillment, to)) {
+      return false;
+    }
+    if (!order.fulfillmentStatus().equals(fromFulfillment)) {
+      return false;
+    }
+    if ("CANCELLED".equals(order.orderStatus()) || "COMPLETED".equals(order.orderStatus())) {
+      return false;
+    }
+    if (!"NONE".equals(order.holdReason())) {
+      return false;
+    }
+    if ("READY_TO_PICK".equals(to)) {
+      if (!"ACTIVE".equals(order.orderStatus())) {
+        return false;
+      }
+      if (!Set.of("PAID", "COD_PENDING").contains(order.paymentStatus())) {
+        return false;
+      }
+      if (guards.stockEnforced() && !guards.reservationCoversMappedLines()) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  private void assertRejected(Runnable action) {
+    assertThatThrownBy(action::run).isInstanceOf(OrderStateException.class);
+    verifyNoRepositoryWrites();
+  }
+
+  private void verifyNoRepositoryWrites() {
     verify(orders, never())
         .updateStatusFields(
             any(), anyLong(), anyString(), anyString(), anyString(), anyString(), any(), any());
@@ -241,52 +289,16 @@ class OrderStateMachineMatrixTest {
         .append(any(), anyString(), anyString(), anyString(), anyString(), anyString());
   }
 
-  @Test
-  void terminalOrderStatusesRejectFurtherOrderChangesWithoutDbWrites() {
-    for (String terminal : List.of("CANCELLED", "COMPLETED")) {
-      SalesOrder order = sampleOrder(terminal, "PAID", "UNFULFILLED", "NONE");
-      Mockito.clearInvocations(orders, history);
-      assertThatThrownBy(
-              () -> machine.applyOrderStatus(order, "ACTIVE", "t", "A", guard(true, true, false)))
-          .isInstanceOf(OrderStateException.class);
-      verify(orders, never())
-          .updateStatusFields(
-              any(), anyLong(), anyString(), anyString(), anyString(), anyString(), any(), any());
-      verify(history, never())
-          .append(any(), anyString(), anyString(), anyString(), anyString(), anyString());
+  private SalesOrder baseOrderForDimensionTest(String dimension, String from) {
+    SalesOrder order = sampleOrder("ACTIVE", "PAID", "UNFULFILLED", "NONE");
+    order = withDimension(order, dimension, from);
+    if ("ORDER".equals(dimension) && "CANCELLED".equals(from)) {
+      order = withDimension(order, "PAYMENT", "PENDING");
     }
-  }
-
-  @Test
-  void terminalPaymentRefundedRejectsPaymentTransitionsWithoutDbWrites() {
-    SalesOrder order = sampleOrder("ACTIVE", "REFUNDED", "DELIVERED", "NONE");
-    assertThatThrownBy(
-            () ->
-                machine.applyPaymentStatus(order, "PAID", "t", "A", NOW, guard(true, true, false)))
-        .isInstanceOf(OrderStateException.class);
-    verify(orders, never())
-        .updateStatusFields(
-            any(), anyLong(), anyString(), anyString(), anyString(), anyString(), any(), any());
-  }
-
-  private static boolean oracleReadyToPick(SalesOrder order, GuardContext guards) {
-    if (!"ACTIVE".equals(order.orderStatus())) {
-      return false;
+    if ("FULFILLMENT".equals(dimension) && Set.of("SHIPPED", "DELIVERED").contains(from)) {
+      order = withDimension(order, "PAYMENT", "PAID");
     }
-    if (!Set.of("PAID", "COD_PENDING").contains(order.paymentStatus())) {
-      return false;
-    }
-    if (!"NONE".equals(order.holdReason())) {
-      return false;
-    }
-    if (!"UNFULFILLED".equals(order.fulfillmentStatus())) {
-      return false;
-    }
-    if (guards.stockEnforced() && !guards.reservationCoversMappedLines()) {
-      return false;
-    }
-    return OrderStateMachineExpectedTransitions.isLegalEdge(
-        "FULFILLMENT", order.fulfillmentStatus(), "READY_TO_PICK");
+    return order;
   }
 
   private void apply(String dimension, SalesOrder order, String to, GuardContext guards) {

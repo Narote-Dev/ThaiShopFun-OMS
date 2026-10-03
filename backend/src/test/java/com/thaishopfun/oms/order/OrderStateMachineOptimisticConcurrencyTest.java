@@ -101,7 +101,7 @@ class OrderStateMachineOptimisticConcurrencyTest {
                 return null;
               });
       start.countDown();
-      bothLoaded.await(10, TimeUnit.SECONDS);
+      assertThat(bothLoaded.await(10, TimeUnit.SECONDS)).isTrue();
       release.countDown();
       payment.get(30, TimeUnit.SECONDS);
       hold.get(30, TimeUnit.SECONDS);
