@@ -269,13 +269,6 @@ class OrderCancelApiTest extends OrderIntegrationTest {
   void usesChannelAccountExternalShopNotTenantPrimary() throws Exception {
     ActiveShop shop = shopActive();
     UUID altChannel = OrderFixture.ensureChannelAccount(shop.fixture().tenantId(), "shop_alt_active");
-    try (Connection admin = AuthTestSupport.admin();
-        PreparedStatement ps =
-            admin.prepareStatement("UPDATE tenant SET tsf_shop_id = ? WHERE id = ?")) {
-      ps.setString(1, "shop_primary_only");
-      ps.setObject(2, shop.fixture().tenantId());
-      ps.executeUpdate();
-    }
     String external = "TSF-ALT-" + UUID.randomUUID().toString().substring(0, 8);
     registerMockOrder(external);
     SalesOrder order =
