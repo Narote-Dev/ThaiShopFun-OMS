@@ -39,7 +39,7 @@ class ChannelListingApiTest extends OrderIntegrationTest {
     try (Connection admin = AuthTestSupport.admin()) {
       try (PreparedStatement product =
           admin.prepareStatement(
-              "INSERT INTO product (id, tenant_id, name) VALUES (?, ?, 'API product')")) {
+              "INSERT INTO product (id, tenant_id, name, status) VALUES (?, ?, 'API product', 'ACTIVE')")) {
         product.setObject(1, productId);
         product.setObject(2, shop.tenantId());
         product.executeUpdate();
