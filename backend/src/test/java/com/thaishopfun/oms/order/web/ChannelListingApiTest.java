@@ -47,8 +47,8 @@ class ChannelListingApiTest extends OrderIntegrationTest {
       try (PreparedStatement sku =
           admin.prepareStatement(
               """
-              INSERT INTO sku (id, tenant_id, product_id, sku_code, name, track_stock)
-              VALUES (?, ?, ?, 'API-SKU', 'API sku', true)
+              INSERT INTO sku (id, tenant_id, product_id, sku_code, name, is_bundle)
+              VALUES (?, ?, ?, 'API-SKU', 'API sku', false)
               """)) {
         sku.setObject(1, skuId);
         sku.setObject(2, shop.tenantId());
