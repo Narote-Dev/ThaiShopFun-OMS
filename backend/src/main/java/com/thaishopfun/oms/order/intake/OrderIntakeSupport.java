@@ -30,6 +30,8 @@ import com.thaishopfun.oms.stock.ReservationEngine;
 import com.thaishopfun.oms.stock.ReserveDemandPlanner;
 import com.thaishopfun.oms.stock.ReserveItem;
 import com.thaishopfun.oms.stock.Shortfall;
+import com.thaishopfun.oms.stock.StockError;
+import com.thaishopfun.oms.stock.StockOperationException;
 import com.thaishopfun.oms.stock.StockOwner;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.math.BigDecimal;
@@ -37,9 +39,11 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -185,24 +189,37 @@ public class OrderIntakeSupport {
                 .componentlessBundleSkus(reserveItems.stream().map(ReserveItem::skuId).toList())
                 .isEmpty();
     List<Shortfall> stockShortfalls = List.of();
+    boolean unknownSkuAtAdopt = false;
+    String unknownSkuNote = null;
     if (stockEnforced && !reserveItems.isEmpty() && !componentlessBundle) {
       UUID groupId = parseUuid(payload.reservationId());
       hooks.beforeEngineWrite();
-      AdoptResult adopt =
-          engine.adoptForOrder(
-              groupId,
-              StockOwner.order(orderId.toString()),
-              reserveItems,
-              holdExpires,
-              "order.adopt:" + message.eventId());
-      if (!adopt.adopted()) {
-        stockShortfalls = adopt.shortfalls();
+      try {
+        AdoptResult adopt =
+            engine.adoptForOrder(
+                groupId,
+                StockOwner.order(orderId.toString()),
+                reserveItems,
+                holdExpires,
+                "order.adopt:" + message.eventId());
+        if (!adopt.adopted()) {
+          stockShortfalls = adopt.shortfalls();
+        }
+      } catch (StockOperationException ex) {
+        if (ex.error() != StockError.UNKNOWN_SKU) {
+          throw ex;
+        }
+        unknownSkuAtAdopt = true;
+        unknownSkuNote = unknownSkuHoldNote(mapped, missingSkuIdsForUnknownSku(ex, reserveItems));
       }
     }
 
     String holdReason = "NONE";
     String holdNote = null;
-    if (hasUnmapped) {
+    if (unknownSkuAtAdopt) {
+      holdReason = "SKU_NOT_MAPPED";
+      holdNote = unknownSkuNote;
+    } else if (hasUnmapped) {
       holdReason = "SKU_NOT_MAPPED";
       if (!stockShortfalls.isEmpty()) {
         holdNote = shortfallNote(stockShortfalls);
@@ -210,6 +227,10 @@ public class OrderIntakeSupport {
     } else if (componentlessBundle) {
       holdReason = "OUT_OF_STOCK";
       holdNote = BUNDLE_WITHOUT_COMPONENTS_NOTE;
+      if ("SHADOW".equals(account.mode())) {
+        shadowDiff.insertOrderDiff(
+            account.id(), payload.orderId(), componentlessBundleShadowJson(reserveItems), now);
+      }
     } else if (!stockShortfalls.isEmpty()) {
       holdReason = "OUT_OF_STOCK";
       recordOversell(account, mapped, stockShortfalls);
@@ -241,18 +262,37 @@ public class OrderIntakeSupport {
     Instant paidAt = eventOccurredAt(message);
     order = applyPayment(order, "PAID", paidAt, account);
     List<ReserveItem> items = mappedReserveItems(order.id());
-    if (stockEnforced(account) && !items.isEmpty()) {
+    boolean componentlessBundle =
+        stockEnforced(account)
+            && !items.isEmpty()
+            && !demandPlanner
+                .componentlessBundleSkus(items.stream().map(ReserveItem::skuId).toList())
+                .isEmpty();
+    if (stockEnforced(account) && !items.isEmpty() && !componentlessBundle) {
       hooks.beforeEngineWrite();
-      EnsureHoldResult held =
-          engine.ensureOrderHold(
-              StockOwner.order(order.id().toString()), items, "order.ensure:" + message.eventId());
-      if (held.held()) {
-        order = orders.findById(order.id()).orElseThrow();
-        if ("OUT_OF_STOCK".equals(order.holdReason())) {
-          order = applyHold(order, "NONE", null);
+      try {
+        EnsureHoldResult held =
+            engine.ensureOrderHold(
+                StockOwner.order(order.id().toString()),
+                items,
+                "order.ensure:" + message.eventId());
+        if (held.held()) {
+          order = orders.findById(order.id()).orElseThrow();
+          if ("OUT_OF_STOCK".equals(order.holdReason())) {
+            order = applyHold(order, "NONE", null);
+          }
+        } else {
+          order = applyHold(order, "OUT_OF_STOCK", shortfallNote(held.shortfalls()));
         }
-      } else {
-        order = applyHold(order, "OUT_OF_STOCK", shortfallNote(held.shortfalls()));
+      } catch (StockOperationException ex) {
+        if (ex.error() != StockError.UNKNOWN_SKU) {
+          throw ex;
+        }
+        order =
+            applyHold(
+                order,
+                "SKU_NOT_MAPPED",
+                unknownSkuHoldNoteFromLines(order.id(), missingSkuIdsForUnknownSku(ex, items)));
       }
     }
     maybeReadyToPick(orders.findById(order.id()).orElseThrow(), account, items, paidAt);
@@ -484,6 +524,83 @@ public class OrderIntakeSupport {
     } catch (IllegalArgumentException ex) {
       return null;
     }
+  }
+
+  private String unknownSkuHoldNote(List<LineMapping> mapped, Set<UUID> missingSkuIds) {
+    StringBuilder note = new StringBuilder("mapped sku not found");
+    for (LineMapping line : mapped) {
+      if (line.skuId() != null && missingSkuIds.contains(line.skuId())) {
+        note.append(';').append(line.listingSkuId());
+      }
+    }
+    return note.toString();
+  }
+
+  private String unknownSkuHoldNoteFromLines(UUID orderId, Set<UUID> missingSkuIds) {
+    List<LineMapping> mapped =
+        lines.findByOrderId(orderId).stream()
+            .map(
+                line ->
+                    new LineMapping(
+                        line.id(),
+                        line.externalLineId(),
+                        line.skuId(),
+                        line.qty(),
+                        line.externalSkuId(),
+                        false,
+                        line.skuId() != null))
+            .toList();
+    return unknownSkuHoldNote(mapped, missingSkuIds);
+  }
+
+  private Set<UUID> missingSkuIdsForUnknownSku(
+      StockOperationException ex, List<ReserveItem> items) {
+    String message = ex.getMessage();
+    if (message != null) {
+      int marker = message.indexOf("unknown sku ");
+      if (marker >= 0) {
+        try {
+          return Set.of(
+              UUID.fromString(message.substring(marker + "unknown sku ".length()).trim()));
+        } catch (IllegalArgumentException ignored) {
+          // fall through
+        }
+      }
+    }
+    return missingCatalogSkuIds(items.stream().map(ReserveItem::skuId).toList());
+  }
+
+  private Set<UUID> missingCatalogSkuIds(List<UUID> skuIds) {
+    if (skuIds.isEmpty()) {
+      return Set.of();
+    }
+    Set<UUID> unique = new LinkedHashSet<>(skuIds);
+    String placeholders = String.join(",", java.util.Collections.nCopies(unique.size(), "?"));
+    List<UUID> found =
+        jdbc.queryForList(
+            "SELECT id FROM sku WHERE id IN (" + placeholders + ")", UUID.class, unique.toArray());
+    Set<UUID> present = new LinkedHashSet<>(found);
+    Set<UUID> missing = new LinkedHashSet<>();
+    for (UUID skuId : unique) {
+      if (!present.contains(skuId)) {
+        missing.add(skuId);
+      }
+    }
+    return missing;
+  }
+
+  private String componentlessBundleShadowJson(List<ReserveItem> reserveItems) {
+    Set<UUID> bundleSkus =
+        demandPlanner.componentlessBundleSkus(
+            reserveItems.stream().map(ReserveItem::skuId).toList());
+    ArrayNode bundles = json.createArrayNode();
+    for (UUID skuId : bundleSkus) {
+      bundles.add(skuId.toString());
+    }
+    ObjectNode root = json.createObjectNode();
+    root.put("reason", "BUNDLE_WITHOUT_COMPONENTS");
+    root.set("bundle_skus", bundles);
+    return json.writeValueAsString(root);
   }
 
   private static String shortfallNote(List<Shortfall> shortfalls) {
