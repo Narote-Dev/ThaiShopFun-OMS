@@ -696,8 +696,8 @@ class OrderHoldResolverT12BCriteriaAcceptanceTest {
                 .POST(HttpRequest.BodyPublishers.noBody())
                 .build(),
             HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-    assertThat(sync.statusCode()).isEqualTo(502);
-    assertThat(JSON.readTree(sync.body()).path("error").asString()).isEqualTo("CHANNEL_ERROR");
+    assertThat(sync.statusCode()).isEqualTo(503);
+    assertThat(JSON.readTree(sync.body()).path("error").asString()).isEqualTo("CHANNEL_UNAVAILABLE");
   }
 
   @Test
