@@ -232,26 +232,31 @@ public class OrderDemoCatalogService {
       boolean mapped,
       String sellerSku,
       String name) {
-    Long count =
-        jdbc.queryForObject(
-            """
-            SELECT count(*) FROM channel_listing
-            WHERE tenant_id = ? AND channel_account_id = ? AND external_sku_id = ?
-            """,
-            Long.class,
-            shop.tenantId(),
-            shop.channelAccountId(),
-            externalSkuId);
-    if (count != null && count > 0) {
-      return;
-    }
     java.time.OffsetDateTime mappedAt = mapped ? java.time.OffsetDateTime.now() : null;
     jdbc.update(
         """
         INSERT INTO channel_listing (
           id, tenant_id, channel_account_id, sku_id, external_sku_id, seller_sku, name,
-          stock_control, mapping_source, mapped_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          stock_control, mapping_source, mapped_at, removed_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+        ON CONFLICT (channel_account_id, external_sku_id) DO UPDATE SET
+          seller_sku = EXCLUDED.seller_sku,
+          name = EXCLUDED.name,
+          stock_control = EXCLUDED.stock_control,
+          removed_at = NULL,
+          updated_at = now(),
+          sku_id = CASE
+            WHEN EXCLUDED.sku_id IS NOT NULL THEN EXCLUDED.sku_id
+            ELSE channel_listing.sku_id
+          END,
+          mapping_source = CASE
+            WHEN EXCLUDED.sku_id IS NOT NULL THEN EXCLUDED.mapping_source
+            ELSE channel_listing.mapping_source
+          END,
+          mapped_at = CASE
+            WHEN EXCLUDED.sku_id IS NOT NULL THEN EXCLUDED.mapped_at
+            ELSE channel_listing.mapped_at
+          END
         """,
         UuidV7.generate(),
         shop.tenantId(),

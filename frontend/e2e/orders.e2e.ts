@@ -88,9 +88,12 @@ test('owner maps unmapped listing and order becomes ready to pick', async ({ pag
   await page.getByRole('button', { name: 'Apply' }).click()
   await expect(page.getByRole('link', { name: 'DEMO-UNMAPPED' })).toBeVisible({ timeout: 120_000 })
   await page.getByRole('link', { name: 'DEMO-UNMAPPED' }).click()
+  await expect(page.getByRole('heading', { name: 'Order DEMO-UNMAPPED' })).toBeVisible()
   await page.getByRole('link', { name: 'Not mapped' }).click()
   await expect(page.getByRole('heading', { name: 'Channel listings' })).toBeVisible()
+  await expect(page.getByLabel('Channel account id')).not.toHaveValue('', { timeout: 30_000 })
   await page.getByRole('button', { name: 'Sync listings' }).click()
+  await expect(page.getByRole('status')).toContainText(/Synced \d+ listings/, { timeout: 60_000 })
   await expect(
     page.getByRole('table', { name: 'Channel listings' }).getByText('L-demo-missing'),
   ).toBeVisible({ timeout: 120_000 })
