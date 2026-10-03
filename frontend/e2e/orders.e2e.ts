@@ -80,9 +80,6 @@ test('owner maps unmapped listing and order becomes ready to pick', async ({ pag
   await page.getByRole('link', { name: /^Active Shop/ }).click()
   const catalog = await request.post('http://127.0.0.1:8080/control/demo/order-catalog')
   expect(catalog.ok()).toBeTruthy()
-  const catalogBody = await catalog.json()
-  const channelAccountId = catalogBody.channel_account_id as string
-  expect(channelAccountId.length).toBeGreaterThan(0)
   const seed = await request.post('http://127.0.0.1:8090/control/demo/orders-seed')
   expect(seed.ok()).toBeTruthy()
 
@@ -90,10 +87,8 @@ test('owner maps unmapped listing and order becomes ready to pick', async ({ pag
   await page.getByLabel('Hold filter').selectOption('SKU_NOT_MAPPED')
   await page.getByRole('button', { name: 'Apply' }).click()
   await expect(page.getByRole('link', { name: 'DEMO-UNMAPPED' })).toBeVisible({ timeout: 120_000 })
-
-  await page.getByRole('link', { name: 'Listings' }).click()
-  await page.getByLabel('Channel account id').fill(channelAccountId)
-  await page.getByRole('button', { name: 'Apply' }).click()
+  await page.getByRole('link', { name: 'DEMO-UNMAPPED' }).click()
+  await page.getByRole('link', { name: 'Not mapped' }).click()
   await expect(
     page.getByRole('table', { name: 'Channel listings' }).getByText('L-demo-missing'),
   ).toBeVisible({ timeout: 120_000 })

@@ -132,7 +132,9 @@ export default function OrderDetailPage({ id, me }: { id: string; me: Me }) {
                   {line.mapped ? (
                     'Mapped'
                   ) : (
-                    <a href={`#/channel/listings?mapped=false&q=${encodeURIComponent(line.external_sku_id)}`}>
+                    <a
+                      href={`#/channel/listings?channel_account_id=${encodeURIComponent(order.channel_account.id)}&mapped=false&q=${encodeURIComponent(line.external_sku_id)}`}
+                    >
                       Not mapped
                     </a>
                   )}
