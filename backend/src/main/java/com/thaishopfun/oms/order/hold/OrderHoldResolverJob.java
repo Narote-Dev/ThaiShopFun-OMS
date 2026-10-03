@@ -46,13 +46,17 @@ public class OrderHoldResolverJob {
 
   public ReevalSummary reevalForListing(UUID channelAccountId, String externalSkuId, int cap) {
     UUID tenantId = TenantContext.requireTenantId();
-    List<UUID> orderIds =
-        listings.findHeldOrderIdsForListing(channelAccountId, externalSkuId, cap + 1);
-    int deferred = Math.max(0, orderIds.size() - cap);
-    if (orderIds.size() > cap) {
-      orderIds = orderIds.subList(0, cap);
-    }
-    return resolveOrders(tenantId, orderIds, deferred, "order.remap", null);
+    return tenantTx.execute(
+        status -> {
+          // Step 1: Held-order lookup must run under app.tenant_id (RLS).
+          List<UUID> orderIds =
+              listings.findHeldOrderIdsForListing(channelAccountId, externalSkuId, cap + 1);
+          int deferred = Math.max(0, orderIds.size() - cap);
+          if (orderIds.size() > cap) {
+            orderIds = orderIds.subList(0, cap);
+          }
+          return resolveOrders(tenantId, orderIds, deferred, "order.remap", null);
+        });
   }
 
   public int runScheduledBatch() {
