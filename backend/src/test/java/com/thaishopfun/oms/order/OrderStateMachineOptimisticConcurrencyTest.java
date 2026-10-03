@@ -57,6 +57,8 @@ class OrderStateMachineOptimisticConcurrencyTest {
     GuardContext guards = new GuardContext(false, true, Instant.now());
     ExecutorService pool = Executors.newFixedThreadPool(2);
     CountDownLatch start = new CountDownLatch(1);
+    CountDownLatch bothLoaded = new CountDownLatch(2);
+    CountDownLatch release = new CountDownLatch(1);
     AtomicReference<Throwable> failure = new AtomicReference<>();
     try {
       Future<?> payment =
@@ -68,6 +70,8 @@ class OrderStateMachineOptimisticConcurrencyTest {
                       shop,
                       () -> {
                         SalesOrder current = orders.findById(order.id()).orElseThrow();
+                        bothLoaded.countDown();
+                        release.await(10, TimeUnit.SECONDS);
                         stateMachine.applyPaymentStatus(
                             current, "PAID", "race", "TEST", Instant.now(), guards);
                         return null;
@@ -77,7 +81,7 @@ class OrderStateMachineOptimisticConcurrencyTest {
                 }
                 return null;
               });
-      Future<?> paymentTwo =
+      Future<?> hold =
           pool.submit(
               () -> {
                 start.await(10, TimeUnit.SECONDS);
@@ -86,8 +90,9 @@ class OrderStateMachineOptimisticConcurrencyTest {
                       shop,
                       () -> {
                         SalesOrder current = orders.findById(order.id()).orElseThrow();
-                        stateMachine.applyPaymentStatus(
-                            current, "PAID", "race-2", "TEST", Instant.now(), guards);
+                        bothLoaded.countDown();
+                        release.await(10, TimeUnit.SECONDS);
+                        stateMachine.applyHoldReason(current, "MANUAL", "race", "race", "TEST");
                         return null;
                       });
                 } catch (Throwable ex) {
@@ -96,8 +101,10 @@ class OrderStateMachineOptimisticConcurrencyTest {
                 return null;
               });
       start.countDown();
+      bothLoaded.await(10, TimeUnit.SECONDS);
+      release.countDown();
       payment.get(30, TimeUnit.SECONDS);
-      paymentTwo.get(30, TimeUnit.SECONDS);
+      hold.get(30, TimeUnit.SECONDS);
     } finally {
       pool.shutdownNow();
     }
