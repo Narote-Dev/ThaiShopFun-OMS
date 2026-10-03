@@ -45,6 +45,27 @@ test('owner browses orders, opens detail with masked phone, requests cancel', as
   await page.getByRole('link', { name: 'DEMO-UNMAPPED' }).click()
   await expect(page.getByRole('list', { name: 'Status timeline' })).not.toBeEmpty()
 
+  await page.getByRole('link', { name: '← Orders' }).click()
+  await page.getByLabel('Hold').selectOption('OUT_OF_STOCK')
+  await search.fill('')
+  await page.getByRole('button', { name: 'Apply' }).click()
+  await expect
+    .poll(
+      async () => await page.getByRole('link', { name: 'DEMO-OOS' }).count(),
+      { timeout: 60_000, intervals: [2000] },
+    )
+    .toBeGreaterThan(0)
+
+  await page.getByRole('link', { name: 'DEMO-OOS' }).click()
+  await expect(page.getByRole('heading', { name: 'Order DEMO-OOS' })).toBeVisible()
+
+  await page.getByRole('link', { name: '← Orders' }).click()
+  await page.getByLabel('Hold').selectOption('')
+  await search.fill('DEMO-COD')
+  await page.getByRole('button', { name: 'Apply' }).click()
+  await page.getByRole('link', { name: 'DEMO-COD' }).click()
+  await expect(page.getByRole('heading', { name: 'Order DEMO-COD' })).toBeVisible()
+
   const cancel = page.getByRole('button', { name: 'Request cancel' })
   await expect(cancel).toBeVisible({ timeout: 60_000 })
   page.once('dialog', (dialog) => void dialog.accept())

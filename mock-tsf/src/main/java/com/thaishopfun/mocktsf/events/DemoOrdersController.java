@@ -11,6 +11,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import org.springframework.context.annotation.Profile;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -31,6 +32,16 @@ public class DemoOrdersController {
 
   private static final String SHOP = "shop_active";
   private static final ContractValidator CONTRACT = ContractValidator.classpath();
+
+  /** Stable checkout-group ids for adoptForOrder (must parse as UUID). */
+  private static final Map<String, UUID> DEMO_RESERVATION_IDS =
+      Map.of(
+          "DEMO-READY", UUID.fromString("a0000001-0001-4001-8001-000000000001"),
+          "DEMO-COD", UUID.fromString("a0000002-0002-4002-8002-000000000002"),
+          "DEMO-OOS", UUID.fromString("a0000003-0003-4003-8003-000000000003"),
+          "DEMO-UNMAPPED", UUID.fromString("a0000004-0004-4004-8004-000000000004"),
+          "DEMO-BUNDLE", UUID.fromString("a0000005-0005-4005-8005-000000000005"),
+          "DEMO-CANCELLED", UUID.fromString("a0000006-0006-4006-8006-000000000006"));
 
   private final JsonMapper json;
   private final OmsCaller oms;
@@ -91,7 +102,9 @@ public class DemoOrdersController {
     event.put("occurred_at", Instant.now().truncatedTo(ChronoUnit.SECONDS).toString());
     ObjectNode data = (ObjectNode) event.get("data");
     data.put("order_id", orderId);
-    data.put("reservation_id", "res-" + orderId);
+    UUID reservationId =
+        DEMO_RESERVATION_IDS.getOrDefault(orderId, UUID.randomUUID());
+    data.put("reservation_id", reservationId.toString());
     data.put("payment_method", payment);
     ArrayNode lines = json.createArrayNode();
     ObjectNode line = json.createObjectNode();

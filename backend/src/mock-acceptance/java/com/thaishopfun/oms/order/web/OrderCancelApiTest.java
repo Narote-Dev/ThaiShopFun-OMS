@@ -260,13 +260,55 @@ class OrderCancelApiTest extends OrderIntegrationTest {
     assertThat(demoCatalog.ensureDemoCatalog().get("status")).isEqualTo("OK");
 
     String shop = "shop_active";
-    ingest(orderCreated("DEMO-READY", shop, "res-demo-ready", "PREPAID", "L-demo-ready", 1));
-    ingest(orderCreated("DEMO-COD", shop, "res-demo-cod", "COD", "L-demo-cod", 2));
-    ingest(orderCreated("DEMO-OOS", shop, "res-demo-oos", "COD", "L-demo-oos", 3));
-    ingest(orderCreated("DEMO-UNMAPPED", shop, "res-demo-unmapped", "COD", "L-demo-missing", 4));
-    ingest(orderCreated("DEMO-BUNDLE", shop, "res-demo-bundle", "COD", "L-demo-bundle", 5));
+    ingest(
+        orderCreated(
+            "DEMO-READY",
+            shop,
+            "a0000001-0001-4001-8001-000000000001",
+            "PREPAID",
+            "L-demo-ready",
+            1));
+    ingest(
+        orderCreated(
+            "DEMO-COD",
+            shop,
+            "a0000002-0002-4002-8002-000000000002",
+            "COD",
+            "L-demo-cod",
+            2));
+    ingest(
+        orderCreated(
+            "DEMO-OOS",
+            shop,
+            "a0000003-0003-4003-8003-000000000003",
+            "COD",
+            "L-demo-oos",
+            3));
+    ingest(
+        orderCreated(
+            "DEMO-UNMAPPED",
+            shop,
+            "a0000004-0004-4004-8004-000000000004",
+            "COD",
+            "L-demo-missing",
+            4));
+    ingest(
+        orderCreated(
+            "DEMO-BUNDLE",
+            shop,
+            "a0000005-0005-4005-8005-000000000005",
+            "COD",
+            "L-demo-bundle",
+            5));
     ingest(orderPaid("DEMO-READY", shop, 6));
-    ingest(orderCreated("DEMO-CANCELLED", shop, "res-demo-cancelled", "COD", "L-demo-cancel", 7));
+    ingest(
+        orderCreated(
+            "DEMO-CANCELLED",
+            shop,
+            "a0000006-0006-4006-8006-000000000006",
+            "COD",
+            "L-demo-cancel",
+            7));
     ingest(orderCancelled("DEMO-CANCELLED", shop, 8));
 
     int processed;
@@ -279,9 +321,15 @@ class OrderCancelApiTest extends OrderIntegrationTest {
 
     assertDemoOrder("DEMO-READY", "READY_TO_PICK", "PAID", "NONE", null);
     assertDemoOrder("DEMO-COD", "READY_TO_PICK", "COD_PENDING", "NONE", null);
-    assertDemoOrderExists("DEMO-OOS");
+    assertDemoOrder(
+        "DEMO-OOS", "UNFULFILLED", "COD_PENDING", "OUT_OF_STOCK", null);
     assertDemoOrder("DEMO-UNMAPPED", "UNFULFILLED", "COD_PENDING", "SKU_NOT_MAPPED", null);
-    assertDemoOrderExists("DEMO-BUNDLE");
+    assertDemoOrder(
+        "DEMO-BUNDLE",
+        "UNFULFILLED",
+        "COD_PENDING",
+        "OUT_OF_STOCK",
+        "bundle has no components");
     assertDemoOrderStatus("DEMO-CANCELLED", "CANCELLED");
   }
 
@@ -546,18 +594,6 @@ class OrderCancelApiTest extends OrderIntegrationTest {
       try (var rs = ps.executeQuery()) {
         assertThat(rs.next()).as("order %s", externalId).isTrue();
         assertThat(rs.getString("order_status")).isEqualTo(orderStatus);
-      }
-    }
-  }
-
-  private void assertDemoOrderExists(String externalId) throws Exception {
-    try (Connection admin = AuthTestSupport.admin();
-        PreparedStatement ps =
-            admin.prepareStatement(
-                "SELECT 1 FROM sales_order WHERE external_order_id = ? LIMIT 1")) {
-      ps.setString(1, externalId);
-      try (var rs = ps.executeQuery()) {
-        assertThat(rs.next()).as("order %s", externalId).isTrue();
       }
     }
   }

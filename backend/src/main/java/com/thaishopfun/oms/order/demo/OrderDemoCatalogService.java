@@ -59,6 +59,7 @@ public class OrderDemoCatalogService {
 
   private Map<String, Object> seedCatalogInTransaction() {
     ShopContext shop = resolveShop();
+    enforceStockOnDemoChannel(shop);
     ensureWarehouse(shop);
     UUID ready = ensureSku(shop, "DEMO-SKU-READY", false);
     UUID cod = ensureSku(shop, "DEMO-SKU-COD", false);
@@ -112,6 +113,18 @@ public class OrderDemoCatalogService {
           base.tenantId());
     }
     return new ShopContext(base.tenantId(), base.channelAccountId(), product, null);
+  }
+
+  /** Demo intake must exercise stock holds; provisioned TSF accounts default to OBSERVE. */
+  private void enforceStockOnDemoChannel(ShopContext shop) {
+    jdbc.update(
+        """
+        UPDATE channel_account
+        SET mode = 'ACTIVE'
+        WHERE tenant_id = ? AND id = ? AND mode = 'OBSERVE'
+        """,
+        shop.tenantId(),
+        shop.channelAccountId());
   }
 
   private ShopContext resolveForTenant(UUID tenantId) {
