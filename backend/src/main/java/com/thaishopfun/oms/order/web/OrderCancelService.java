@@ -69,8 +69,8 @@ public class OrderCancelService {
               }
               validateCancellable(order);
               AccountRow accountRow = loadAccount(order).orElseThrow(OrderApiException::notFound);
-              ChannelAdapter adapter = adapters.require(Channel.valueOf(accountRow.channel()));
-              if (!adapter.capabilities().supportsCancelRequest()) {
+              ChannelAdapter adapter = adapters.optional(Channel.valueOf(accountRow.channel()));
+              if (adapter == null || !adapter.capabilities().supportsCancelRequest()) {
                 throw new OrderApiException(
                     422, "CAPABILITY_UNSUPPORTED", "Cancel request is not supported");
               }
@@ -155,9 +155,8 @@ public class OrderCancelService {
     return jdbc
         .query(
             """
-            SELECT ca.id, ca.channel, t.tsf_shop_id
+            SELECT ca.id, ca.channel, ca.external_shop_id
             FROM channel_account ca
-            JOIN tenant t ON t.id = ca.tenant_id
             WHERE ca.id = ? AND ca.tenant_id = ?
             """,
             (rs, rowNum) ->
@@ -165,7 +164,7 @@ public class OrderCancelService {
                     new ChannelAccountRef(
                         order.tenantId(),
                         rs.getObject("id", UUID.class),
-                        rs.getString("tsf_shop_id")),
+                        rs.getString("external_shop_id")),
                     rs.getString("channel")),
             order.channelAccountId(),
             order.tenantId())

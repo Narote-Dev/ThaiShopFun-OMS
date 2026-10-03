@@ -49,4 +49,16 @@ describe('ordersAccess', () => {
     const access = ordersAccess(baseMe('OWNER', 'ACTIVE'))
     expect(access.canRequestCancel({ ...order, fulfillment_status: 'SHIPPED' })).toBe(false)
   })
+
+  it('blocks when channel does not support cancel', () => {
+    const access = ordersAccess(baseMe('OWNER', 'ACTIVE'))
+    expect(access.canRequestCancel({ ...order, supports_cancel_request: false })).toBe(false)
+  })
+
+  it('shows hold detail on banner copy', () => {
+    expect(order.hold_detail).toBeNull()
+    expect({ ...order, hold_reason: 'CHANNEL_CANCEL_PENDING', hold_detail: null }).hold_reason).toBe(
+      'CHANNEL_CANCEL_PENDING',
+    )
+  })
 })

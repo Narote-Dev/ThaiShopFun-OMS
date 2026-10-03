@@ -4,6 +4,7 @@ import com.thaishopfun.oms.catalog.CatalogApiException;
 import com.thaishopfun.oms.catalog.Fields;
 import com.thaishopfun.oms.catalog.PageResult;
 import com.thaishopfun.oms.channel.Channel;
+import com.thaishopfun.oms.channel.ChannelAdapter;
 import com.thaishopfun.oms.channel.ChannelAdapterRegistry;
 import com.thaishopfun.oms.order.OrderLineRepository;
 import com.thaishopfun.oms.order.OrderRecipientRepository;
@@ -143,11 +144,9 @@ public class OrderQueryService {
           SalesOrder order = orders.findById(id).orElseThrow(OrderApiException::notFound);
           ChannelAccountRow account =
               channelAccount(order.channelAccountId()).orElseThrow(OrderApiException::notFound);
+          ChannelAdapter cancelAdapter = adapters.optional(Channel.valueOf(account.channel()));
           boolean supportsCancel =
-              adapters
-                  .optional(Channel.valueOf(account.channel()))
-                  .capabilities()
-                  .supportsCancelRequest();
+              cancelAdapter != null && cancelAdapter.capabilities().supportsCancelRequest();
           List<OrderViews.LineView> lineViews = loadLines(order.id());
           List<OrderViews.ReservationView> reservations = loadReservations(order.id());
           List<OrderViews.ShipmentView> shipments = loadShipments(order.id());
@@ -198,72 +197,106 @@ public class OrderQueryService {
   public OrderViews.HoldsView holds() {
     return tx.read(
         () -> {
-          List<HoldRow> rows =
+          String bundleWithoutComponents =
+              """
+              EXISTS (
+                SELECT 1 FROM order_line ol
+                JOIN sku s ON s.id = ol.sku_id AND s.is_bundle = true
+                WHERE ol.order_id = o.id
+                AND NOT EXISTS (
+                  SELECT 1 FROM sku_bundle_component bc
+                  WHERE bc.tenant_id = ol.tenant_id AND bc.bundle_sku_id = ol.sku_id
+                )
+              )
+              """;
+          List<HoldGroupRow> groups =
               jdbc.query(
                   """
-                  SELECT o.id, o.external_order_id, o.ordered_at, o.hold_reason
-                  FROM sales_order o
-                  WHERE o.hold_reason <> 'NONE'
-                  ORDER BY o.ordered_at DESC
+                  WITH held AS (
+                    SELECT
+                      o.id,
+                      o.external_order_id,
+                      o.ordered_at,
+                      CASE
+                        WHEN o.hold_reason = 'OUT_OF_STOCK' AND """
+                      + bundleWithoutComponents
+                      + """
+                        THEN 'OUT_OF_STOCK'
+                        ELSE o.hold_reason
+                      END AS group_reason,
+                      CASE
+                        WHEN o.hold_reason = 'OUT_OF_STOCK' AND """
+                      + bundleWithoutComponents
+                      + """
+                        THEN 'BUNDLE_WITHOUT_COMPONENTS'
+                        ELSE NULL
+                      END AS hold_detail
+                    FROM sales_order o
+                    WHERE o.hold_reason <> 'NONE'
+                  )
+                  SELECT group_reason, hold_detail, COUNT(*) AS cnt
+                  FROM held
+                  GROUP BY group_reason, hold_detail
+                  ORDER BY group_reason, hold_detail NULLS FIRST
                   """,
                   (rs, rowNum) ->
-                      new HoldRow(
-                          rs.getObject("id", UUID.class),
-                          rs.getString("external_order_id"),
-                          rs.getObject("ordered_at", java.time.OffsetDateTime.class).toInstant(),
-                          rs.getString("hold_reason")));
-          Map<String, Long> counts = new LinkedHashMap<>();
-          Map<String, List<OrderViews.HoldSample>> samples = new LinkedHashMap<>();
-          for (HoldRow row : rows) {
-            String key = groupKey(row);
-            counts.merge(key, 1L, Long::sum);
-            samples.computeIfAbsent(key, k -> new ArrayList<>());
-            if (samples.get(key).size() < 5) {
-              samples
-                  .get(key)
-                  .add(new OrderViews.HoldSample(row.id(), row.externalOrderId(), row.orderedAt()));
-            }
-          }
-          List<OrderViews.HoldGroup> groups = new ArrayList<>();
-          for (Map.Entry<String, Long> entry : counts.entrySet()) {
-            String key = entry.getKey();
-            String holdReason = key;
-            String holdDetail = null;
-            if (key.endsWith(":BUNDLE_WITHOUT_COMPONENTS")) {
-              holdReason = "OUT_OF_STOCK";
-              holdDetail = "BUNDLE_WITHOUT_COMPONENTS";
-            }
-            groups.add(
+                      new HoldGroupRow(
+                          rs.getString("group_reason"),
+                          rs.getString("hold_detail"),
+                          rs.getLong("cnt")));
+          List<OrderViews.HoldGroup> result = new ArrayList<>();
+          for (HoldGroupRow group : groups) {
+            List<OrderViews.HoldSample> samples =
+                jdbc.query(
+                    """
+                    WITH held AS (
+                      SELECT
+                        o.id,
+                        o.external_order_id,
+                        o.ordered_at,
+                        CASE
+                          WHEN o.hold_reason = 'OUT_OF_STOCK' AND """
+                        + bundleWithoutComponents
+                        + """
+                          THEN 'OUT_OF_STOCK'
+                          ELSE o.hold_reason
+                        END AS group_reason,
+                        CASE
+                          WHEN o.hold_reason = 'OUT_OF_STOCK' AND """
+                        + bundleWithoutComponents
+                        + """
+                          THEN 'BUNDLE_WITHOUT_COMPONENTS'
+                          ELSE NULL
+                        END AS hold_detail
+                      FROM sales_order o
+                      WHERE o.hold_reason <> 'NONE'
+                    )
+                    SELECT id, external_order_id, ordered_at
+                    FROM (
+                      SELECT
+                        h.id,
+                        h.external_order_id,
+                        h.ordered_at,
+                        ROW_NUMBER() OVER (ORDER BY h.ordered_at DESC) AS rn
+                      FROM held h
+                      WHERE h.group_reason = ? AND h.hold_detail IS NOT DISTINCT FROM ?
+                    ) ranked
+                    WHERE rn <= 5
+                    ORDER BY ordered_at DESC
+                    """,
+                    (rs, rowNum) ->
+                        new OrderViews.HoldSample(
+                            rs.getObject("id", UUID.class),
+                            rs.getString("external_order_id"),
+                            rs.getObject("ordered_at", java.time.OffsetDateTime.class).toInstant()),
+                    group.holdReason(),
+                    group.holdDetail());
+            result.add(
                 new OrderViews.HoldGroup(
-                    holdReason, holdDetail, entry.getValue(), List.copyOf(samples.get(key))));
+                    group.holdReason(), group.holdDetail(), group.count(), samples));
           }
-          return new OrderViews.HoldsView(groups);
+          return new OrderViews.HoldsView(result);
         });
-  }
-
-  private String groupKey(HoldRow row) {
-    if ("OUT_OF_STOCK".equals(row.holdReason()) && isBundleWithoutComponents(row.id())) {
-      return "OUT_OF_STOCK:BUNDLE_WITHOUT_COMPONENTS";
-    }
-    return row.holdReason();
-  }
-
-  private boolean isBundleWithoutComponents(UUID orderId) {
-    return Boolean.TRUE.equals(
-        jdbc.queryForObject(
-            """
-            SELECT EXISTS (
-              SELECT 1 FROM order_line ol
-              JOIN sku s ON s.id = ol.sku_id AND s.is_bundle = true
-              WHERE ol.order_id = ?
-              AND NOT EXISTS (
-                SELECT 1 FROM sku_bundle_component bc
-                WHERE bc.tenant_id = ol.tenant_id AND bc.bundle_sku_id = ol.sku_id
-              )
-            )
-            """,
-            Boolean.class,
-            orderId));
   }
 
   private String resolveHoldDetail(UUID orderId, String holdReason) {
@@ -472,7 +505,7 @@ public class OrderQueryService {
 
   private record ChannelAccountRow(UUID id, String channel, String mode, String status) {}
 
-  private record HoldRow(UUID id, String externalOrderId, Instant orderedAt, String holdReason) {}
+  private record HoldGroupRow(String holdReason, String holdDetail, long count) {}
 
   sealed interface SearchClause permits PhoneSearch, TrackingSearch, ExternalSearch, NoSearch {}
 
@@ -490,7 +523,7 @@ public class OrderQueryService {
     }
     String query = q.trim();
     String digits = query.replaceAll("\\D", "");
-    if (digits.length() >= 9) {
+    if (digits.length() >= 9 && digits.length() <= 15) {
       List<UUID> ids = recipients.findOrderIdsByPhone(query);
       if (!ids.isEmpty()) {
         return new PhoneSearch(ids);

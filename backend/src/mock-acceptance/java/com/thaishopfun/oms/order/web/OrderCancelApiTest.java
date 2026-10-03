@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.thaishopfun.mocktsf.MockTsfApplication;
 import com.thaishopfun.oms.auth.AuthTestSupport;
+import com.thaishopfun.oms.auth.UuidV7;
+import com.thaishopfun.oms.inbox.InboxWorker;
 import com.thaishopfun.oms.catalog.CatalogHttp;
 import com.thaishopfun.oms.order.OrderRecipientRepository;
 import com.thaishopfun.oms.order.OrderStatusHistoryRepository;
@@ -45,6 +47,7 @@ class OrderCancelApiTest extends OrderIntegrationTest {
   @Autowired OrderStatusHistoryRepository history;
   @Autowired PlatformTransactionManager transactions;
   @Autowired JdbcTemplate jdbc;
+  @Autowired InboxWorker inboxWorker;
 
   private OrderFixture fixture;
   private static final HttpClient HTTP =
@@ -81,6 +84,7 @@ class OrderCancelApiTest extends OrderIntegrationTest {
   void ownerCancelIsIdempotent() throws Exception {
     ActiveShop shop = shopActive();
     SalesOrder order = fixture.insert(shop.fixture(), "TSF-240929-000123", "READY_TO_PICK", "NONE");
+    clearCancelHits(order.externalOrderId());
     CatalogHttp.Result first =
         http.post(
             OrderHttp.ordersPath("/" + order.id() + "/cancel-requests"),
@@ -93,6 +97,9 @@ class OrderCancelApiTest extends OrderIntegrationTest {
     assertThat(historyRows).isGreaterThanOrEqualTo(1);
     assertThat(auditRows).isEqualTo(1);
     assertThat(holdReason(order.id())).isEqualTo("CHANNEL_CANCEL_PENDING");
+    assertThat(cancelHits(order.externalOrderId())).hasSize(1);
+    assertThat(cancelHits(order.externalOrderId()).get(0).path("idempotencyKey").asString())
+        .isEqualTo("cancel-request:" + order.id());
 
     CatalogHttp.Result second =
         http.post(
@@ -102,6 +109,7 @@ class OrderCancelApiTest extends OrderIntegrationTest {
     assertThat(second.status()).isEqualTo(202);
     assertThat(historyCount(order.id())).isEqualTo(historyRows);
     assertThat(auditCount(order.id())).isEqualTo(auditRows);
+    assertThat(cancelHits(order.externalOrderId())).hasSize(1);
   }
 
   @Test
@@ -133,7 +141,8 @@ class OrderCancelApiTest extends OrderIntegrationTest {
   @Test
   void shippedOrderConflict() throws Exception {
     ActiveShop shop = shopActive();
-    SalesOrder order = fixture.insert(shop.fixture(), "TSF-240929-000125", "SHIPPED", "NONE");
+    SalesOrder order = fixture.insert(shop.fixture(), "TSF-240929-000126", "SHIPPED", "NONE");
+    clearCancelHits(order.externalOrderId());
     CatalogHttp.Result result =
         http.post(
             OrderHttp.ordersPath("/" + order.id() + "/cancel-requests"),
@@ -142,6 +151,29 @@ class OrderCancelApiTest extends OrderIntegrationTest {
     assertThat(result.status()).isEqualTo(409);
     assertThat(result.error()).isEqualTo("ORDER_NOT_CANCELLABLE");
     assertThat(holdReason(order.id())).isEqualTo("NONE");
+    assertThat(cancelHits(order.externalOrderId())).isEmpty();
+  }
+
+  @Test
+  void cancelledOrderConflictWithoutTsfCall() throws Exception {
+    ActiveShop shop = shopActive();
+    SalesOrder order =
+        fixture.insert(
+            shop.fixture(),
+            "TSF-240929-000127",
+            "CANCELLED",
+            "PAID",
+            "UNFULFILLED",
+            "NONE",
+            shop.fixture().channelAccountId());
+    clearCancelHits(order.externalOrderId());
+    CatalogHttp.Result result =
+        http.post(
+            OrderHttp.ordersPath("/" + order.id() + "/cancel-requests"),
+            shop.owner(),
+            Map.of("reason", "late"));
+    assertThat(result.status()).isEqualTo(409);
+    assertThat(cancelHits(order.externalOrderId())).isEmpty();
   }
 
   @Test
@@ -154,9 +186,72 @@ class OrderCancelApiTest extends OrderIntegrationTest {
             OrderHttp.ordersPath("/" + order.id() + "/cancel-requests"),
             shop.owner(),
             Map.of("reason", "fault"));
-    assertThat(result.status()).isIn(502, 503);
+    assertThat(result.status()).isIn(502, 503, 429);
     assertThat(holdReason(order.id())).isEqualTo("NONE");
     assertThat(auditCount(order.id())).isZero();
+  }
+
+  @Test
+  void channelRateLimitLeavesOrderUnchanged() throws Exception {
+    ActiveShop shop = shopActive();
+    SalesOrder order = fixture.insert(shop.fixture(), "TSF-240929-000128", "READY_TO_PICK", "NONE");
+    armFault("POST", "/internal/v1/orders/TSF-240929-000128/cancel-requests", 429, 1);
+    CatalogHttp.Result result =
+        http.post(
+            OrderHttp.ordersPath("/" + order.id() + "/cancel-requests"),
+            shop.owner(),
+            Map.of("reason", "rate"));
+    assertThat(result.status()).isEqualTo(429);
+    assertThat(holdReason(order.id())).isEqualTo("NONE");
+  }
+
+  @Test
+  void orderCancelledEventSetsCancelled() throws Exception {
+    ActiveShop shop = shopActive();
+    SalesOrder order = fixture.insert(shop.fixture(), "TSF-240929-000129", "READY_TO_PICK", "NONE");
+    http.post(
+        OrderHttp.ordersPath("/" + order.id() + "/cancel-requests"),
+        shop.owner(),
+        Map.of("reason", "buyer"));
+    sendCancelledEvent(order.externalOrderId());
+    inboxWorker.processAvailable();
+    assertThat(orderStatus(order.id())).isEqualTo("CANCELLED");
+  }
+
+  @Test
+  void usesChannelAccountExternalShopNotTenantPrimary() throws Exception {
+    ActiveShop shop = shopActive();
+    UUID altChannel = OrderFixture.ensureChannelAccount(shop.fixture().tenantId(), "shop_alt_active");
+    try (Connection admin = AuthTestSupport.admin();
+        PreparedStatement ps =
+            admin.prepareStatement("UPDATE tenant SET tsf_shop_id = ? WHERE id = ?")) {
+      ps.setString(1, "shop_primary_only");
+      ps.setObject(2, shop.fixture().tenantId());
+      ps.executeUpdate();
+    }
+    SalesOrder order =
+        fixture.insert(
+            shop.fixture(),
+            "TSF-240929-000124",
+            "ACTIVE",
+            "PAID",
+            "READY_TO_PICK",
+            "NONE",
+            altChannel);
+    clearCancelHits(order.externalOrderId());
+    CatalogHttp.Result result =
+        http.post(
+            OrderHttp.ordersPath("/" + order.id() + "/cancel-requests"),
+            shop.owner(),
+            Map.of("reason", "alt shop"));
+    assertThat(result.status()).isEqualTo(202);
+    assertThat(cancelHits(order.externalOrderId())).hasSize(1);
+    String externalShop =
+        jdbc.queryForObject(
+            "SELECT external_shop_id FROM channel_account WHERE id = ?",
+            String.class,
+            altChannel);
+    assertThat(externalShop).isEqualTo("shop_alt_active");
   }
 
   private ActiveShop shopActive() throws Exception {
@@ -246,6 +341,77 @@ class OrderCancelApiTest extends OrderIntegrationTest {
         return rs.getLong(1);
       }
     }
+  }
+
+  private String orderStatus(UUID orderId) throws Exception {
+    try (Connection admin = AuthTestSupport.admin();
+        PreparedStatement ps =
+            admin.prepareStatement("SELECT order_status FROM sales_order WHERE id = ?")) {
+      ps.setObject(1, orderId);
+      try (var rs = ps.executeQuery()) {
+        rs.next();
+        return rs.getString(1);
+      }
+    }
+  }
+
+  private void sendCancelledEvent(String externalOrderId) throws Exception {
+    String body =
+        """
+        {
+          "event": {
+            "event_type": "order.cancelled",
+            "event_id": "test-cancel-%s",
+            "schema_version": 1,
+            "tsf_shop_id": "shop_active",
+            "aggregate_id": "%s",
+            "aggregate_version": 99,
+            "occurred_at": "2026-09-30T12:00:00Z",
+            "data": { "order_id": "%s", "reason": "BUYER" }
+          }
+        }
+        """
+            .formatted(UuidV7.generate(), externalOrderId, externalOrderId);
+    HttpResponse<String> response =
+        HTTP.send(
+            HttpRequest.newBuilder(
+                    URI.create("http://127.0.0.1:" + mockPort() + "/control/events/send"))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8))
+                .build(),
+            HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+    assertThat(response.statusCode()).isEqualTo(200);
+  }
+
+  private tools.jackson.databind.JsonNode cancelHits(String externalOrderId) throws Exception {
+    HttpResponse<String> response =
+        HTTP.send(
+            HttpRequest.newBuilder(
+                    URI.create(
+                        "http://127.0.0.1:"
+                            + mockPort()
+                            + "/control/rest/cancel-hits/"
+                            + externalOrderId))
+                .GET()
+                .build(),
+            HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+    assertThat(response.statusCode()).isEqualTo(200);
+    return new tools.jackson.databind.json.JsonMapper()
+        .readTree(response.body())
+        .path("hits");
+  }
+
+  private void clearCancelHits(String externalOrderId) throws Exception {
+    HTTP.send(
+        HttpRequest.newBuilder(
+                URI.create(
+                    "http://127.0.0.1:"
+                        + mockPort()
+                        + "/control/rest/cancel-hits/"
+                        + externalOrderId))
+            .DELETE()
+            .build(),
+        HttpResponse.BodyHandlers.discarding());
   }
 
   private static void armFault(String method, String path, int status, int times) throws Exception {

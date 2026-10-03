@@ -8,6 +8,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BiFunction;
 import org.springframework.stereotype.Component;
@@ -25,6 +26,25 @@ public class TsfCatalog {
   private final ConcurrentHashMap<String, Map<String, Object>> shipments =
       new ConcurrentHashMap<>();
   private final AtomicLong sequence = new AtomicLong(1);
+  private final ConcurrentHashMap<String, CopyOnWriteArrayList<CancelHit>> cancelHits =
+      new ConcurrentHashMap<>();
+
+  public record CancelHit(String idempotencyKey, Instant at) {}
+
+  public void recordCancelHit(String orderId, String idempotencyKey) {
+    cancelHits
+        .computeIfAbsent(orderId, ignored -> new CopyOnWriteArrayList<>())
+        .add(new CancelHit(idempotencyKey, Instant.now()));
+  }
+
+  public List<CancelHit> cancelHits(String orderId) {
+    CopyOnWriteArrayList<CancelHit> hits = cancelHits.get(orderId);
+    return hits == null ? List.of() : List.copyOf(hits);
+  }
+
+  public void clearCancelHits(String orderId) {
+    cancelHits.remove(orderId);
+  }
 
   public TsfCatalog() {
     Instant updated = Instant.parse("2026-09-29T08:15:02Z");

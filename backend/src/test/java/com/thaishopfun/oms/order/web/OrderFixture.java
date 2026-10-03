@@ -22,6 +22,7 @@ final class OrderFixture {
 
   static final String NAME = "สมชาย ใจดี";
   static final String PHONE = "081-234-5678";
+  static final String ADDRESS = "{\"line1\":\"ซอยตัวอย่าง 1\"}";
 
   private final SalesOrderRepository orders;
   private final OrderRecipientRepository recipients;
@@ -94,6 +95,17 @@ final class OrderFixture {
   }
 
   SalesOrder insert(Shop shop, String externalId, String fulfillment, String hold) {
+    return insert(shop, externalId, "ACTIVE", "PAID", fulfillment, hold, shop.channelAccountId());
+  }
+
+  SalesOrder insert(
+      Shop shop,
+      String externalId,
+      String orderStatus,
+      String paymentStatus,
+      String fulfillment,
+      String hold,
+      UUID channelAccountId) {
     return inTenant(
         shop.tenantId(),
         () -> {
@@ -101,10 +113,10 @@ final class OrderFixture {
               new SalesOrder(
                   UuidV7.generate(),
                   shop.tenantId(),
-                  shop.channelAccountId(),
+                  channelAccountId,
                   externalId,
-                  "ACTIVE",
-                  "PAID",
+                  orderStatus,
+                  paymentStatus,
                   fulfillment,
                   hold,
                   null,
@@ -123,11 +135,47 @@ final class OrderFixture {
           orders.insert(order);
           recipients.insert(
               order.id(),
-              new Recipient(NAME, PHONE, "{\"line1\":\"x\"}", "Bangkok", "10110"),
+              new Recipient(NAME, PHONE, ADDRESS, "Bangkok", "10110"),
               null);
           history.append(order.id(), "FULFILLMENT", "UNFULFILLED", fulfillment, "test", "SYSTEM");
           return order;
         });
+  }
+
+  static UUID ensureChannelAccount(UUID tenantId, String externalShopId) throws SQLException {
+    try (java.sql.Connection admin = AuthTestSupport.admin()) {
+      UUID existing = findChannel(admin, tenantId, externalShopId);
+      if (existing != null) {
+        return existing;
+      }
+      UUID id = UuidV7.generate();
+      exec(
+          admin,
+          """
+          INSERT INTO channel_account (id, tenant_id, channel, external_shop_id, status, mode)
+          VALUES (?, ?, 'TSF', ?, 'CONNECTED', 'ACTIVE')
+          """,
+          id,
+          tenantId,
+          externalShopId);
+      return id;
+    }
+  }
+
+  static UUID ensureShopeeAccount(UUID tenantId, String externalShopId) throws SQLException {
+    try (java.sql.Connection admin = AuthTestSupport.admin()) {
+      UUID id = UuidV7.generate();
+      exec(
+          admin,
+          """
+          INSERT INTO channel_account (id, tenant_id, channel, external_shop_id, status, mode)
+          VALUES (?, ?, 'SHOPEE', ?, 'CONNECTED', 'ACTIVE')
+          """,
+          id,
+          tenantId,
+          externalShopId);
+      return id;
+    }
   }
 
   <T> T inTenant(UUID tenantId, java.util.function.Supplier<T> work) {

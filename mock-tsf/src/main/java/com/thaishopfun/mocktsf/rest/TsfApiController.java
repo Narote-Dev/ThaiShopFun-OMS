@@ -158,6 +158,9 @@ public class TsfApiController {
     requireOrder(orderId);
     String raw = read(request);
     responses.requireInboundRest("cancel-request", raw);
+    if (key != null && !key.isBlank()) {
+      catalog.recordCancelHit(orderId, key);
+    }
     return idempotent(
         "cancel:" + orderId,
         key,

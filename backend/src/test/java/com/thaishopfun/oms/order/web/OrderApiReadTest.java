@@ -76,6 +76,37 @@ class OrderApiReadTest extends OrderIntegrationTest {
     for (ILoggingEvent event : logs.list) {
       assertThat(event.getFormattedMessage()).doesNotContain(OrderFixture.NAME);
       assertThat(event.getFormattedMessage()).doesNotContain(OrderFixture.PHONE);
+      assertThat(event.getFormattedMessage()).doesNotContain(OrderFixture.ADDRESS);
+    }
+  }
+
+  @Test
+  void redactedRecipientOnDetail() throws Exception {
+    CatalogHttp.Shop httpShop = http.catalog().shop();
+    OrderFixture.Shop shop = OrderFixture.shopFor(httpShop);
+    SalesOrder order = fixture.insert(shop, "ORD-REDACT", "READY_TO_PICK", "NONE");
+    fixture.inTenant(
+        shop.tenantId(),
+        () -> {
+          recipients.redact(order.id());
+          return null;
+        });
+    CatalogHttp.Result detail = http.get(OrderHttp.ordersPath("/" + order.id()), httpShop.owner());
+    assertThat(detail.body().path("recipient").path("name_masked").asString()).isEqualTo("redacted");
+    assertThat(detail.body().path("recipient").path("phone_masked").asString()).isEqualTo("redacted");
+    assertThat(detail.body().path("recipient").path("pii_status").asString()).isEqualTo("REDACTED");
+  }
+
+  @Test
+  void phoneSearchDoesNotLeakPiiInLogs() throws Exception {
+    CatalogHttp.Shop httpShop = http.catalog().shop();
+    OrderFixture.Shop shop = OrderFixture.shopFor(httpShop);
+    fixture.insert(shop, "ORD-LOG", "READY_TO_PICK", "NONE");
+    http.get(OrderHttp.ordersPath("?q=081-234-5678"), httpShop.owner());
+    for (ILoggingEvent event : logs.list) {
+      assertThat(event.getFormattedMessage()).doesNotContain(OrderFixture.NAME);
+      assertThat(event.getFormattedMessage()).doesNotContain(OrderFixture.PHONE);
+      assertThat(event.getFormattedMessage()).doesNotContain(OrderFixture.ADDRESS);
     }
   }
 
