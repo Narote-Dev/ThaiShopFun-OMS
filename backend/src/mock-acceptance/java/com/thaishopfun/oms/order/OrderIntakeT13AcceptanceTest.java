@@ -3,6 +3,7 @@ package com.thaishopfun.oms.order;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.thaishopfun.mocktsf.OmsEndpoint;
+import com.thaishopfun.mocktsf.idp.TokenIssuer;
 import com.thaishopfun.oms.auth.AuthTestSupport;
 import com.thaishopfun.oms.auth.UuidV7;
 import com.thaishopfun.oms.inbox.InboxWorker;
@@ -194,20 +195,25 @@ class OrderIntakeT13AcceptanceTest {
     String shopId = fixture.tsfShopId(shop);
     UUID account = fixture.tsfChannelAccount(shop, "ACTIVE", "CONNECTED");
     UUID ghostSku = UuidV7.generate();
-    fixture.inTenant(
-        shop.tenant(),
-        () ->
-            jdbc.update(
-                """
-                INSERT INTO channel_listing (
-                  id, tenant_id, channel_account_id, external_sku_id, sku_id, stock_control
-                ) VALUES (?, ?, ?, ?, ?, true)
-                """,
-                UuidV7.generate(),
-                shop.tenant(),
-                account,
-                "L-ghost",
-                ghostSku));
+    try (Connection admin = AuthTestSupport.admin();
+        var statement = admin.createStatement()) {
+      statement.execute("SET session_replication_role = replica");
+      try (PreparedStatement insert =
+          admin.prepareStatement(
+              """
+              INSERT INTO channel_listing (
+                id, tenant_id, channel_account_id, external_sku_id, sku_id, stock_control
+              ) VALUES (?, ?, ?, ?, ?, true)
+              """)) {
+        insert.setObject(1, UuidV7.generate());
+        insert.setObject(2, shop.tenant());
+        insert.setObject(3, account);
+        insert.setString(4, "L-ghost");
+        insert.setObject(5, ghostSku);
+        insert.executeUpdate();
+      }
+      statement.execute("SET session_replication_role = DEFAULT");
+    }
     String externalOrderId = "TSF-T13-UNK-C-" + UUID.randomUUID();
     ObjectNode created =
         OrderIntakeScenarioSupport.orderCreated(
@@ -246,20 +252,25 @@ class OrderIntakeT13AcceptanceTest {
     String shopId = fixture.tsfShopId(shop);
     UUID account = fixture.tsfChannelAccount(shop, "ACTIVE", "CONNECTED");
     UUID ghostSku = UuidV7.generate();
-    fixture.inTenant(
-        shop.tenant(),
-        () ->
-            jdbc.update(
-                """
-                INSERT INTO channel_listing (
-                  id, tenant_id, channel_account_id, external_sku_id, sku_id, stock_control
-                ) VALUES (?, ?, ?, ?, ?, true)
-                """,
-                UuidV7.generate(),
-                shop.tenant(),
-                account,
-                "L-ghost-paid",
-                ghostSku));
+    try (Connection admin = AuthTestSupport.admin();
+        var statement = admin.createStatement()) {
+      statement.execute("SET session_replication_role = replica");
+      try (PreparedStatement insert =
+          admin.prepareStatement(
+              """
+              INSERT INTO channel_listing (
+                id, tenant_id, channel_account_id, external_sku_id, sku_id, stock_control
+              ) VALUES (?, ?, ?, ?, ?, true)
+              """)) {
+        insert.setObject(1, UuidV7.generate());
+        insert.setObject(2, shop.tenant());
+        insert.setObject(3, account);
+        insert.setString(4, "L-ghost-paid");
+        insert.setObject(5, ghostSku);
+        insert.executeUpdate();
+      }
+      statement.execute("SET session_replication_role = DEFAULT");
+    }
     String externalOrderId = "TSF-T13-UNK-P-" + UUID.randomUUID();
     ingest(
         OrderIntakeScenarioSupport.orderCreated(
@@ -320,16 +331,7 @@ class OrderIntakeT13AcceptanceTest {
   }
 
   private static String tsfToken() {
-    return AuthTestSupport.token(
-        "tsf",
-        "shop",
-        "ACTIVE",
-        null,
-        1,
-        "oms-internal",
-        Instant.now().plusSeconds(600),
-        java.util.List.of(),
-        "SERVICE");
+    return OrderIntakeMockRuntime.mock().getBean(TokenIssuer.class).tsfServiceToken();
   }
 
   private static String sign(String secret, String timestamp, byte[] body) throws Exception {

@@ -276,8 +276,7 @@ public class OrderIntakeSupport {
                 "order.ensure:" + message.eventId());
         if (held.held()) {
           order = orders.findById(order.id()).orElseThrow();
-          if ("OUT_OF_STOCK".equals(order.holdReason())
-              && !BUNDLE_WITHOUT_COMPONENTS_NOTE.equals(order.holdNote())) {
+          if ("OUT_OF_STOCK".equals(order.holdReason())) {
             order = applyHold(order, "NONE", null);
           }
         } else {

@@ -3,6 +3,7 @@ package com.thaishopfun.oms.order;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.thaishopfun.mocktsf.OmsEndpoint;
+import com.thaishopfun.mocktsf.idp.TokenIssuer;
 import com.thaishopfun.oms.auth.AuthTestSupport;
 import com.thaishopfun.oms.inbox.InboxWorker;
 import com.thaishopfun.oms.stock.StockFixture;
@@ -167,16 +168,7 @@ class InboxOrphanDeferCapTest {
   }
 
   private static String tsfToken() {
-    return AuthTestSupport.token(
-        "tsf",
-        "shop",
-        "ACTIVE",
-        null,
-        1,
-        "oms-internal",
-        Instant.now().plusSeconds(600),
-        java.util.List.of(),
-        "SERVICE");
+    return OrderIntakeMockRuntime.mock().getBean(TokenIssuer.class).tsfServiceToken();
   }
 
   private static String sign(String secret, String timestamp, byte[] body) throws Exception {

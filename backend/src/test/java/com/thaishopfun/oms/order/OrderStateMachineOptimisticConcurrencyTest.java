@@ -77,7 +77,7 @@ class OrderStateMachineOptimisticConcurrencyTest {
                 }
                 return null;
               });
-      Future<?> hold =
+      Future<?> paymentTwo =
           pool.submit(
               () -> {
                 start.await(10, TimeUnit.SECONDS);
@@ -86,7 +86,8 @@ class OrderStateMachineOptimisticConcurrencyTest {
                       shop,
                       () -> {
                         SalesOrder current = orders.findById(order.id()).orElseThrow();
-                        stateMachine.applyHoldReason(current, "MANUAL", "race", "race", "TEST");
+                        stateMachine.applyPaymentStatus(
+                            current, "PAID", "race-2", "TEST", Instant.now(), guards);
                         return null;
                       });
                 } catch (Throwable ex) {
@@ -96,7 +97,7 @@ class OrderStateMachineOptimisticConcurrencyTest {
               });
       start.countDown();
       payment.get(30, TimeUnit.SECONDS);
-      hold.get(30, TimeUnit.SECONDS);
+      paymentTwo.get(30, TimeUnit.SECONDS);
     } finally {
       pool.shutdownNow();
     }
