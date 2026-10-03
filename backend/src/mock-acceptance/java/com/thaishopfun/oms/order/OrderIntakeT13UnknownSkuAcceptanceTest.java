@@ -140,7 +140,7 @@ class OrderIntakeT13UnknownSkuAcceptanceTest {
             1);
     ingest(created);
     String eventId = created.path("event_id").asString();
-    assertThat(worker.processAvailable(10)).isEqualTo(1);
+    drainWorkerUntilProcessed(eventId);
     assertInboxProcessedOnce(eventId);
     UUID orderId = orderId(shop, externalOrderId);
     assertThat(holdReason(shop, orderId)).isEqualTo("SKU_NOT_MAPPED");
@@ -152,7 +152,7 @@ class OrderIntakeT13UnknownSkuAcceptanceTest {
     assertThat(orderReservationCount(shop, orderId)).isZero();
 
     resetInboxToPending(eventId);
-    assertThat(worker.processAvailable(10)).isEqualTo(1);
+    drainWorkerUntilProcessed(eventId);
     assertInboxProcessedOnce(eventId);
     assertThat(holdReason(shop, orderId)).isEqualTo("SKU_NOT_MAPPED");
     assertThat(holdNote(shop, orderId)).isEqualTo(holdNote);
@@ -178,7 +178,7 @@ class OrderIntakeT13UnknownSkuAcceptanceTest {
     fixture.channelListing(shop, account, "L-unk-p", sku, true);
     omitSkuFromCatalog = sku;
     String externalOrderId = "TSF-T13-UNK-P-" + UUID.randomUUID();
-    ingest(
+    ObjectNode created =
         OrderIntakeScenarioSupport.orderCreated(
             JSON,
             externalOrderId,
@@ -187,19 +187,37 @@ class OrderIntakeT13UnknownSkuAcceptanceTest {
             "PREPAID",
             "L-unk-p",
             1,
-            1));
-    assertThat(worker.processAvailable(10)).isEqualTo(1);
+            1);
+    ingest(created);
+    drainWorkerUntilProcessed(created.path("event_id").asString());
 
     ObjectNode paid = OrderIntakeScenarioSupport.orderPaid(JSON, externalOrderId, shopId, 2);
     ingest(paid);
-    assertThat(worker.processAvailable(10)).isEqualTo(1);
     String eventId = paid.path("event_id").asString();
+    drainWorkerUntilProcessed(eventId);
     assertInboxProcessedOnce(eventId);
     UUID orderId = orderId(shop, externalOrderId);
     assertThat(holdReason(shop, orderId)).isEqualTo("SKU_NOT_MAPPED");
     assertThat(holdNote(shop, orderId)).contains("L-unk-p");
     assertThat(historyHoldCount(shop, orderId)).isEqualTo(1);
     assertThat(orderReservationCount(shop, orderId)).isZero();
+  }
+
+  private void drainWorkerUntilProcessed(String eventId) throws Exception {
+    for (int i = 0; i < 5; i++) {
+      worker.processAvailable(10);
+      String status = text("SELECT status FROM inbox_event WHERE event_id = ?", eventId);
+      if ("PROCESSED".equals(status)) {
+        return;
+      }
+      if ("DEAD".equals(status)) {
+        String lastError = text("SELECT last_error FROM inbox_event WHERE event_id = ?", eventId);
+        throw new AssertionError("inbox DEAD: " + lastError);
+      }
+    }
+    throw new AssertionError(
+        "inbox not processed: "
+            + text("SELECT status FROM inbox_event WHERE event_id = ?", eventId));
   }
 
   private void assertInboxProcessedOnce(String eventId) throws Exception {

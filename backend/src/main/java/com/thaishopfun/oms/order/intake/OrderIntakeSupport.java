@@ -555,11 +555,6 @@ public class OrderIntakeSupport {
 
   private Set<UUID> missingSkuIdsForUnknownSku(
       StockOperationException ex, List<ReserveItem> items) {
-    List<UUID> skuIds = items.stream().map(ReserveItem::skuId).toList();
-    Set<UUID> missing = missingCatalogSkuIds(skuIds);
-    if (!missing.isEmpty()) {
-      return missing;
-    }
     String message = ex.getMessage();
     if (message != null && message.startsWith("unknown sku ")) {
       try {
@@ -568,7 +563,7 @@ public class OrderIntakeSupport {
         // fall through
       }
     }
-    return Set.of();
+    return missingCatalogSkuIds(items.stream().map(ReserveItem::skuId).toList());
   }
 
   private Set<UUID> missingCatalogSkuIds(List<UUID> skuIds) {
@@ -576,13 +571,10 @@ public class OrderIntakeSupport {
       return Set.of();
     }
     Set<UUID> unique = new LinkedHashSet<>(skuIds);
+    String placeholders = String.join(",", java.util.Collections.nCopies(unique.size(), "?"));
     List<UUID> found =
-        jdbc.query(
-            "SELECT id FROM sku WHERE id = ANY (?)",
-            ps -> {
-              ps.setArray(1, ps.getConnection().createArrayOf("uuid", unique.toArray(UUID[]::new)));
-            },
-            (rs, row) -> rs.getObject("id", UUID.class));
+        jdbc.queryForList(
+            "SELECT id FROM sku WHERE id IN (" + placeholders + ")", UUID.class, unique.toArray());
     Set<UUID> present = new LinkedHashSet<>(found);
     Set<UUID> missing = new LinkedHashSet<>();
     for (UUID skuId : unique) {
