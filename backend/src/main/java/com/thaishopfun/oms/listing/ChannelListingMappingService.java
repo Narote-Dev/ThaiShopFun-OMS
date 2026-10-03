@@ -39,7 +39,11 @@ public class ChannelListingMappingService {
       return new ChannelListingViews.MappingPutResponse(
           ChannelListingViews.from(before), toView(ReevalSummary.zero()));
     }
-    tx.read(() -> ensureSku(skuId));
+    tx.read(
+        () -> {
+          ensureSku(skuId);
+          return null;
+        });
     UUID channelAccountId = before.channelAccountId();
     String externalSkuId = before.externalSkuId();
     tx.write(
