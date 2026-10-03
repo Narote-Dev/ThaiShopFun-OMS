@@ -74,8 +74,7 @@ class OrderApiPerfTest extends OrderIntegrationTest {
       deep =
           http.get(
                   OrderHttp.ordersPath(
-                      "?limit=50&cursor="
-                          + URLEncoder.encode(deep, StandardCharsets.UTF_8)),
+                      "?limit=50&cursor=" + URLEncoder.encode(deep, StandardCharsets.UTF_8)),
                   shop.owner())
               .body()
               .path("next_cursor")
@@ -109,8 +108,8 @@ class OrderApiPerfTest extends OrderIntegrationTest {
     assertThat(ms).isLessThan(1000);
   }
 
-  private static void seedOrders(
-      UUID tenantId, UUID channelAccountId, int count, boolean varied) throws Exception {
+  private static void seedOrders(UUID tenantId, UUID channelAccountId, int count, boolean varied)
+      throws Exception {
     try (Connection admin = AuthTestSupport.admin()) {
       admin.setAutoCommit(false);
       try (PreparedStatement order =

@@ -5,7 +5,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.thaishopfun.mocktsf.MockTsfApplication;
 import com.thaishopfun.mocktsf.contract.ContractValidator;
 import com.thaishopfun.oms.auth.AuthTestSupport;
-import com.thaishopfun.oms.auth.UuidV7;
 import com.thaishopfun.oms.catalog.CatalogHttp;
 import com.thaishopfun.oms.inbox.InboxWorker;
 import com.thaishopfun.oms.order.OrderRecipientRepository;
@@ -258,9 +257,7 @@ class OrderCancelApiTest extends OrderIntegrationTest {
             Map.of("reason", "buyer"));
     assertThat(cancel.status()).isEqualTo(202);
     assertThat(holdReason(order.id())).isEqualTo("CHANNEL_CANCEL_PENDING");
-    ingest(
-        orderCancelled(
-            order.externalOrderId(), shop.fixture().tsfShopId(), 1));
+    ingest(orderCancelled(order.externalOrderId(), shop.fixture().tsfShopId(), 1));
     assertThat(worker.processAvailable(10)).isEqualTo(1);
     assertThat(orderStatus(order.id())).isEqualTo("CANCELLED");
   }
@@ -268,18 +265,13 @@ class OrderCancelApiTest extends OrderIntegrationTest {
   @Test
   void usesChannelAccountExternalShopNotTenantPrimary() throws Exception {
     ActiveShop shop = shopActive();
-    UUID altChannel = OrderFixture.ensureChannelAccount(shop.fixture().tenantId(), "shop_alt_active");
+    UUID altChannel =
+        OrderFixture.ensureChannelAccount(shop.fixture().tenantId(), "shop_alt_active");
     String external = "TSF-ALT-" + UUID.randomUUID().toString().substring(0, 8);
     registerMockOrder(external);
     SalesOrder order =
         fixture.insert(
-            shop.fixture(),
-            external,
-            "ACTIVE",
-            "PAID",
-            "READY_TO_PICK",
-            "NONE",
-            altChannel);
+            shop.fixture(), external, "ACTIVE", "PAID", "READY_TO_PICK", "NONE", altChannel);
     clearCancelHits(order.externalOrderId());
     CatalogHttp.Result result =
         http.post(
@@ -397,9 +389,7 @@ class OrderCancelApiTest extends OrderIntegrationTest {
                 .build(),
             HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
     assertThat(response.statusCode()).isEqualTo(200);
-    return new tools.jackson.databind.json.JsonMapper()
-        .readTree(response.body())
-        .path("hits");
+    return new tools.jackson.databind.json.JsonMapper().readTree(response.body()).path("hits");
   }
 
   private void clearCancelHits(String externalOrderId) throws Exception {

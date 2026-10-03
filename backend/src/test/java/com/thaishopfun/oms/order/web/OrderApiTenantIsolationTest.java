@@ -42,15 +42,21 @@ class OrderApiTenantIsolationTest extends OrderIntegrationTest {
     assertThat(
             http.get(OrderHttp.ordersPath("?q=SHARED-EXT"), b.owner()).body().path("total").asInt())
         .isEqualTo(1);
-    assertThat(http.get(OrderHttp.ordersPath("?q=081-234-5678"), a.owner()).body().path("total").asInt())
+    assertThat(
+            http.get(OrderHttp.ordersPath("?q=081-234-5678"), a.owner())
+                .body()
+                .path("total")
+                .asInt())
         .isEqualTo(2);
-    assertThat(http.get(OrderHttp.ordersPath("?q=081-234-5678"), b.owner()).body().path("total").asInt())
+    assertThat(
+            http.get(OrderHttp.ordersPath("?q=081-234-5678"), b.owner())
+                .body()
+                .path("total")
+                .asInt())
         .isEqualTo(2);
 
-    int holdsA =
-        http.get(OrderHttp.ordersPath("/holds"), a.owner()).body().path("groups").size();
-    int holdsB =
-        http.get(OrderHttp.ordersPath("/holds"), b.owner()).body().path("groups").size();
+    int holdsA = http.get(OrderHttp.ordersPath("/holds"), a.owner()).body().path("groups").size();
+    int holdsB = http.get(OrderHttp.ordersPath("/holds"), b.owner()).body().path("groups").size();
     assertThat(holdsA).isEqualTo(1);
     assertThat(holdsB).isEqualTo(1);
   }

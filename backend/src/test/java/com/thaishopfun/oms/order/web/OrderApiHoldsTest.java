@@ -42,18 +42,21 @@ class OrderApiHoldsTest extends OrderIntegrationTest {
     CatalogHttp.Result holds = http.get(OrderHttp.ordersPath("/holds"), httpShop.owner());
     assertThat(holds.status()).isEqualTo(200);
     JsonNode groups = holds.body().path("groups");
-    assertThat(groups).anySatisfy(g -> assertThat(g.path("hold_reason").asString()).isEqualTo("SKU_NOT_MAPPED"));
-    assertThat(groups).anySatisfy(
-        g -> {
-          assertThat(g.path("hold_reason").asString()).isEqualTo("OUT_OF_STOCK");
-          assertThat(g.path("hold_detail").asString()).isBlank();
-          assertThat(g.path("count").asInt()).isGreaterThanOrEqualTo(1);
-        });
-    assertThat(groups).anySatisfy(
-        g -> {
-          assertThat(g.path("hold_reason").asString()).isEqualTo("OUT_OF_STOCK");
-          assertThat(g.path("hold_detail").asString()).isEqualTo("BUNDLE_WITHOUT_COMPONENTS");
-        });
+    assertThat(groups)
+        .anySatisfy(g -> assertThat(g.path("hold_reason").asString()).isEqualTo("SKU_NOT_MAPPED"));
+    assertThat(groups)
+        .anySatisfy(
+            g -> {
+              assertThat(g.path("hold_reason").asString()).isEqualTo("OUT_OF_STOCK");
+              assertThat(g.path("hold_detail").asString()).isBlank();
+              assertThat(g.path("count").asInt()).isGreaterThanOrEqualTo(1);
+            });
+    assertThat(groups)
+        .anySatisfy(
+            g -> {
+              assertThat(g.path("hold_reason").asString()).isEqualTo("OUT_OF_STOCK");
+              assertThat(g.path("hold_detail").asString()).isEqualTo("BUNDLE_WITHOUT_COMPONENTS");
+            });
     int total = 0;
     for (JsonNode group : groups) {
       total += group.path("count").asInt();
@@ -76,8 +79,7 @@ class OrderApiHoldsTest extends OrderIntegrationTest {
               bundle,
               shop.tenantId(),
               product);
-          SalesOrder order =
-              fixture.insert(shop, externalId, "UNFULFILLED", "OUT_OF_STOCK");
+          SalesOrder order = fixture.insert(shop, externalId, "UNFULFILLED", "OUT_OF_STOCK");
           jdbc.update(
               """
               INSERT INTO order_line (

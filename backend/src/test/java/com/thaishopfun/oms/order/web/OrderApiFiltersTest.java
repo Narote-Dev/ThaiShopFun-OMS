@@ -9,12 +9,12 @@ import com.thaishopfun.oms.order.OrderRecipientRepository;
 import com.thaishopfun.oms.order.OrderStatusHistoryRepository;
 import com.thaishopfun.oms.order.SalesOrder;
 import com.thaishopfun.oms.order.SalesOrderRepository;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -81,22 +81,29 @@ class OrderApiFiltersTest extends OrderIntegrationTest {
         shopee,
         day.plus(3, ChronoUnit.HOURS));
 
-    assertThat(http.get(OrderHttp.ordersPath("?fulfillment_status=READY_TO_PICK"), httpShop.owner())
-            .body()
-            .path("total")
-            .asInt())
+    assertThat(
+            http.get(OrderHttp.ordersPath("?fulfillment_status=READY_TO_PICK"), httpShop.owner())
+                .body()
+                .path("total")
+                .asInt())
         .isEqualTo(1);
-    assertThat(http.get(OrderHttp.ordersPath("?payment_status=COD_PENDING"), httpShop.owner())
-            .body()
-            .path("total")
-            .asInt())
+    assertThat(
+            http.get(OrderHttp.ordersPath("?payment_status=COD_PENDING"), httpShop.owner())
+                .body()
+                .path("total")
+                .asInt())
         .isEqualTo(1);
-    assertThat(http.get(OrderHttp.ordersPath("?hold_reason=SKU_NOT_MAPPED"), httpShop.owner())
-            .body()
-            .path("total")
-            .asInt())
+    assertThat(
+            http.get(OrderHttp.ordersPath("?hold_reason=SKU_NOT_MAPPED"), httpShop.owner())
+                .body()
+                .path("total")
+                .asInt())
         .isEqualTo(1);
-    assertThat(http.get(OrderHttp.ordersPath("?channel=SHOPEE"), httpShop.owner()).body().path("total").asInt())
+    assertThat(
+            http.get(OrderHttp.ordersPath("?channel=SHOPEE"), httpShop.owner())
+                .body()
+                .path("total")
+                .asInt())
         .isEqualTo(1);
     assertThat(
             http.get(
@@ -147,9 +154,17 @@ class OrderApiFiltersTest extends OrderIntegrationTest {
       ps.setString(5, "TH999888777");
       ps.executeUpdate();
     }
-    assertThat(http.get(OrderHttp.ordersPath("?q=TH999888777"), httpShop.owner()).body().path("total").asInt())
+    assertThat(
+            http.get(OrderHttp.ordersPath("?q=TH999888777"), httpShop.owner())
+                .body()
+                .path("total")
+                .asInt())
         .isEqualTo(1);
-    assertThat(http.get(OrderHttp.ordersPath("?q=0819999999999"), httpShop.owner()).body().path("total").asInt())
+    assertThat(
+            http.get(OrderHttp.ordersPath("?q=0819999999999"), httpShop.owner())
+                .body()
+                .path("total")
+                .asInt())
         .isZero();
   }
 

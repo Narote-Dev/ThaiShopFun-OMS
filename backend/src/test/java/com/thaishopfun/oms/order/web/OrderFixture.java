@@ -134,9 +134,7 @@ final class OrderFixture {
                   0);
           orders.insert(order);
           recipients.insert(
-              order.id(),
-              new Recipient(NAME, PHONE, ADDRESS, "Bangkok", "10110"),
-              null);
+              order.id(), new Recipient(NAME, PHONE, ADDRESS, "Bangkok", "10110"), null);
           history.append(order.id(), "FULFILLMENT", "UNFULFILLED", fulfillment, "test", "SYSTEM");
           return order;
         });

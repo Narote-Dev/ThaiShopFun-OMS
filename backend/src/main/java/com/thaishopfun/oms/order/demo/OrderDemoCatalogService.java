@@ -69,8 +69,7 @@ public class OrderDemoCatalogService {
 
   private ShopContext resolveShop() {
     UUID tenantId = TenantContext.tenantId();
-    ShopContext base =
-        tenantId != null ? resolveForTenant(tenantId) : resolveForTsfShop(SHOP);
+    ShopContext base = tenantId != null ? resolveForTenant(tenantId) : resolveForTsfShop(SHOP);
     if (base == null) {
       return null;
     }

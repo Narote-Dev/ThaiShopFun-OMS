@@ -8,14 +8,13 @@ import com.thaishopfun.oms.order.OrderRecipientRepository;
 import com.thaishopfun.oms.order.OrderStatusHistoryRepository;
 import com.thaishopfun.oms.order.SalesOrder;
 import com.thaishopfun.oms.order.SalesOrderRepository;
-import java.util.Arrays;
-import java.util.List;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
@@ -43,7 +42,9 @@ class OrderApiCursorStabilityTest extends OrderIntegrationTest {
     OrderFixture.Shop shop = OrderFixture.shopFor(httpShop);
     Instant base = Instant.parse("2026-07-01T12:00:00Z");
     for (int i = 0; i < 5; i++) {
-      stamp(fixture.insert(shop, "CUR-" + i, "READY_TO_PICK", "NONE"), base.plus(i, ChronoUnit.MINUTES));
+      stamp(
+          fixture.insert(shop, "CUR-" + i, "READY_TO_PICK", "NONE"),
+          base.plus(i, ChronoUnit.MINUTES));
     }
     CatalogHttp.Result page1 =
         http.get(OrderHttp.ordersPath("?limit=2&ordered_to=2026-07-02"), httpShop.owner());
@@ -61,7 +62,8 @@ class OrderApiCursorStabilityTest extends OrderIntegrationTest {
         http.get(
             OrderHttp.ordersPath(
                 "?limit=2&ordered_to=2026-07-02&cursor="
-                    + URLEncoder.encode(page2.body().path("next_cursor").asString(), StandardCharsets.UTF_8)),
+                    + URLEncoder.encode(
+                        page2.body().path("next_cursor").asString(), StandardCharsets.UTF_8)),
             httpShop.owner());
     Set<String> ids = new HashSet<>();
     for (CatalogHttp.Result page : Arrays.asList(page1, page2, page3)) {
@@ -82,5 +84,4 @@ class OrderApiCursorStabilityTest extends OrderIntegrationTest {
       ps.executeUpdate();
     }
   }
-
 }

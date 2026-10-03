@@ -97,8 +97,10 @@ class OrderApiReadTest extends OrderIntegrationTest {
           return null;
         });
     CatalogHttp.Result detail = http.get(OrderHttp.ordersPath("/" + order.id()), httpShop.owner());
-    assertThat(detail.body().path("recipient").path("name_masked").asString()).isEqualTo("redacted");
-    assertThat(detail.body().path("recipient").path("phone_masked").asString()).isEqualTo("redacted");
+    assertThat(detail.body().path("recipient").path("name_masked").asString())
+        .isEqualTo("redacted");
+    assertThat(detail.body().path("recipient").path("phone_masked").asString())
+        .isEqualTo("redacted");
     assertThat(detail.body().path("recipient").path("pii_status").asString()).isEqualTo("REDACTED");
   }
 
