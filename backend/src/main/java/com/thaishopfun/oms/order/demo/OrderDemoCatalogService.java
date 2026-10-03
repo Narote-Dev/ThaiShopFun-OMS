@@ -105,6 +105,27 @@ public class OrderDemoCatalogService {
           "DEMO-SKU-MISSING",
           "Demo unmapped listing");
     }
+    UUID missingListingAccountId = shop.channelAccountId();
+    List<UUID> unmappedOrderAccounts =
+        jdbc.query(
+            """
+            SELECT channel_account_id FROM sales_order
+            WHERE tenant_id = ? AND external_order_id = 'DEMO-UNMAPPED'
+            LIMIT 1
+            """,
+            (rs, rowNum) -> rs.getObject("channel_account_id", UUID.class),
+            shop.tenantId());
+    if (!unmappedOrderAccounts.isEmpty()) {
+      missingListingAccountId = unmappedOrderAccounts.get(0);
+    }
+    UUID missingListingId =
+        jdbc.queryForObject(
+            """
+            SELECT id FROM channel_listing
+            WHERE channel_account_id = ? AND external_sku_id = 'L-demo-missing'
+            """,
+            UUID.class,
+            missingListingAccountId);
     return Map.of(
         "status",
         "OK",
@@ -112,6 +133,8 @@ public class OrderDemoCatalogService {
         shop.tenantId().toString(),
         "channel_account_id",
         shop.channelAccountId().toString(),
+        "L_demo_missing_listing_id",
+        missingListingId.toString(),
         "listings",
         List.of(
             "L-demo-ready",

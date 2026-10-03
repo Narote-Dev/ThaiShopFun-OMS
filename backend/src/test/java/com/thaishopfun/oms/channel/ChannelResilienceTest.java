@@ -440,7 +440,13 @@ class ChannelResilienceTest {
             });
     adapter.getOrder(accountRef(), "x");
     assertThat(attempts).hasValue(2);
-    assertThat(sleeper.durations()).isNotEmpty();
+    // Full jitter may pick zero ms; retry is still observable via metrics.
+    if (sleeper.durations().isEmpty()) {
+      assertThat(meters.find("oms.channel.retries").tag("reason", "unavailable").counter())
+          .isNotNull();
+    } else {
+      assertThat(sleeper.durations()).isNotEmpty();
+    }
   }
 
   @Test

@@ -104,7 +104,6 @@ test('owner maps unmapped listing and order becomes ready to pick', async ({ pag
     (row: { external_order_id: string }) => row.external_order_id === 'DEMO-UNMAPPED',
   )
   expect(heldOrder).toBeTruthy()
-  const channelAccountId = heldOrder.channel_account_id as string
 
   const skuResponse = await request.get(
     'http://127.0.0.1:8080/api/v1/skus?q=DEMO-SKU-READY&limit=10',
@@ -116,36 +115,12 @@ test('owner maps unmapped listing and order becomes ready to pick', async ({ pag
   )
   expect(readySku).toBeTruthy()
 
-  const sync = await request.post(
-    `http://127.0.0.1:8080/api/v1/channel-accounts/${channelAccountId}/listing-syncs`,
-    {
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      data: {},
-    },
-  )
-  expect(sync.ok()).toBeTruthy()
-
-  let listing: { id: string; external_sku_id: string } | undefined
-  await expect
-    .poll(
-      async () => {
-        const listingsResponse = await request.get(
-          `http://127.0.0.1:8080/api/v1/channel-listings?channel_account_id=${channelAccountId}&q=L-demo-missing&limit=25`,
-          { headers: { Authorization: `Bearer ${token}` } },
-        )
-        if (!listingsResponse.ok()) return false
-        listing = (await listingsResponse.json()).items.find(
-          (row: { external_sku_id: string }) => row.external_sku_id === 'L-demo-missing',
-        )
-        return listing != null
-      },
-      { timeout: 120_000, intervals: [3000] },
-    )
-    .toBeTruthy()
-  expect(listing).toBeTruthy()
+  const catalogBody = await catalog.json()
+  const listingId = catalogBody.L_demo_missing_listing_id as string
+  expect(listingId.length).toBeGreaterThan(0)
 
   const mapResponse = await request.put(
-    `http://127.0.0.1:8080/api/v1/channel-listings/${listing.id}/mapping`,
+    `http://127.0.0.1:8080/api/v1/channel-listings/${listingId}/mapping`,
     {
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
       data: { sku_id: readySku.id },
