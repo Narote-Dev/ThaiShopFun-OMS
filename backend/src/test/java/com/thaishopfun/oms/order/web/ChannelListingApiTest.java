@@ -6,6 +6,7 @@ import com.thaishopfun.oms.auth.AuthTestSupport;
 import com.thaishopfun.oms.auth.UuidV7;
 import com.thaishopfun.oms.catalog.CatalogHttp;
 import com.thaishopfun.oms.order.web.OrderIntegrationTest;
+import com.thaishopfun.oms.tenant.TenantContext;
 import java.sql.Connection;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
@@ -33,15 +34,20 @@ class ChannelListingApiTest extends OrderIntegrationTest {
     shop = http.catalog().shop();
     accountId = OrderFixture.shopFor(shop).channelAccountId();
     UUID listing = UuidV7.generate();
-    jdbc.update(
-        """
-        INSERT INTO channel_listing (
-          id, tenant_id, channel_account_id, external_sku_id, seller_sku, name, stock_control
-        ) VALUES (?, ?, ?, 'L-api', 'API-SKU', 'API listing', true)
-        """,
-        listing,
-        shop.tenantId(),
-        accountId);
+    TenantContext.set(shop.tenantId(), null);
+    try {
+      jdbc.update(
+          """
+          INSERT INTO channel_listing (
+            id, tenant_id, channel_account_id, external_sku_id, seller_sku, name, stock_control
+          ) VALUES (?, ?, ?, 'L-api', 'API-SKU', 'API listing', true)
+          """,
+          listing,
+          shop.tenantId(),
+          accountId);
+    } finally {
+      TenantContext.clear();
+    }
   }
 
   @Test

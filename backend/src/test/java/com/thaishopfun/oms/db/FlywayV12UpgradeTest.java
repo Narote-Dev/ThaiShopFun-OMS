@@ -63,7 +63,7 @@ class FlywayV12UpgradeTest {
       try (Connection admin = openAdmin(database);
           PreparedStatement tenantStmt =
               admin.prepareStatement(
-                  "INSERT INTO tenant (id, name, tsf_shop_id, entitlement_status) VALUES (?, 't', 'shop', 'ACTIVE')");
+                  "INSERT INTO tenant (id, name, tsf_shop_id, membership_tier, entitlement_status, ent_ver) VALUES (?, 't', 'shop', 'PRO', 'ACTIVE', 1)");
           PreparedStatement accountStmt =
               admin.prepareStatement(
                   "INSERT INTO channel_account (id, tenant_id, channel, external_shop_id, mode, status) VALUES (?, ?, 'TSF', 'shop', 'ACTIVE', 'CONNECTED')");
