@@ -16,12 +16,13 @@ test('owner browses orders, opens detail with masked phone, requests cancel', as
     .poll(
       async () => {
         await page.goto('/#/orders')
-        return await page.getByRole('link', { name: 'DEMO-COD' }).count()
+        return await page.getByRole('table', { name: 'Orders' }).getByRole('link').count()
       },
       { timeout: 120_000, intervals: [3000] },
     )
     .toBeGreaterThan(0)
   const codLink = page.getByRole('link', { name: 'DEMO-COD' })
+  await expect(codLink).toBeVisible({ timeout: 60_000 })
   await codLink.click()
   await expect(page.getByRole('heading', { name: 'Order DEMO-COD' })).toBeVisible()
   await expect(page.getByText(/\*\*\*-\*\*\*-/)).toBeVisible()
