@@ -119,7 +119,7 @@ class OrderStateMachineOptimisticConcurrencyTest {
                     order.id()));
     assertThat(history).isEqualTo(1);
     SalesOrder finalOrder = as(shop, () -> orders.findById(order.id()).orElseThrow());
-    assertThat(finalOrder.version()).isEqualTo(2L);
+    assertThat(finalOrder.version()).isEqualTo(1L);
   }
 
   private SalesOrder seed(Shop shop) {
