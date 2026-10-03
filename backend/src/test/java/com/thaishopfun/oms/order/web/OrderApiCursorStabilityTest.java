@@ -72,7 +72,8 @@ class OrderApiCursorStabilityTest extends OrderIntegrationTest {
         ids.add(item.path("id").asString());
       }
     }
-    assertThat(ids).hasSize(5);
+    assertThat(ids).hasSize(6);
+    assertThat(ids).hasSameSizeAs(new HashSet<>(ids));
     assertThat(ids).doesNotContain((String) null);
   }
 

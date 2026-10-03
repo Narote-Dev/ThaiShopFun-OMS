@@ -19,6 +19,7 @@ import java.sql.ResultSet;
 import java.time.Duration;
 import java.util.UUID;
 import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -47,7 +48,6 @@ class OrderDemoOrdersAcceptanceTest extends OrderIntegrationTest {
 
   @DynamicPropertySource
   static void mockTsf(DynamicPropertyRegistry registry) {
-    AuthTestSupport.register(registry);
     startMock();
     int mockPort = mockPort();
     registry.add("oms.tsf.base-url", () -> "http://127.0.0.1:" + mockPort);
@@ -68,6 +68,16 @@ class OrderDemoOrdersAcceptanceTest extends OrderIntegrationTest {
   void pointMockAtOms() {
     mock.getBean(OmsEndpoint.class).setBaseUrl("http://127.0.0.1:" + port);
     TenantContext.clear();
+  }
+
+  @AfterEach
+  void clearShopActiveTenant() throws Exception {
+    TenantContext.clear();
+    try (Connection admin = AuthTestSupport.admin();
+        var ps = admin.prepareStatement("DELETE FROM tenant WHERE tsf_shop_id = ?")) {
+      ps.setString(1, "shop_active");
+      ps.executeUpdate();
+    }
   }
 
   @Test

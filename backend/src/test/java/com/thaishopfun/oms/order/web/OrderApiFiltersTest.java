@@ -207,7 +207,7 @@ class OrderApiFiltersTest extends OrderIntegrationTest {
   void fifteenDigitLeadingZeroPhoneQueryReturns200WithoutServerError() throws Exception {
     CatalogHttp.Shop httpShop = http.catalog().shop();
     OrderFixture.Shop shop = OrderFixture.shopFor(httpShop);
-    fixture.insert(shop, "TH012345678901234", "READY_TO_PICK", "NONE");
+    fixture.insert(shop, "012345678901234", "READY_TO_PICK", "NONE");
     CatalogHttp.Result result =
         http.get(
             OrderHttp.ordersPath(

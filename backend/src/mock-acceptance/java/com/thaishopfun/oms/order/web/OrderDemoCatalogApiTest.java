@@ -31,8 +31,13 @@ class OrderDemoCatalogApiTest extends OrderIntegrationTest {
   @Autowired OrderDemoCatalogService catalog;
 
   @AfterEach
-  void clearTenant() {
+  void clearTenant() throws Exception {
     TenantContext.clear();
+    try (Connection admin = AuthTestSupport.admin();
+        var ps = admin.prepareStatement("DELETE FROM tenant WHERE tsf_shop_id = ?")) {
+      ps.setString(1, "shop_active");
+      ps.executeUpdate();
+    }
   }
 
   @Test
