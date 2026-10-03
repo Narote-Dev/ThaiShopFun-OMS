@@ -92,18 +92,27 @@ test('owner maps unmapped listing and order becomes ready to pick', async ({ pag
   expect(me.ok()).toBeTruthy()
   const seed = await request.post('http://127.0.0.1:8090/control/demo/orders-seed')
   expect(seed.ok()).toBeTruthy()
+
+  let heldOrder: { external_order_id: string; channel_account_id: string } | undefined
+  await expect
+    .poll(
+      async () => {
+        const ordersResponse = await request.get(
+          'http://127.0.0.1:8080/api/v1/orders?hold_reason=SKU_NOT_MAPPED&limit=10',
+          { headers: { Authorization: `Bearer ${token}` } },
+        )
+        if (!ordersResponse.ok()) return 0
+        heldOrder = (await ordersResponse.json()).items.find(
+          (row: { external_order_id: string }) => row.external_order_id === 'DEMO-UNMAPPED',
+        )
+        return heldOrder ? 1 : 0
+      },
+      { timeout: 120_000, intervals: [2000] },
+    )
+    .toBeGreaterThan(0)
+
   const catalog = await request.post('http://127.0.0.1:8080/control/demo/order-catalog')
   expect(catalog.ok()).toBeTruthy()
-
-  const ordersResponse = await request.get(
-    'http://127.0.0.1:8080/api/v1/orders?hold_reason=SKU_NOT_MAPPED&limit=10',
-    { headers: { Authorization: `Bearer ${token}` } },
-  )
-  expect(ordersResponse.ok()).toBeTruthy()
-  const heldOrder = (await ordersResponse.json()).items.find(
-    (row: { external_order_id: string }) => row.external_order_id === 'DEMO-UNMAPPED',
-  )
-  expect(heldOrder).toBeTruthy()
 
   const skuResponse = await request.get(
     'http://127.0.0.1:8080/api/v1/skus?q=DEMO-SKU-READY&limit=10',

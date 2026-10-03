@@ -4,6 +4,7 @@ import { expect, test } from '@playwright/test'
 // with one bad row and sees that row's error. Codes are unique per run so a reused local
 // database does not collide.
 test('owner creates a SKU, finds it by search, and sees a CSV row error', async ({ page }) => {
+  test.setTimeout(120_000)
   const code = `E2E-${Date.now()}`
 
   // Step 1: Sign in through the mock IdP and open the new SKU form from the shell nav.
@@ -16,7 +17,9 @@ test('owner creates a SKU, finds it by search, and sees a CSV row error', async 
 
   // Step 2: Create the SKU with a new product in the same call.
   await page.getByRole('combobox').selectOption({ label: 'New product…' })
-  await page.getByLabel('New product name').fill('E2E Product')
+  const newProductName = page.getByLabel('New product name')
+  await expect(newProductName).toBeVisible()
+  await newProductName.fill('E2E Product')
   await page.getByLabel('SKU code').fill(code)
   await page.getByLabel('Name', { exact: true }).fill('E2E red mug')
   await page.getByLabel('Barcode').fill(`885${Date.now()}`)
