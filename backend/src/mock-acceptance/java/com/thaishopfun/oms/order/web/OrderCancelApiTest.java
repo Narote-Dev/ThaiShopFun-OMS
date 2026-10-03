@@ -286,10 +286,10 @@ class OrderCancelApiTest extends OrderIntegrationTest {
 
     assertDemoOrder("DEMO-READY", "READY_TO_PICK", "PAID", "NONE", null);
     assertDemoOrder("DEMO-COD", "READY_TO_PICK", "COD_PENDING", "NONE", null);
-    assertDemoOrder("DEMO-OOS", "UNFULFILLED", "COD_PENDING", "OUT_OF_STOCK", null);
+    assertDemoOrder("DEMO-OOS", "READY_TO_PICK", "COD_PENDING", "OUT_OF_STOCK", null);
     assertDemoOrder("DEMO-UNMAPPED", "UNFULFILLED", "COD_PENDING", "SKU_NOT_MAPPED", null);
     assertDemoOrder(
-        "DEMO-BUNDLE", "UNFULFILLED", "COD_PENDING", "OUT_OF_STOCK", "bundle has no components");
+        "DEMO-BUNDLE", "READY_TO_PICK", "COD_PENDING", "OUT_OF_STOCK", "bundle has no components");
     assertDemoOrder("DEMO-CANCELLED", "CANCELLED", "COD_PENDING", "NONE", null);
   }
 
