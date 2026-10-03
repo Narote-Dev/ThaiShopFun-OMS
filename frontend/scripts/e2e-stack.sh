@@ -55,6 +55,23 @@ fi
 
 curl -fsS http://127.0.0.1:8090/actuator/health >/dev/null
 
+# JIT-provision shop_active (demo catalog resolves tenant via resolve_tenant('TSF','shop_active')).
+owner_token="$(
+  curl -fsS -X POST http://127.0.0.1:8090/control/user-token \
+    -H 'Content-Type: application/json' \
+    -d '{"login_hint":"owner-active"}' \
+  | python3 -c "import sys, json; print(json.load(sys.stdin)['access_token'])"
+)"
+curl -fsS -H "Authorization: Bearer ${owner_token}" http://127.0.0.1:8080/api/v1/me >/dev/null
+
+# Demo catalog + orders need time for the inbox worker before Playwright runs.
+catalog_body="$(curl -fsS -X POST http://127.0.0.1:8080/control/demo/order-catalog)"
+echo "$catalog_body" | grep -q '"status":"OK"' || {
+  echo "demo order-catalog failed: $catalog_body" >&2
+  exit 1
+}
+curl -fsS -X POST http://127.0.0.1:8090/control/demo/orders-seed >/dev/null
+
 cd "$ROOT/frontend"
 # Foreground so this process exits when Vite exits, and the runner can stop the whole group.
 exec npm run dev -- --host 127.0.0.1 --port 5173 --strictPort

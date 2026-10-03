@@ -33,7 +33,8 @@ public class MockTsfApplication {
    */
   public static SpringApplication application() {
     SpringApplication app = new SpringApplication(MockTsfApplication.class);
-    app.setDefaultProperties(Map.of("spring.config.name", "mock-tsf"));
+    app.setDefaultProperties(
+        Map.of("spring.config.name", "mock-tsf", "spring.profiles.active", "local,e2e"));
     return app;
   }
 }

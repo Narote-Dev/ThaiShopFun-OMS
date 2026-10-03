@@ -35,6 +35,7 @@ export default function AppLayout({ me, readOnlyNotice, onLogout, children }: Pr
           <a href="#/warehouses">Warehouses</a>
           {/* Change: T08A stock documents. */}
           <a href="#/stock/documents">Stock documents</a>
+          <a href="#/orders">Orders</a>
           <a href="#/admin/outbox">Dead outbox</a>
         </nav>
       </header>

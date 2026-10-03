@@ -39,6 +39,34 @@ public class OrderStatusHistoryRepository {
         actor);
   }
 
+  /** All history rows for one order, oldest first. */
+  public java.util.List<HistoryRow> findByOrderId(UUID orderId) {
+    return jdbc.query(
+        """
+        SELECT dimension, from_value, to_value, reason, actor, created_at
+        FROM order_status_history
+        WHERE order_id = ?
+        ORDER BY created_at ASC, id ASC
+        """,
+        (rs, row) ->
+            new HistoryRow(
+                rs.getString("dimension"),
+                rs.getString("from_value"),
+                rs.getString("to_value"),
+                rs.getString("reason"),
+                rs.getString("actor"),
+                rs.getObject("created_at", java.time.OffsetDateTime.class).toInstant()),
+        orderId);
+  }
+
+  public record HistoryRow(
+      String dimension,
+      String fromValue,
+      String toValue,
+      String reason,
+      String actor,
+      java.time.Instant createdAt) {}
+
   /** Latest time a dimension reached {@code toValue} (for COMPLETED guard). */
   public java.util.Optional<java.time.Instant> transitionedAt(
       UUID orderId, String dimension, String toValue) {

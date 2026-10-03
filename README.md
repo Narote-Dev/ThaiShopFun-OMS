@@ -14,6 +14,7 @@ cd backend && ./mvnw spring-boot:run -Dspring-boot.run.profiles=local
 cd frontend && npm ci && npm run dev
 ```
 
+- Mock TSF listens on `localhost:8090` with Spring profile `local,e2e` (demo catalog/orders and REST debug controls). `docker compose` sets `SPRING_PROFILES_ACTIVE=local,e2e` on the `mock-tsf` service.
 - Postgres 16 listens on `localhost:5432` (database `oms`). `oms` / `oms` is a dev-only bootstrap superuser. Flyway uses it. It bypasses row-level security.
 - The API connects as `oms_app` / `oms_app` (dev-only, `NOBYPASSRLS`). Override with `DATABASE_USERNAME`, `DATABASE_PASSWORD`, and `OMS_APP_PASSWORD`. `docker/postgres/init` creates that login on a new volume. An existing volume that never ran the init script has `oms_app` as `NOLOGIN`; recreate the volume or `ALTER ROLE oms_app LOGIN PASSWORD 'oms_app'`.
 - Flyway's login defaults to `FLYWAY_USER` / `FLYWAY_PASSWORD` (`oms` / `oms`). A `postgresql://` `DATABASE_URL` (Railway) keeps Flyway on that URL's user.
@@ -48,6 +49,8 @@ The web app calls the IdP at `http://localhost:8090/tsf-idp` with `client_id=oms
 | `POST /control/events/shuffle` | `{"events":[envelope, envelope]}` — sent in a different order |
 | `POST /control/events/stale` | `{"skew_seconds":301,"event":{...}}` |
 | `POST /control/events/bad-signature` | `{"event":{...}}` — signed with the wrong secret |
+| `POST /control/demo/order-catalog` | Idempotent SKUs, stock, and listings for demo orders (`local`/`e2e` OMS profile); also switches `shop_active` TSF channel to `ACTIVE` so stock enforcement applies |
+| `POST /control/demo/orders-seed` | Calls order-catalog then idempotent demo `order.*` events for `shop_active` (local/e2e only) |
 | `POST /control/events/after-reservation-expiry` | `order.created` only. `{"reservation_expires_at":"...","event":{...}}`. Refuses a future `occurred_at` |
 | `POST /control/checkout/reservations` | reservation request; OMS status and body are returned as-is |
 | `DELETE /control/checkout/reservations/{id}` | release |

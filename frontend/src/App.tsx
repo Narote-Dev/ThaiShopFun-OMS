@@ -20,11 +20,16 @@ import StockDocumentPage from './stock/StockDocumentPage'
 import StockDocumentsPage from './stock/StockDocumentsPage'
 import StockHistoryPage from './stock/StockHistoryPage'
 import WarehousesPage from './warehouse/WarehousesPage'
+import HoldQueuePage from './orders/HoldQueuePage'
+import OrderDetailPage from './orders/OrderDetailPage'
+import OrdersListPage from './orders/OrdersListPage'
 import type { ReactNode } from 'react'
 
 const SKU_ROUTE = /^#\/catalog\/skus\/([0-9a-f-]{36}|new)$/
 const SKU_HISTORY_ROUTE = /^#\/catalog\/skus\/([0-9a-f-]{36})\/history$/
 const DOCUMENT_ROUTE = /^#\/stock\/documents\/([0-9a-f-]{36})$/
+const ORDER_ROUTE = /^#\/orders\/([0-9a-f-]{36})$/
+const ORDERS_ROUTE = /^#\/orders(\?.*)?$/
 
 // Change: T07 catalog and warehouse pages. Writes need OWNER/ADMIN and a non-GRACE shop.
 // Change: T08A stock documents and history. Drafts: any member; post/void rules in stockAccess.
@@ -42,6 +47,10 @@ function page(route: string, me: Me): ReactNode {
   if (route === '#/catalog/products') return <ProductsPage canWrite={canWrite} />
   if (route === '#/catalog/import') return <ImportPage canWrite={canWrite} />
   if (route === '#/warehouses') return <WarehousesPage canWrite={canWrite} />
+  if (route === '#/orders/holds') return <HoldQueuePage />
+  if (ORDERS_ROUTE.test(route)) return <OrdersListPage />
+  const order = ORDER_ROUTE.exec(route.split('?')[0])
+  if (order) return <OrderDetailPage key={order[1]} id={order[1]} me={me} />
   const sku = SKU_ROUTE.exec(route)
   if (sku) {
     const id = sku[1] === 'new' ? null : sku[1]

@@ -57,6 +57,15 @@ public class OmsCaller {
     return send(request);
   }
 
+  public CallResult postDemoOrderCatalog() {
+    HttpRequest request =
+        HttpRequest.newBuilder(oms.demoOrderCatalog())
+            .timeout(Duration.ofSeconds(8))
+            .POST(HttpRequest.BodyPublishers.noBody())
+            .build();
+    return send(request);
+  }
+
   public String signInbox(long epochSeconds, byte[] raw) {
     String secret = properties.inboxSecrets().get(0);
     return Hmacs.header(secret, epochSeconds, raw);

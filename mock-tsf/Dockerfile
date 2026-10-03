@@ -17,4 +17,4 @@ COPY --from=build --chown=mock:mock /src/mock-tsf/target/mock-tsf-exec.jar /app/
 USER mock
 EXPOSE 8090
 ENV PORT=8090
-ENTRYPOINT ["java", "-jar", "/app/mock-tsf.jar"]
+ENTRYPOINT ["java", "-Dspring.profiles.active=local,e2e", "-jar", "/app/mock-tsf.jar"]
