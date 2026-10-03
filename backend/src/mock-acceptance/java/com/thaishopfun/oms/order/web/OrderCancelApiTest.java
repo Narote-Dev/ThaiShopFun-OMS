@@ -43,6 +43,7 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.transaction.PlatformTransactionManager;
 import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
 
 @ActiveProfiles("test")
@@ -265,15 +266,15 @@ class OrderCancelApiTest extends OrderIntegrationTest {
     assertThat(catalog.statusCode()).isEqualTo(200);
     assertThat(JSON.readTree(catalog.body()).path("status").asString()).isEqualTo("OK");
 
-    HttpResponse<String> seed =
-        HTTP.send(
-            HttpRequest.newBuilder(
-                    URI.create("http://127.0.0.1:" + mockPort() + "/control/demo/orders-seed"))
-                .POST(HttpRequest.BodyPublishers.noBody())
-                .timeout(HTTP_TIMEOUT)
-                .build(),
-            HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-    assertThat(seed.statusCode()).isEqualTo(200);
+    String shop = "shop_active";
+    ingest(orderCreated("DEMO-READY", shop, "res-demo-ready", "PREPAID", "L-demo-ready", 1));
+    ingest(orderCreated("DEMO-COD", shop, "res-demo-cod", "COD", "L-demo-cod", 2));
+    ingest(orderCreated("DEMO-OOS", shop, "res-demo-oos", "COD", "L-demo-oos", 3));
+    ingest(orderCreated("DEMO-UNMAPPED", shop, "res-demo-unmapped", "COD", "L-demo-missing", 4));
+    ingest(orderCreated("DEMO-BUNDLE", shop, "res-demo-bundle", "COD", "L-demo-bundle", 5));
+    ingest(orderPaid("DEMO-READY", shop, 6));
+    ingest(orderCreated("DEMO-CANCELLED", shop, "res-demo-cancelled", "COD", "L-demo-cancel", 7));
+    ingest(orderCancelled("DEMO-CANCELLED", shop, 8));
 
     int processed;
     int rounds = 0;
@@ -474,6 +475,51 @@ class OrderCancelApiTest extends OrderIntegrationTest {
     HttpResponse<String> response =
         HTTP.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
     assertThat(response.statusCode()).isEqualTo(202);
+  }
+
+  private ObjectNode orderCreated(
+      String orderId,
+      String shopId,
+      String reservationId,
+      String paymentMethod,
+      String listingSku,
+      long aggregateVersion)
+      throws IOException {
+    ObjectNode event = loadExample("order.created.json");
+    event.put("event_id", "demo-" + orderId);
+    event.put("tsf_shop_id", shopId);
+    event.put("aggregate_id", orderId);
+    event.put("aggregate_version", aggregateVersion);
+    event.put("occurred_at", Instant.now().truncatedTo(ChronoUnit.SECONDS).toString());
+    ObjectNode data = (ObjectNode) event.get("data");
+    data.put("order_id", orderId);
+    data.put("reservation_id", reservationId);
+    data.put("payment_method", paymentMethod);
+    ArrayNode lines = JSON.createArrayNode();
+    ObjectNode line = JSON.createObjectNode();
+    line.put("line_id", "L1");
+    line.put("listing_sku_id", listingSku);
+    line.put("seller_sku", "SKU-DEMO");
+    line.put("name", "Demo item");
+    line.put("qty", 1);
+    line.put("unit_price", 100);
+    lines.add(line);
+    data.set("lines", lines);
+    assertThat(CONTRACT.envelopeErrors(JSON.writeValueAsString(event))).isEmpty();
+    return event;
+  }
+
+  private ObjectNode orderPaid(String orderId, String shopId, long aggregateVersion)
+      throws IOException {
+    ObjectNode event = loadExample("order.paid.json");
+    event.put("event_id", "demo-paid-" + orderId);
+    event.put("tsf_shop_id", shopId);
+    event.put("aggregate_id", orderId);
+    event.put("aggregate_version", aggregateVersion);
+    event.put("occurred_at", Instant.now().truncatedTo(ChronoUnit.SECONDS).toString());
+    ((ObjectNode) event.get("data")).put("order_id", orderId);
+    assertThat(CONTRACT.envelopeErrors(JSON.writeValueAsString(event))).isEmpty();
+    return event;
   }
 
   private ObjectNode orderCancelled(String orderId, String shopId, long aggregateVersion)
