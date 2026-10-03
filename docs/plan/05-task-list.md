@@ -7,7 +7,7 @@
 - **Narote approve ทุก merge** เข้า `main` (branch protection: CI เขียว + Codex review + Narote approve)
 - 1 task = 1 PR (ใหญ่เกิน ~600 บรรทัดไม่นับ test → แตก PR)
 - **Flyway migrations may be written by Cursor or Codex, one migration per PR, never edit a merged version; Codex reviews every migration PR.**
-- **Definition of Done:** CI เขียว (รวม contract test), test ครอบ AC, ไม่มี PII ใน log, invariant check ผ่าน, อัปเดต `docs/` ถ้าเปลี่ยน contract (แก้ spec ใน `tsf-oms-contracts` ก่อนเสมอ)
+- **Definition of Done:** CI เขียว (รวม contract test), test ครอบ AC, ไม่มี PII ใน log, invariant check ผ่าน, อัปเดต `docs/` ถ้าเปลี่ยน contract (แก้ spec ใน in-repo `contracts/` ก่อนเสมอ; ย้ายไป repo `tsf-oms-contracts` ภายหลังได้แต่ไม่บังคับ)
 
 ### Flyway versions
 
@@ -54,6 +54,7 @@ flowchart LR
     T06-->T07 & T08
     T08-->T08A & T09
     T07-->T08A
+    T00-->T09
   end
   subgraph P2[Phase 2]
     T10-->T12
@@ -64,10 +65,11 @@ flowchart LR
   end
   subgraph P3[Phase 3]
     T18 & T20 & T21-->T22
-    T18 & T20-->T19
+    T18 & T20 & T21-->T19
     T23
     T28
   end
+  T00-->T19
   subgraph P4[Phase 4]
     T40-->T41 & T24
     T26-->T42 & T43
@@ -165,7 +167,7 @@ flowchart LR
 - เอกสาร Opening balance, Receive, Adjustment (บังคับ reason), Count (จำ `system_qty_at_start`), Write-off; DRAFT → POSTED (ห้ามแก้หลัง post, ยกเลิกด้วย VOID + เอกสารกลับรายการ); return restock hook; หน้า stock history ต่อ SKU (กรอง reason/วันที่, ลิงก์ไปเอกสาร/ออเดอร์)
 - AC: post แล้ว ledger reason ตรง (`OPENING_BALANCE/RECEIVE/ADJUST_IN/ADJUST_OUT/COUNT_CORRECTION/DAMAGE_WRITE_OFF`) · Count ที่มีการขายระหว่างนับ → ยอดสุดท้าย = นับได้ − ที่ขายหลังเริ่มนับ · ADJUST_OUT จนต่ำกว่า `reserved` → 422 · post ซ้ำ (double click) ไม่ลง ledger ซ้ำ · STAFF post ADJUST ไม่ได้ (OWNER/ADMIN เท่านั้น)
 
-**T09 · Codex · deps: T08** Concurrency + bundle stress
+**T09 · Codex · deps: T08, T00** Concurrency + bundle stress
 - jqwik + multi-thread test
 - AC ต้องมีทุกเคส:
   - bundle vs component race (ขาย bundle กับ SKU ลูกพร้อมกันจนของหมด) → ไม่ติดลบ, สำเร็จรวมไม่เกินของ
@@ -239,7 +241,7 @@ flowchart LR
 - เทียบ `last_exposed_qty` กับ `last_seen_channel_qty` จาก listings
 - AC: diff → issue `STOCK_DRIFT` + re-push · ไม่แตะ `on_hand`
 
-**T19 · Codex · deps: T18, T20** E2E
+**T19 · Codex · deps: T18, T20, T21** E2E
 - Playwright + mock TSF: reserve → created → paid → pick → pack → label → ship → delivered → คืนบางชิ้น → refund; และ cancel ตอน PACKED
 - AC: รันใน CI < 5 นาที · InvariantChecker ผ่านท้ายทุก scenario
 
@@ -277,7 +279,7 @@ flowchart LR
 - AC: เพิ่มตารางไม่มี FORCE RLS → CI fail · รายงาน finding ใน PR
 
 ## Phase 5: Multichannel (framework เริ่ม ~สัปดาห์ 14, adapter หลัง approval)
-**T50M · Codex · deps: T10** Flyway V5: `allocation_policy`, `channel_allocation`
+**T50M · Codex · deps: T10** Flyway (next free version at time of work — ห้ามใช้ V5; หลัง V11 ปัจจุบันคือ V12+ หรือเลขว่างถัดไปเมื่อเริ่มงาน): `allocation_policy`, `channel_allocation`
 - AC: CHECK ผลรวม allocation ≤ physical − buffer (ตรวจใน service + test)
 
 **T50 · Codex · deps: T16** Capability framework (ต่อยอด T16)

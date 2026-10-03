@@ -59,14 +59,14 @@
 |---|---|---|
 | 1 | งาน MVP Phase 0–4 ครบ (39 task ใน [05-task-list](plan/05-task-list.md)) | 05 |
 | 2 | E2E เต็ม flow ผ่านใน CI: reserve → created → paid → pick → pack → label → ship → delivered → คืนบางชิ้น → refund + cancel ตอน PACKED (T19) | 05 |
-| 3 | TSF ฝั่งจริงทำ TSF-01…09 เสร็จบน staging และ prod | 05 |
+| 3 | TSF ฝั่งจริงทำ **TSF-01…12** เสร็จบน staging และ prod (รวม Pay/refund events TSF-10, membership/billing TSF-11, prod SSO entry TSF-12) | 05, หัวข้อ 4 |
 | 4 | มี prod env จริง (HTTPS, secret ไม่อยู่ใน git, PITR เปิด, alert ทำงาน) (T26) | 05, NFR |
 | 5 | DR drill ผ่าน RPO ≤ 1 นาที, RTO ≤ 60 นาที (T42) | NFR |
 | 6 | Load test ผ่านทุกตัวเลขใน NFR ที่ 2× peak (T43) | NFR |
 | 7 | Security review ผ่าน: FORCE RLS ทุกตาราง, ไม่มี PII ใน log, dependency scan (T25) | 05 |
 | 8 | Pilot ครบ 5 ขั้น และ "ครบ NFR 14 วัน" ที่ 5–10 ร้าน | 02 |
 | 9 | Production readiness checklist (หัวข้อ 5) ติ๊กครบ รวม repo เป็น private | เอกสารนี้ |
-| 10 | Terms / Privacy policy / คู่มือผู้ใช้ / ช่องทาง support พร้อม (หัวข้อ 6) | เอกสารนี้ |
+| 10 | งาน GTM-01…04 (Terms, Privacy, คู่มือผู้ใช้, support) มี owner + deadline + evidence ครบ (หัวข้อ 6.7) | เอกสารนี้ |
 
 ---
 
@@ -75,15 +75,15 @@
 ### ภาพรวมตัวเลข (MVP = Phase 0–4 = 39 task)
 | สถานะ | จำนวน | task |
 |---|---|---|
-| ✅ เสร็จ + merge แล้ว | 18 | T01, T02, T03, T04, T05, T06, T07, T08, T08A, T10, T11, T12, T12A, T13, T14, T14B, T16, T17 |
-| 🟡 ทำแล้วบางส่วน | 2 | T01C (contracts ใน repo มีแล้ว ยังขาด AsyncAPI, `oasdiff`, repo แยก), T27 (เข้ารหัส PII + `phone_hash` มากับ T10 แล้ว ส่วนอื่นยังไม่ทำ) |
-| 🔨 กำลังทำ | 1 | T12B |
+| ✅ เสร็จ + merge แล้ว | 17 | T02, T03, T04, T05, T06, T07, T08, T08A, T10, T11, T12, T13, T14, T14B, T16, T17 (+ ฟีเจอร์ T12A แยกจาก perf ด้านล่าง) |
+| 🟡 ทำแล้วบางส่วน | 4 | **T01** (CI/local ผ่าน แต่ยังไม่มี staging deploy อัตโนมัติ + health บน staging), **T01C** (in-repo `contracts/` มีแล้ว ยังขาด AsyncAPI + `oasdiff`), **T12A** (API + migration V9 merge แล้ว แต่ perf AC ยังไม่ผ่าน — ดูด้านล่าง), **T27** (เข้ารหัส PII + `phone_hash` มากับ T10 แล้ว ส่วน lifecycle ยังไม่ทำ) |
+| 🔨 กำลังทำ | 1 | T12B (branch `feat/T12B-sku-mapping` — cloud agent กำลังทำ ห้ามเปิดงานซ้ำ) |
 | ⬜ ยังไม่เริ่ม | 18 | T00, T09, T12C, T15, T18, T19, T20, T21, T22, T23, T24, T25, T26, T28, T40, T41, T42, T43 |
 
 ### งานที่เสร็จแล้ว (ตรวจกับ `git log` และ closed PRs: merge ทั้งหมด 20 PR, ไม่มี PR #2)
 | Task | PR | สิ่งที่ได้ |
 |---|---|---|
-| T01 | [#1](https://github.com/Narote-Dev/ThaiShopFun-OMS/pull/1) | Monorepo skeleton (backend/frontend), docker-compose, CI, config staging Railway (ยังไม่เคย deploy จริง) |
+| T01 | [#1](https://github.com/Narote-Dev/ThaiShopFun-OMS/pull/1) | Monorepo skeleton (backend/frontend), docker-compose, CI, `.railway/railway.ts` (ยังไม่ apply / ไม่มี staging health UP — นับเป็น 🟡 บางส่วน) |
 | T02 | [#3](https://github.com/Narote-Dev/ThaiShopFun-OMS/pull/3) | Flyway V1: ตารางพื้นฐาน, FORCE RLS, roles `oms_migrator` / `oms_app` / `oms_maint` |
 | T03 | [#4](https://github.com/Narote-Dev/ThaiShopFun-OMS/pull/4) | JWT auth, TenantContext, RLS ต่อ transaction, entitlement gate, JIT provisioning (V2) |
 | T14 | [#5](https://github.com/Narote-Dev/ThaiShopFun-OMS/pull/5) | Outbox publisher at-least-once (lease, backoff, DEAD, หน้า admin retry) |
@@ -96,7 +96,7 @@
 | T07 | [#12](https://github.com/Narote-Dev/ThaiShopFun-OMS/pull/12) | Catalog + warehouse API, CSV import, UI ([docs/api/catalog.md](api/catalog.md)) |
 | T10 | [#13](https://github.com/Narote-Dev/ThaiShopFun-OMS/pull/13) | Flyway V7 ฝั่งออเดอร์ + เข้ารหัส PII ผู้รับ (AES-256-GCM) |
 | T08A | [#14](https://github.com/Narote-Dev/ThaiShopFun-OMS/pull/14) | เอกสารสต๊อก (opening/receive/adjust/count/write-off) + หน้าประวัติ + V8 ([docs/api/stock-documents.md](api/stock-documents.md)) |
-| T12A | [#15](https://github.com/Narote-Dev/ThaiShopFun-OMS/pull/15) | Checkout Reserve API (idempotent, `enforced` ตาม mode) + V9 + Gatling perf job ใน CI |
+| T12A | [#15](https://github.com/Narote-Dev/ThaiShopFun-OMS/pull/15) | Checkout Reserve API (idempotent, `enforced` ตาม mode) + V9 + Gatling job ใน CI — **perf AC ยังไม่ผ่าน**: job `Checkout reserve perf` ใช้ `continue-on-error: true`, simulation ยิง ~154 req/s (`constantUsersPerSec(154)` ใน `CheckoutReserveSimulation`) แต่ NFR เป้า 200 req/s; ยืนยัน p95/p99 จริงบน env จริงใน **T43** |
 | T16 | [#16](https://github.com/Narote-Dev/ThaiShopFun-OMS/pull/16), [#18](https://github.com/Narote-Dev/ThaiShopFun-OMS/pull/18) | `ChannelAdapter` + Resilience4j base + TSF adapter + V10 |
 | T12 | [#17](https://github.com/Narote-Dev/ThaiShopFun-OMS/pull/17) | รับออเดอร์, `OrderStateMachine` 3 มิติ, โอน reservation CHECKOUT→ORDER |
 | T13 | [#20](https://github.com/Narote-Dev/ThaiShopFun-OMS/pull/20) | State matrix test ครอบทุก transition + T12 follow-ups |
@@ -105,7 +105,7 @@
 ### งานที่กำลังทำ
 | Task | สถานะ | หมายเหตุ |
 |---|---|---|
-| **T12B** SKU mapping + ปล่อย hold | 🔨 กำลังทำ (ยังไม่มี PR บน `main`) | sync listings, auto-map `seller_sku = sku_code`, หน้า map มือ, ปล่อย `SKU_NOT_MAPPED` แล้วจองใหม่ (late mapping) ของไม่พอ → `OUT_OF_STOCK` |
+| **T12B** SKU mapping + ปล่อย hold | 🔨 กำลังทำบน branch `feat/T12B-sku-mapping` (ยังไม่ merge `main`) | sync listings, auto-map `seller_sku = sku_code`, หน้า map มือ, ปล่อย `SKU_NOT_MAPPED` แล้วจองใหม่ (late mapping) ของไม่พอ → `OUT_OF_STOCK` — **ห้ามเปิด agent ซ้ำ** |
 
 ---
 
@@ -114,12 +114,41 @@
 > รายละเอียด AC เต็มอยู่ใน [05-task-list](plan/05-task-list.md) ตารางนี้ย่อแค่ "acceptance หลัก"
 > ลำดับ = ลำดับที่แนะนำให้ทำ (เลขเดียวกัน = ทำคู่ขนานได้)
 
-### Phase 0–1 ที่ค้าง (ทำแทรกได้ทุกเมื่อ)
+### 3.0 Dependencies (สำคัญต่อ launch)
+
+| จาก | ไป | เหตุผล |
+|---|---|---|
+| **T00** | **T09**, **T19** | `InvariantChecker` ต้องมีก่อน stress/E2E (ไม่ใช่ "ทำเมื่อไหร่ก็ได้") |
+| **T21** | **T19** | E2E มีขั้น refund → ต้องมี payment/refund snapshot ก่อน |
+| **T12C** | gap/backfill | อยู่ใน critical path ก่อน pilot (ออเดอร์ไม่หายเมื่อ webhook ล่ม) |
+| **Q2 (hosting)** | **T26** | prod/staging deploy + PITR รอ Narote เลือก host/งบ |
+| **hosting สาธารณะ + HTTPS** | **T28** | หน้า product/demo ต้องเปิดนอก localhost · ไม่อยู่ใน launch set ถ้ายังไม่มี host สาธารณะ (หรือเลื่อนออกจาก MVP launch) |
+| **TSF-10…12** | **T21**, launch | Pay/refund events, billing, prod SSO entry |
+
+```mermaid
+flowchart TB
+  T00 --> T09
+  T00 --> T19
+  T12B --> T15
+  T12C --> T22
+  T15 --> T23
+  T18 --> T19
+  T20 --> T19
+  T21 --> T19
+  T18 & T20 & T21 --> T22
+  T22 --> T26
+  T26 --> T42 & T43
+  Q2[Q2 hosting] --> T26
+  HOST[HTTPS public host] --> T28
+  TSF10[TSF-10..12] --> Launch
+```
+
+### Phase 0–1 ที่ค้าง (**T00 ต้องทำก่อน T09/T19**)
 | ลำดับ | Task | ผู้ทำ (ตาม plan) | Deps | ขนาด | Acceptance หลัก |
 |---|---|---|---|---|---|
-| แทรก | **T00** Invariants + NFR | Codex | — | M | มี `InvariantChecker` เรียกจากทุก test ได้ · ทำ invariant พังโดยตั้งใจแล้ว test fail · NFR ทุกบรรทัดมีค่าหรือ TBD |
-| แทรก | **T01C** Contracts (ส่วนที่ขาด) | Codex | — | S–M | เพิ่ม AsyncAPI 3 · `oasdiff` breaking check (ลบ field required → CI fail) · ย้ายไป repo `tsf-oms-contracts` เมื่อ TSF พร้อม (หัวข้อ 4) |
-| 4 | **T09** Concurrency + bundle stress | Codex | T08 ✅ | M | 7 เคสใน 05 ผ่าน เช่น {A,B} กับ {B,A} 1,000 คู่ = 0 deadlock · 10,000 op สุ่มแล้ว InvariantChecker ผ่าน (ต้องมี T00 ก่อนจะดีที่สุด) |
+| 1 | **T00** Invariants + NFR | Codex | — | M | มี `InvariantChecker` เรียกจากทุก test ได้ · ทำ invariant พังโดยตั้งใจแล้ว test fail · NFR ทุกบรรทัดมีค่าหรือ TBD + ค่าเริ่ม (หัวข้อ 5.5) |
+| แทรก | **T01C** Contracts (ส่วนที่ขาด) | Codex | — | S–M | เพิ่ม AsyncAPI 3 · `oasdiff` breaking check · **in-repo `contracts/` เป็น source หลัก** (repo แยก = ทางเลือกภายหลัง) |
+| 4 | **T09** Concurrency + bundle stress | Codex | T08 ✅, **T00** | M | 7 เคสใน 05 ผ่าน · 10,000 op สุ่มแล้ว `InvariantChecker` ผ่านทุกครั้ง |
 
 ### Phase 2: TSF Order Integration (เหลือ)
 | ลำดับ | Task | ผู้ทำ | Deps | ขนาด | Acceptance หลัก |
@@ -132,6 +161,25 @@
 
 **Exit Phase 2:** ออเดอร์จาก mock TSF เข้าครบ ไม่ซ้ำ, reserve p95 ตาม NFR
 
+### 3.1 Code pointers (งานที่เหลือ — ชื่อจริงใน repo)
+
+| Task | จุดต่อ/ขยายในโค้ด (package `com.thaishopfun.oms`) |
+|---|---|
+| **T00** | ยังไม่มี `InvariantChecker` — สร้างใหม่ + ผูกหลัง test (ดู AC ใน 05) |
+| **T09** | `stock.ReservationEngine`, `stock.StockMovements` · jqwik ตาม 05 |
+| **T12B** | `checkout.CheckoutReserveService` (listing/SKU) · `order.intake.OrderIntakeSupport` · `channel.tsf.TsfChannelAdapter` (listings) · UI catalog routes ที่มีแล้ว |
+| **T12C** | `inbox.InboxWorker` (TODO refetch) · `order.intake.*Handler` · ตาราง `sync_cursor` (V7) |
+| **T15** | `stock.StockChanged` · `outbox.OutboxPublisher` / `OutboxScheduler` · `channel.tsf.TsfChannelAdapter` |
+| **T18** | `order.OrderStateMachine` · `channel.ChannelAdapter` / `supportsLabel` · orders UI ต่อจาก `order.web.*` |
+| **T20** | `order.OrderStateMachine` · `stockdoc.*` / `StockMovements` (return restock) |
+| **T21** | เพิ่ม `inbox` handlers คู่ `payment.status_changed` / `refund.status_changed` · `order.OrderStateMachine.applyPaymentStatus` · `channel.tsf.TsfChannelAdapter.getPaymentStatus` |
+| **T22** | schema `reconciliation_issue` (V7) · ยังไม่มี job หลัก — ดู acceptance ใน `OrderIntakeAcceptanceTest` ที่อ้าง reconciliation |
+| **T23** | `channel_listing` / shadow diff (V4, V6) · หลัง T15 |
+| **T19** | `frontend/scripts/e2e-stack.sh` · Playwright ใน `frontend/` · เรียก invariant หลัง scenario (หลัง T00) |
+| **T26** | `auth.RuntimeRoleGuard` · `config.PostgresJdbcUrlEnvironmentPostProcessor` · actuator/metrics |
+| **T25** | RLS test pattern จาก T02 · dependency scan ใน CI (เพิ่ม) |
+| **T40** | `channel_account.mode` (V4/V10) · `checkout.CheckoutReserveService` (`enforced`) |
+
 ### Phase 3: Fulfillment
 | ลำดับ | Task | ผู้ทำ | Deps | ขนาด | Acceptance หลัก |
 |---|---|---|---|---|---|
@@ -140,15 +188,15 @@
 | 1 | **T21** Payment + refund snapshot | Codex | T12 ✅, T16 ✅ | M | event ซ้ำไม่สร้างแถวซ้ำ · refund 295/580 → `PARTIALLY_REFUNDED` · ไม่มี Xendit/Opn SDK ใน OMS |
 | 2 | **T23** Stock drift (TSF) | Codex | **T15**, T16 ✅ | S–M | diff → issue `STOCK_DRIFT` + re-push · ไม่แตะ `on_hand` |
 | 3 | **T22** Reconciliation | Cursor | T18, T20, T21 | L | 8 กฎใน 01 §1.5 จับได้ 8/8 · รันซ้ำไม่สร้าง issue ซ้ำ · invariant พัง → alert |
-| 4 | **T19** E2E | Codex | T18, T20 | M | Playwright + mock TSF ทั้ง flow < 5 นาทีใน CI · InvariantChecker ผ่านท้ายทุก scenario |
-| แทรก | **T28** Public product page + demo tenant | Cursor | T04 ✅ | S–M | เปิดได้ไม่ต้อง login (HTTPS) · demo tenant ไม่มี PII จริง · **ต้องมีก่อนยื่น marketplace** และต้องมี hosting สาธารณะ |
+| 4 | **T19** E2E | Codex | T18, T20, **T21** | M | Playwright + mock TSF ทั้ง flow (รวม refund) < 5 นาทีใน CI · `InvariantChecker` ผ่านท้ายทุก scenario (ต้องมี **T00**) |
+| แทรก | **T28** Public product page + demo tenant | Cursor | T04 ✅, **hosting สาธารณะ** | S–M | เปิดได้ไม่ต้อง login (HTTPS) · demo tenant ไม่มี PII จริง · **ต้องมีก่อนยื่น marketplace** · ไม่บล็อก core OMS launch ถ้าเลื่อนออก แต่บล็อก marketplace submission |
 
 **Exit Phase 3:** E2E เต็ม flow ผ่านกับ mock TSF
 
 ### Phase 4: Pilot
 | ลำดับ | Task | ผู้ทำ | Deps | ขนาด | Acceptance หลัก |
 |---|---|---|---|---|---|
-| 1 | **T26** Prod deploy + observability + PITR | Cursor | T22 | L | prod deploy ต้องกดเอง (Narote) · JSON log + `trace_id` · alert เมื่อ DEAD > 0, inbox lag > 5 นาที, reserve p95 เกิน NFR · PITR healthy · **รอ Narote เลือก hosting** |
+| 1 | **T26** Prod deploy + observability + PITR | Cursor | T22, **Q2** | L | prod deploy ต้องกดเอง (Narote) · JSON log + `trace_id` · alert · PITR healthy · **blocked จนกว่า Q2 (hosting + งบ) ตัดสิน** · รวม startup env validation + staging smoke (หัวข้อ 5.2) |
 | 1 | **T40** Connection modes + emergency controls | Cursor | T12A ✅, T15, T22 | L | ข้ามขั้น mode ไม่ได้ · PAUSE มีผลใน 5 วิ · DISCONNECT → `enforced=false` · RESYNC ครบ · ยืนยัน 2 ขั้น + audit |
 | 2 | **T41** Shadow diff report | Codex | T40, T23 | M | diff % รายวัน · เกณฑ์ < 0.5% 7 วันคำนวณถูก |
 | 2 | **T24** Dashboard + audit viewer | Cursor | T17 ✅, T40 | M | ตัวเลขการ์ดตรง query · audit ไม่แสดง PII |
@@ -176,13 +224,17 @@
 
 ### Critical path (เส้นทางที่ช้าที่สุดถึง launch)
 ```
-T12B ─┐
-T15 ──┼─ T23 ─────────────┐
-T27 ──┴─ T18 ─┐           │
-T20 ──────────┼─ T22 ─ T40 ┼─ T41 ─┐
-T21 ──────────┘     └ T26 ─┴─ T42, T43, T25, T24 ─ Pilot 5 ขั้น ─ Launch
+T00 ────────────────────────────────┐
+T12B ─┐                             │
+T12C ─┼─ T15 ── T23 ───────────────┤
+T27 ──┴─ T18 ─┐                     │
+T20 ──────────┼─ T22 ─ T40 ─────────┼─ T41 ─┐
+T21 ──────────┘                     │      │
+       └──────────────► T19 (E2E) ───┘      │
+                         T26 ◄── Q2 hosting  │
+                         T42, T43, T25, T24 ┴─ Pilot 5 ขั้น ─ Launch
                          ▲
-              ต้องมี hosting + TSF-01…09 พร้อม
+              TSF-01…12 (รวม Pay/billing/prod SSO) + GTM-01…04
 ```
 
 ---
@@ -203,18 +255,14 @@ T21 ──────────┘     └ T26 ─┴─ T42, T43, T25, T24 �
 | TSF-07 | T12A | checkout เรียก `POST /inventory/reservations` ก่อนสร้างออเดอร์, 409 → OUT_OF_STOCK, `DELETE` เมื่อทิ้ง checkout, ส่ง `reservation_id`, เคารพ `enforced` | TBD |
 | TSF-08 | T01C | ใช้ contracts tag เดียวกับ OMS + contract test ใน CI ของ TSF | TBD |
 | TSF-09 | T12A | timeout 800 ms + circuit breaker + fallback แบบ conditional fail-open + metric | TBD |
-
-เพิ่มเติมที่ต้องมีเพื่อ launch แต่ยังไม่มี ID ใน 05 (เสนอ):
-| เสนอ | งาน | เหตุผล |
-|---|---|---|
-| TSF-10 (เสนอ) | TSF Pay ส่ง `payment.status_changed` / `refund.status_changed` จาก Xendit/Opn ผ่าน TSF | T21 ต้องใช้ OMS อ่านอย่างเดียว |
-| TSF-11 (เสนอ) | หน้า membership/billing ใน TSF ที่ขายแพ็กเกจที่มี OMS | หัวข้อ 6 |
-| TSF-12 (เสนอ) | ลิงก์ "เข้า OMS" จากหลังบ้าน TSF + โดเมน/redirect URI prod | SSO prod |
+| **TSF-10** | **T21**, launch | TSF Pay ส่ง `payment.status_changed` / `refund.status_changed` จาก Xendit/Opn ผ่าน TSF (OMS อ่านอย่างเดียว) | TBD |
+| **TSF-11** | launch (หัวข้อ 6) | หน้า membership/billing ใน TSF ที่ขายแพ็กเกจที่มี OMS entitlement | TBD |
+| **TSF-12** | **T04** prod, launch | ลิงก์ "เข้า OMS" จากหลังบ้าน TSF + โดเมน/redirect URI prod (OIDC client `oms-web`) | TBD |
 
 ### Contracts (T01C)
 | เรื่อง | ตอนนี้ | ต้องทำ |
 |---|---|---|
-| ที่อยู่ spec | `contracts/` ใน repo นี้ (มากับ T05 PR #7) | สร้าง repo `tsf-oms-contracts` แล้วย้าย (ตาม [04 §4.9](plan/04-api-contract.md)) · เวลาที่จะย้าย = TBD |
+| ที่อยู่ spec | **`contracts/` ใน repo นี้** (มากับ T05 PR #7) — source of truth จนกว่าจะย้าย | AsyncAPI 3 + `oasdiff` · ย้ายไป repo `tsf-oms-contracts` = **ทางเลือก** (Q8) ไม่บล็อก MVP |
 | OpenAPI | `oms-checkout.yaml`, `tsf-internal.yaml` + Spectral lint ใน CI | ✅ |
 | Event schema | JSON Schema 15 event + examples + `ContractExamplesTest` | ✅ |
 | AsyncAPI 3 | ยังไม่มี | ⬜ |
@@ -236,7 +284,7 @@ T21 ──────────┘     └ T26 ─┴─ T42, T43, T25, T24 �
 | S2 | Secrets อยู่ใน secret manager ของ host ไม่อยู่ใน git: `OMS_INBOX_HMAC_SECRETS`, `OMS_OUTBOX_WEBHOOK_SECRET`, `OMS_PII_KEYS`, `OMS_PII_ACTIVE_KEY_ID`, `OMS_PII_HASH_KEY`, DB passwords, client secret | ⬜ (dev ค่าอยู่ใน `application-local.yml` เท่านั้น) | README |
 | S3 | สร้าง key prod ใหม่ทั้งหมด ห้ามใช้ค่า dev · มีแผนหมุน key (PII ring + HMAC หลายค่า) | ⬜ | README, NFR |
 | S4 | FORCE RLS ทุกตาราง tenant + `oms_app` NOBYPASSRLS | ✅ ใน code/test · ⬜ CI guard (T25) | T02, T25 |
-| S5 | **Flyway รันด้วย `oms_migrator`** ไม่ใช่ superuser ก่อน prod (ตอนนี้ dev ใช้ `oms` superuser) | ⬜ | README, backlog |
+| S5 | **Migration ใช้ bootstrap login ที่มีสิทธิ์สูง (superuser) ตอน deploy เท่านั้น** — V1 สร้าง `oms_migrator` (NOLOGIN) แล้วโอน ownership; V8 backfill `ledger_seq` ต้องรันในบริบทที่เห็นทุกแถว (comment ใน migration) · **runtime ต้องเป็น `oms_app` (NOBYPASSRLS)** · local dev ใช้ `oms` superuser เป็น bootstrap ตาม README | ⬜ prod/staging · ✅ local pattern ใน README | V1, V8, `RuntimeRoleGuard` |
 | S6 | Backend ไม่ยอม start ถ้า runtime role เป็น superuser/BYPASSRLS | ✅ | README |
 | S7 | PDPA: PII เข้ารหัส ✅ (T10) · masking log + redaction + scrub (T27) ⬜ · data residency Singapore ต้องยืนยันกับที่ปรึกษา (TBD) · บทบาท controller/processor ระหว่าง TSF–ร้าน–OMS (TBD, ปรึกษากฎหมาย) | 🟡 | NFR, T27 |
 | S8 | เบอร์ mask `***-***-1234` ทุก role, ที่อยู่/เบอร์เต็มเฉพาะหน้าแพ็ก T18 | ✅ API orders · ⬜ T18 | docs/api/orders.md |
@@ -248,15 +296,39 @@ T21 ──────────┘     └ T26 ─┴─ T42, T43, T25, T24 �
 ### 5.2 Infra / Deploy
 | # | รายการ | ตัวเลือก / หมายเหตุ |
 |---|---|---|
-| I1 | **Hosting backend + Postgres** | Railway (plan แนะนำ: region Singapore, PITR, HA Postgres ก่อนร้านแรกเข้า CONTROL) หรือที่อื่นที่รัน Java container + managed Postgres ได้ → **รอ Narote ตัดสินใจ + งบ** |
+| I0 | **Config ต่อ environment** (ชื่อตัวแปรตรวจจาก `application.yml`, `backend/.env.example`, `frontend/.env.example`, `.railway/railway.ts`) | ดูตาราง **5.2.1** · งาน: startup validation (มี `RuntimeRoleGuard` + PII guard แล้ว) + **staging smoke** หลัง T26/C2 (health, SSO login, reserve 1 ครั้ง) |
+| I1 | **Hosting backend + Postgres** | Railway (plan แนะนำ: region Singapore, PITR, HA Postgres ก่อนร้านแรกเข้า CONTROL) หรือที่อื่นที่รัน Java container + managed Postgres ได้ → **รอ Narote ตัดสินใจ + งบ (Q2)** |
 | I2 | **Hosting frontend** | Vercel ได้ (static Vite build) หรือ Railway service `frontend` ที่มีอยู่ใน `.railway/railway.ts` · **Vercel host backend/DB/mock ไม่ได้** |
 | I3 | Mock TSF | ใช้ใน local/CI/staging เท่านั้น ห้ามขึ้น prod |
 | I4 | Environments | local (มีแล้ว) → staging (ต่อ TSF staging) → prod · แยก DB, secret, domain |
 | I5 | Domain + TLS | TBD ชื่อโดเมน (เช่น subdomain ของ TSF) · TLS ทุกเส้น (NFR) · ต้องมี HTTPS สาธารณะก่อน T28 และก่อนยื่น marketplace |
-| I6 | Staging IaC | `.railway/railway.ts` มีอยู่แต่ **ยังไม่เคย apply** และต้องแก้ก่อนใช้: ตอนนี้ map `DATABASE_USERNAME` เป็น `PGUSER` (superuser) ซึ่ง backend จะไม่ยอม start · ยังไม่มี env PII/HMAC |
+| I6 | Staging IaC | `.railway/railway.ts` มีอยู่แต่ **ยังไม่เคย apply** · **ต้องแก้ก่อน staging**: ตอนนี้ส่ง `DATABASE_USERNAME`/`PASSWORD` จาก `PGUSER`/`PGPASSWORD` (superuser) → `RuntimeRoleGuard` จะ fail start · ต้องแยก bootstrap URL user (Flyway) กับ `DATABASE_USERNAME=oms_app` ตาม `PostgresJdbcUrlEnvironmentPostProcessor` · ยังไม่ตั้ง PII/HMAC/TSF env ใน IaC |
 | I7 | `railway.toml` | deprecated (README: hard stop 2026-12-01) ใช้ `railway.ts` แทน |
 | I8 | Prod deploy ต้องกดเอง (Narote) ไม่ auto | T26 AC |
 | I9 | ≥ 2 app instance สำหรับ Checkout Reserve API (99.9% ตอน CONTROL/ACTIVE) | NFR |
+
+#### 5.2.1 ตาราง config ต่อ environment (owner = Narote สำหรับ secret/prod)
+
+| ตัวแปร | ใช้ทำอะไร | local (source) | staging | prod |
+|---|---|---|---|---|
+| `DATABASE_URL` / JDBC | Postgres URL; user ใน URL = **bootstrap/Flyway** ถ้าไม่ override | `docker-compose` → `oms` superuser | Railway Postgres URL | เหมือน staging แยก project |
+| `DATABASE_USERNAME` / `DATABASE_PASSWORD` | **Runtime** DB login | `oms_app` / `oms_app` (README) | `oms_app` + secret manager | prod secret ใหม่ |
+| `FLYWAY_USER` / `FLYWAY_PASSWORD` (หรือ user ใน URL) | Flyway migrate | `oms` / `oms` (dev bootstrap) | superuser หรือ break-glass bootstrap ตาม host | เหมือน staging |
+| `OMS_JWT_ISSUER` | Validate user JWT | `application-local` → mock IdP | TSF staging issuer | TSF prod issuer |
+| `TSF_JWKS_URI` หรือ `OMS_JWKS_URI` | JWKS | mock `8090` | TSF staging JWKS | TSF prod JWKS |
+| `OMS_JWT_AUDIENCE` | User API | `oms` | `oms` | `oms` |
+| `OMS_JWT_INTERNAL_AUDIENCE` | `/internal/**` | `oms-internal` | `oms-internal` | `oms-internal` |
+| `OMS_TSF_BASE_URL` | TSF REST 4.7 | mock `8090` | TSF staging API | TSF prod API |
+| `OMS_TSF_TOKEN_URI` | client credentials | mock token endpoint | TSF staging | TSF prod |
+| `OMS_TSF_CLIENT_ID` / `OMS_TSF_CLIENT_SECRET` | service client | `oms-service` + dev secret (local profile) | secret manager | prod secret |
+| `OMS_TSF_AUDIENCE` | token aud | `tsf-internal` | `tsf-internal` | `tsf-internal` |
+| `OMS_INBOX_HMAC_SECRETS` | verify TSF webhooks | `application-local.yml` | secret manager | prod keys ใหม่ |
+| `OMS_OUTBOX_WEBHOOK_SECRET` | sign outbox | local dev | secret manager | prod |
+| `TSF_OMS_EVENTS_URL` | outbox destination | mock receiver URL | TSF staging webhook | TSF prod |
+| `OMS_PII_KEYS` / `OMS_PII_ACTIVE_KEY_ID` / `OMS_PII_HASH_KEY` | encrypt/hash PII | local dev keys | secret manager | prod keys + rotation plan |
+| `VITE_OMS_API_BASE_URL` | browser → API | ว่าง (Vite proxy) | Railway public backend URL | prod API URL |
+| `VITE_OIDC_AUTHORITY` / `VITE_OIDC_CLIENT_ID` | SPA SSO | mock `8090` / `oms-web` | TSF staging IdP | TSF prod IdP |
+| `VITE_OIDC_REDIRECT_URI` | OIDC redirect | default `window.location.origin` | HTTPS frontend URL | prod frontend |
 
 ### 5.3 Backup / Restore
 | # | รายการ | เป้า |
@@ -277,10 +349,14 @@ T21 ──────────┘     └ T26 ─┴─ T42, T43, T25, T24 �
 ### 5.5 Performance / Load
 | # | รายการ | สถานะ |
 |---|---|---|
-| P1 | Gatling checkout reserve ใน CI (`Checkout reserve perf` job) | ✅ มีแล้ว (T12A) |
+| P1 | Gatling checkout reserve ใน CI (`Checkout reserve perf` job) | 🟡 มี job แล้ว แต่ **non-blocking** (`continue-on-error`) · load ~154 req/s ไม่ถึง NFR 200 req/s · AC เต็ม → **T43** บน env จริง |
 | P2 | Orders list 10,000 ออเดอร์ < 1 วิ (keyset index V11) | ✅ T17 |
 | P3 | Load test ครบ NFR ที่ 2× peak บน env จริง | ⬜ T43 |
-| P4 | ตัวเลข NFR ส่วนใหญ่ยังเป็น TBD + ค่าเริ่ม → ทบทวนหลัง pilot ขั้น 2 | [NFR.md](plan/NFR.md) |
+| P4 | ตัวเลข NFR: ใช้ค่าเริ่มใน [NFR.md](plan/NFR.md) จน Narote ยืนยัน (**default until confirmed**) — สรุปด้านล่าง | T00 ควรล็อกค่าก่อน T43 |
+| P4a | **Latency (default until confirmed):** checkout reserve p95 &lt; 150 ms, p99 &lt; 300 ms · webhook ack p95 &lt; 100 ms · order lag p95 &lt; 5 วิ · stock propagation TSF p95 &lt; 10 วิ | T12A/T11/T15 |
+| P4b | **Throughput (default until confirmed):** peak checkout reserve **200 req/s** · peak orders **500/min** platform · stock updates **300/s** peak | T43 |
+| P4c | **Availability (default until confirmed):** UI/API 99.5%/เดือน (pilot) · Checkout Reserve **99.9%** ตอน CONTROL/ACTIVE | T26 |
+| P4d | **DR (default until confirmed):** RPO ≤ 1 นาที · RTO ≤ 60 นาที (pilot) | T42 |
 
 ### 5.6 CI/CD
 | # | รายการ | สถานะ |
@@ -289,7 +365,7 @@ T21 ──────────┘     └ T26 ─┴─ T42, T43, T25, T24 �
 | C2 | CD ไป staging อัตโนมัติจาก `main` | ⬜ (T01 AC นี้ยังไม่ได้ทำ เพราะ localhost-only) |
 | C3 | Promote ไป prod แบบกดเอง + rollback plan | ⬜ T26 |
 | C4 | แก้ test flaky (`InboxApiTest`) ก่อนใช้ CI เป็นด่าน deploy | ⬜ backlog |
-| C5 | Migration check: Flyway ต่อด้วย `oms_migrator` ใน CI | ⬜ |
+| C5 | Migration check: CI ใช้ bootstrap superuser ตาม Testcontainers (เหมือน local) · prod/staging ต้อง migrate ด้วย privileged bootstrap แล้วรัน app เป็น `oms_app` (S5) | ⬜ guard ใน T25/T26 |
 
 ### 5.7 Incident runbook (ต้องเขียน, ยังไม่มี)
 | สถานการณ์ | ทำอะไรก่อน (ร่าง) |
@@ -354,6 +430,15 @@ T21 ──────────┘     └ T26 ─┴─ T42, T43, T25, T24 �
 | Data processing terms ระหว่าง TSF กับร้าน | TBD |
 | นิติบุคคลที่ยื่น partner marketplace (plan ข้อ 4: บริษัท ThaiShopFun) | ข้อเสนอใน plan · สถานะการยื่น = TBD |
 
+### 6.7 Launch blockers (เอกสาร/กฎหมาย — owned tasks)
+
+| ID | งาน | Owner (คน) | Deadline | Evidence of done |
+|---|---|---|---|---|
+| **GTM-01** | Terms of Service (OMS หรือข้อเพิ่มใน TSF) | TBD (Narote + ที่ปรึกษากฎหมาย) | TBD ก่อน pilot ร้านจริง | URL ที่เผยแพร่ + วันที่มีผล |
+| **GTM-02** | Privacy Policy (ผู้รับปลายทาง, retention ตาม NFR) | TBD | TBD ก่อน pilot | URL + บันทึกปรึกษา PDPA |
+| **GTM-03** | คู่มือผู้ใช้ภาษาไทย (onboarding → แพ็ก/ส่ง/คืน/hold) | TBD | TBD ก่อนเปิดขายทั่วไป | ลิงก์ docs/help ในแอปหรือ Notion |
+| **GTM-04** | ช่องทาง support + เวลาให้บริการ (LINE/อีเมล/ในแอป) | TBD (Narote) | TBD ก่อน pilot ขั้น 3 | ช่องทางทดสอบได้ + runbook รับ ticket |
+
 ---
 
 ## 7. Decision log + เรื่องที่รอ Narote
@@ -387,7 +472,7 @@ T21 ──────────┘     └ T26 ─┴─ T42, T43, T25, T24 �
 | Q5 | **Pricing / แพ็กเกจ** | A / B / C / D (หัวข้อ 6.2) | launch |
 | Q6 | **Marketplace ที่ 2** | Shopee (plan) / เจ้าที่อนุมัติก่อน · ยื่น partner แล้วหรือยัง | Phase 5 |
 | Q7 | โดเมน prod | subdomain TSF หรือโดเมนใหม่ | I5, T28 |
-| Q8 | ย้าย contracts ไป repo `tsf-oms-contracts` เมื่อไร | ตอนนี้ / ตอน TSF เริ่ม TSF-08 | T01C |
+| Q8 | ย้าย contracts ไป repo `tsf-oms-contracts` เมื่อไร (ถ้าต้องการ) | **ไม่บังคับ** — in-repo `contracts/` ใช้ได้จนกว่าจะย้าย · ถ้าย้าย ควรก่อน/คู่กับ TSF-08 | T01C |
 | Q9 | ร้าน pilot ตัวจริง | ตามเกณฑ์ plan ข้อ 9 | Phase 4 |
 | Q10 | ที่ปรึกษากฎหมาย PDPA (residency Singapore, privacy policy, terms) | — | ก่อน pilot ร้านจริง |
 | Q11 | ช่องทาง alert + support | LINE / Slack / อีเมล | T26, launch |
@@ -427,6 +512,19 @@ T21 ──────────┘     └ T26 ─┴─ T42, T43, T25, T24 �
 
 ## 9. วิธีทำงาน (workflow) + รัน local demo
 
+### 9.0 กติกา TBD สำหรับ agents (Cursor / Codex)
+
+| หัวข้อ | Agent **เติมค่าเริ่มจาก plan ได้** | Agent **ต้อง STOP ถามมนุษย์** |
+|---|---|---|
+| NFR ตัวเลข, ลำดับ task ภายใน phase, รายละเอียด AC ทางเทคนิค | ✅ ใช้ [NFR.md](plan/NFR.md) + 05 จนกว่า owner ยืนยัน | |
+| ชื่อ class/package, env var, คำสั่ง CI | ✅ ต้อง **ตรวจจาก repo** ห้ามเดา | |
+| Hosting, งบ, region, HA Postgres | | ❌ Q2 — Narote |
+| กฎหมาย PDPA, terms, privacy, pricing | | ❌ ที่ปรึกษากฎหมาย / Narote (GTM-01…02, Q5) |
+| Prod secrets, rotation, โดเมน prod | | ❌ Narote |
+| Repo public/private, เปิดขายจริง (go-live) | | ❌ Narote |
+| ย้าย contracts ออก repo | | ❌ Q8 (ทางเลือก) |
+| Deploy staging/prod, ชี้ Railway project | | ❌ Narote (T26, I6) |
+
 ### 9.1 Workflow
 | ขั้น | ใคร | ทำอะไร |
 |---|---|---|
@@ -460,6 +558,21 @@ cd frontend && npm ci && npm run dev                              # UI :5173
 | ทั้ง stack สำหรับ Playwright | `frontend/scripts/e2e-stack.sh` (เรียกผ่าน `npm run test:e2e`) |
 
 ข้อควรรู้: restart `mock-tsf` = ได้ RSA key ใหม่ OMS cache JWKS ~5 นาที token ใหม่อาจ 401 จน restart backend (README)
+
+### 9.3 Test strategy (คำสั่งจริงจาก repo)
+
+| ชั้น | คำสั่ง / job | "เขียว" หมายถึง |
+|---|---|---|
+| Backend unit + integration | `cd backend && ./mvnw -Pmock-acceptance verify` (ต้อง `docker` สำหรับ Testcontainers ตาม CI) | ทุก test ผ่าน + Spotless · job **Backend** ใน `.github/workflows/ci.yml` |
+| Mock TSF | `cd mock-tsf && ./mvnw verify` | job **Mock TSF** |
+| Chaos | `cd backend && ./mvnw -Pmock-acceptance,chaos test` (หลัง install mock-tsf) | job **Delivery chaos** |
+| Perf (non-blocking) | job **Checkout reserve perf** — `./mvnw -Pperf gatling:test` | รายงาน artifact; **ไม่ fail PR** แม้ NFR assert ล้ม (`continue-on-error`) |
+| Contracts | `cd contracts && npm ci && npm run lint` + `ContractExamplesTest` | job **Contract examples** |
+| Frontend | `cd frontend && npm ci && npm run lint && npm run build && npm test` | Vitest ผ่าน · job **Frontend** |
+| E2E | `cd frontend && npm run test:e2e` (หรือ `frontend/scripts/e2e-stack.sh`) | Playwright SSO · job **Frontend e2e** |
+| Invariant (หลัง T00) | เรียก `InvariantChecker` ท้าย integration/acceptance/E2E ที่แตะสต๊อก/ออเดอร์ | ยังไม่มีในโค้ด — T00 |
+
+**CI ที่รู้จัก flaky:** `InboxApiTest` (backlog C4) — ยังถือว่า CI "เขียว" ถ้า job Backend ผ่าน แต่ **ห้ามใช้เป็นด่าน deploy จนกว่าแก้ flake**
 
 ---
 
