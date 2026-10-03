@@ -95,7 +95,7 @@ public class OrderQueryService {
                   search);
           OrderListCursor cursor =
               cursorRaw == null || cursorRaw.isBlank()
-                  ? OrderListCursor.firstPage(Instant.now())
+                  ? OrderListCursor.firstPage(listSnapshotInstant())
                   : OrderListCursor.decode(cursorRaw);
           List<Object> countParams = new ArrayList<>(filter.params());
           StringBuilder countWhere = new StringBuilder(filter.where());
@@ -338,6 +338,11 @@ public class OrderQueryService {
             Boolean.class,
             orderId);
     return Boolean.TRUE.equals(bundle) ? "BUNDLE_WITHOUT_COMPONENTS" : null;
+  }
+
+  private Instant listSnapshotInstant() {
+    return jdbc.queryForObject(
+        "SELECT clock_timestamp()", (rs, rowNum) -> rs.getTimestamp(1).toInstant());
   }
 
   private OrderViews.ListItem mapListItem(ResultSet rs, int rowNum) throws SQLException {
