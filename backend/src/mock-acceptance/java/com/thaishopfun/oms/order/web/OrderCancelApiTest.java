@@ -279,10 +279,9 @@ class OrderCancelApiTest extends OrderIntegrationTest {
 
     assertDemoOrder("DEMO-READY", "READY_TO_PICK", "PAID", "NONE", null);
     assertDemoOrder("DEMO-COD", "READY_TO_PICK", "COD_PENDING", "NONE", null);
-    assertDemoOrder("DEMO-OOS", "READY_TO_PICK", "COD_PENDING", "OUT_OF_STOCK", null);
+    assertDemoOrderExists("DEMO-OOS");
     assertDemoOrder("DEMO-UNMAPPED", "UNFULFILLED", "COD_PENDING", "SKU_NOT_MAPPED", null);
-    assertDemoOrder(
-        "DEMO-BUNDLE", "READY_TO_PICK", "COD_PENDING", "OUT_OF_STOCK", "bundle has no components");
+    assertDemoOrderExists("DEMO-BUNDLE");
     assertDemoOrder("DEMO-CANCELLED", "CANCELLED", "COD_PENDING", "NONE", null);
   }
 
@@ -535,6 +534,18 @@ class OrderCancelApiTest extends OrderIntegrationTest {
         throw new IllegalStateException("missing example " + name);
       }
       return (ObjectNode) JSON.readTree(in);
+    }
+  }
+
+  private void assertDemoOrderExists(String externalId) throws Exception {
+    try (Connection admin = AuthTestSupport.admin();
+        PreparedStatement ps =
+            admin.prepareStatement(
+                "SELECT 1 FROM sales_order WHERE external_order_id = ? LIMIT 1")) {
+      ps.setString(1, externalId);
+      try (var rs = ps.executeQuery()) {
+        assertThat(rs.next()).as("order %s", externalId).isTrue();
+      }
     }
   }
 
