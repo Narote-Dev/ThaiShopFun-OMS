@@ -33,6 +33,7 @@ import com.thaishopfun.oms.stock.Shortfall;
 import com.thaishopfun.oms.stock.StockError;
 import com.thaishopfun.oms.stock.StockOperationException;
 import com.thaishopfun.oms.stock.StockOwner;
+import com.thaishopfun.oms.tenant.TenantContext;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.math.BigDecimal;
 import java.time.Clock;
