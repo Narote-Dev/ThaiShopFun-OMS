@@ -113,13 +113,18 @@ class OrderOptimisticLockInboxRetryTest {
     }
   }
 
-  private InboxRowState state(String eventId) {
-    return jdbc.queryForObject(
-        "SELECT status, attempts, last_error FROM inbox_event WHERE event_id = ?",
-        (rs, row) ->
-            new InboxRowState(
-                rs.getString("status"), rs.getInt("attempts"), rs.getString("last_error")),
-        eventId);
+  private InboxRowState state(String eventId) throws SQLException {
+    try (Connection admin = AuthTestSupport.admin();
+        PreparedStatement statement =
+            admin.prepareStatement(
+                "SELECT status, attempts, last_error FROM inbox_event WHERE event_id = ?")) {
+      statement.setString(1, eventId);
+      try (var rows = statement.executeQuery()) {
+        assertThat(rows.next()).isTrue();
+        return new InboxRowState(
+            rows.getString("status"), rows.getInt("attempts"), rows.getString("last_error"));
+      }
+    }
   }
 
   private record InboxRowState(String status, int attempts, String lastError) {}

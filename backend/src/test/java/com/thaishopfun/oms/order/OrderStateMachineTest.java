@@ -155,7 +155,7 @@ class OrderStateMachineTest {
   }
 
   @Test
-  void cancelledOrderRejectsPaymentChange() {
+  void cancelledOrderAllowsPaymentRefundTransitions() {
     Shop shop = shop();
     SalesOrder order =
         new SalesOrder(
@@ -164,8 +164,8 @@ class OrderStateMachineTest {
             shop.channelAccount(),
             "TSF-" + UuidV7.generate(),
             "CANCELLED",
-            "PENDING",
-            "UNFULFILLED",
+            "PAID",
+            "DELIVERED",
             "NONE",
             null,
             null,
@@ -176,7 +176,7 @@ class OrderStateMachineTest {
             BigDecimal.ZERO,
             new BigDecimal("100.00"),
             Instant.now().truncatedTo(ChronoUnit.MICROS),
-            null,
+            Instant.now(),
             null,
             1L,
             0);
@@ -187,16 +187,68 @@ class OrderStateMachineTest {
           return null;
         });
     GuardContext guards = new GuardContext(true, true, Instant.now());
+    as(
+        shop,
+        () -> {
+          stateMachine.applyPaymentStatus(
+              orders.findById(order.id()).orElseThrow(),
+              "REFUNDED",
+              "refund",
+              "TEST",
+              Instant.now(),
+              guards);
+          return null;
+        });
+    SalesOrder updated = as(shop, () -> orders.findById(order.id()).orElseThrow());
+    assertThat(updated.paymentStatus()).isEqualTo("REFUNDED");
+  }
 
+  @Test
+  void cancelledOrderRejectsIllegalPaymentTransition() {
+    Shop shop = shop();
+    SalesOrder order =
+        new SalesOrder(
+            UuidV7.generate(),
+            shop.tenant(),
+            shop.channelAccount(),
+            "TSF-" + UuidV7.generate(),
+            "CANCELLED",
+            "REFUNDED",
+            "DELIVERED",
+            "NONE",
+            null,
+            null,
+            "PREPAID",
+            "THB",
+            new BigDecimal("100.00"),
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            new BigDecimal("100.00"),
+            Instant.now().truncatedTo(ChronoUnit.MICROS),
+            Instant.now(),
+            null,
+            1L,
+            0);
+    as(
+        shop,
+        () -> {
+          orders.insert(order);
+          return null;
+        });
+    GuardContext guards = new GuardContext(true, true, Instant.now());
     assertThatThrownBy(
             () ->
                 as(
                     shop,
                     () ->
                         stateMachine.applyPaymentStatus(
-                            order, "PAID", "test", "TEST", Instant.now(), guards)))
-        .isInstanceOf(OrderStateException.class)
-        .hasMessageContaining("immutable");
+                            orders.findById(order.id()).orElseThrow(),
+                            "PAID",
+                            "test",
+                            "TEST",
+                            Instant.now(),
+                            guards)))
+        .isInstanceOf(OrderStateException.class);
   }
 
   @Test

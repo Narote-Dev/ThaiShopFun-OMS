@@ -226,7 +226,7 @@ class OrderStateMachinePropertyTest {
             () ->
                 jdbc.queryForMap(
                     """
-                    SELECT dimension, from_status, to_status
+                    SELECT dimension, from_value, to_value
                     FROM order_status_history
                     WHERE order_id = ?
                     ORDER BY created_at DESC
@@ -234,8 +234,8 @@ class OrderStateMachinePropertyTest {
                     """,
                     orderId));
     assertThat(row.get("dimension")).isEqualTo(dimension);
-    assertThat(row.get("from_status")).isEqualTo(from);
-    assertThat(row.get("to_status")).isEqualTo(to);
+    assertThat(row.get("from_value")).isEqualTo(from);
+    assertThat(row.get("to_value")).isEqualTo(to);
   }
 
   private static final class Model {
