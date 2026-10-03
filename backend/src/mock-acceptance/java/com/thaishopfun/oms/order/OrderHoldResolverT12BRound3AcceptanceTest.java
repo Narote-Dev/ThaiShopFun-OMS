@@ -796,19 +796,24 @@ class OrderHoldResolverT12BRound3AcceptanceTest {
   }
 
   private Instant removedAt(StockFixture.Shop shop, UUID account, String externalSkuId) {
-    return fixture
-        .inTenant(
-            shop.tenant(),
-            () ->
-                jdbc.queryForObject(
-                    """
-                SELECT removed_at FROM channel_listing
-                WHERE channel_account_id = ? AND external_sku_id = ?
-                """,
-                    java.time.OffsetDateTime.class,
-                    account,
-                    externalSkuId))
-        .toInstant();
+    return fixture.inTenant(
+        shop.tenant(),
+        () -> {
+          List<java.time.OffsetDateTime> values =
+              jdbc.query(
+                  """
+                  SELECT removed_at FROM channel_listing
+                  WHERE channel_account_id = ? AND external_sku_id = ?
+                  """,
+                  (rs, row) -> rs.getObject("removed_at", java.time.OffsetDateTime.class),
+                  account,
+                  externalSkuId);
+          if (values.isEmpty()) {
+            return null;
+          }
+          java.time.OffsetDateTime removed = values.get(0);
+          return removed == null ? null : removed.toInstant();
+        });
   }
 
   private HttpResponse<String> postListingSync(String shopId, UUID account) throws Exception {

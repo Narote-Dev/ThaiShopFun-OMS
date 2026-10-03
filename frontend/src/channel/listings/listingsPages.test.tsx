@@ -167,7 +167,7 @@ describe('ListingsPage', () => {
   })
 
   it('clears SKU picker when canceling or switching listings', async () => {
-    const { fetchImpl } = stubFetch(({ url, init }) => {
+    const { fetchImpl } = stubFetch(({ url }) => {
       if (url.includes('/channel-accounts') && !url.includes('listing-syncs')) {
         return { body: { items: [{ id: 'ca-1', channel: 'TSF', external_shop_id: 'shop', status: 'CONNECTED' }] } }
       }
