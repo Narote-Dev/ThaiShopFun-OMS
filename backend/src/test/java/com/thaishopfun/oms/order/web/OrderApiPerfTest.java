@@ -204,7 +204,7 @@ class OrderApiPerfTest extends OrderIntegrationTest {
               FROM sales_order o
               JOIN channel_account ca ON ca.tenant_id = o.tenant_id AND ca.id = o.channel_account_id
               LEFT JOIN order_recipient r ON r.order_id = o.id
-              WHERE true AND o.ordered_at <= ?
+              WHERE true AND o.created_at <= ?
               ORDER BY o.ordered_at DESC, o.id DESC
               LIMIT 50
               """)) {

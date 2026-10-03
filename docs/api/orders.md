@@ -25,7 +25,7 @@ Recipient phone is always `***-***-` + `phone_last4` for every role. Name is fir
 | `ordered_from`, `ordered_to` | Bangkok calendar date (`YYYY-MM-DD`) or ISO instant; `from` inclusive, `to` date is inclusive whole day, `to` instant is exclusive |
 | `q` | Phone (normalized hash), exact `tracking_no`, or `external_order_id` exact/prefix |
 
-Response: `{items, total, limit, next_cursor}`. `total` is the count of all rows matching the filters as of the first-page snapshot. `next_cursor` is `null` on the last page. New orders that arrive while paging do not shift earlier pages.
+Response: `{items, total, limit, next_cursor}`. The opaque `cursor` carries a snapshot instant (database time) taken on the first page; only rows with `created_at` at or before that instant are included in `total` and in every page. Sort order remains `ordered_at DESC`, `id DESC`, so a late-ingested order with an older `ordered_at` does not appear on later pages or change `total`. `next_cursor` is `null` on the last page.
 
 List items may include `phone_masked`.
 

@@ -155,8 +155,12 @@ export default function OrdersListPage() {
             <option value="">Any</option>
             <option value="NONE">None</option>
             <option value="ANY">On hold</option>
-            <option value="OUT_OF_STOCK">Out of stock</option>
             <option value="SKU_NOT_MAPPED">SKU not mapped</option>
+            <option value="OUT_OF_STOCK">Out of stock</option>
+            <option value="ADDRESS_PROBLEM">Address problem</option>
+            <option value="PAYMENT_MISMATCH">Payment mismatch</option>
+            <option value="CHANNEL_CANCEL_PENDING">Channel cancel pending</option>
+            <option value="MANUAL">Manual</option>
           </select>
         </label>
         <label>

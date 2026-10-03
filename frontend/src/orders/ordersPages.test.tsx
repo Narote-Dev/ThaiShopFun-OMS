@@ -71,7 +71,7 @@ describe('OrdersListPage', () => {
     expect(await screen.findByRole('link', { name: 'ORD-1' })).toBeInTheDocument()
 
     fireEvent.change(screen.getByLabelText('Search'), { target: { value: 'ORD' } })
-    fireEvent.change(screen.getByLabelText('Hold'), { target: { value: 'OUT_OF_STOCK' } })
+    fireEvent.change(screen.getByLabelText('Hold'), { target: { value: 'CHANNEL_CANCEL_PENDING' } })
     fireEvent.change(screen.getByLabelText('Order status'), { target: { value: 'ACTIVE' } })
     fireEvent.change(screen.getByLabelText('Payment status'), { target: { value: 'PAID' } })
     fireEvent.change(screen.getByLabelText('Channel'), { target: { value: 'TSF' } })
@@ -81,7 +81,7 @@ describe('OrdersListPage', () => {
         calls.some(
           (c) =>
             c.url.includes('q=ORD') &&
-            c.url.includes('hold_reason=OUT_OF_STOCK') &&
+            c.url.includes('hold_reason=CHANNEL_CANCEL_PENDING') &&
             c.url.includes('order_status=ACTIVE') &&
             c.url.includes('payment_status=PAID') &&
             c.url.includes('channel=TSF'),

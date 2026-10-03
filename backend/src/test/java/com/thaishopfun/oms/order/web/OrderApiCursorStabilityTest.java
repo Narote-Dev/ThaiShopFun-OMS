@@ -37,6 +37,41 @@ class OrderApiCursorStabilityTest extends OrderIntegrationTest {
   }
 
   @Test
+  void lateArrivalWithOldOrderedAtStaysOutOfSnapshot() throws Exception {
+    CatalogHttp.Shop httpShop = http.catalog().shop();
+    OrderFixture.Shop shop = OrderFixture.shopFor(httpShop);
+    Instant base = Instant.parse("2026-07-01T12:00:00Z");
+    for (int i = 0; i < 5; i++) {
+      stamp(
+          fixture.insert(shop, "CUR-" + i, "READY_TO_PICK", "NONE"),
+          base.plus(i, ChronoUnit.MINUTES));
+    }
+    CatalogHttp.Result page1 =
+        http.get(OrderHttp.ordersPath("?limit=2&ordered_to=2026-07-02"), httpShop.owner());
+    assertThat(page1.status()).isEqualTo(200);
+    long totalAfterPage1 = page1.body().path("total").asLong();
+    String cursor = page1.body().path("next_cursor").asString();
+    assertThat(cursor).isNotBlank();
+
+    SalesOrder late =
+        stamp(
+            fixture.insert(shop, "CUR-LATE", "READY_TO_PICK", "NONE"),
+            base.plus(2, ChronoUnit.MINUTES));
+
+    CatalogHttp.Result page2 =
+        http.get(
+            OrderHttp.ordersPath(
+                "?limit=2&ordered_to=2026-07-02&cursor="
+                    + URLEncoder.encode(cursor, StandardCharsets.UTF_8)),
+            httpShop.owner());
+    assertThat(page2.status()).isEqualTo(200);
+    assertThat(page2.body().path("total").asLong()).isEqualTo(totalAfterPage1);
+    for (var item : page2.body().path("items")) {
+      assertThat(item.path("external_order_id").asString()).isNotEqualTo(late.externalOrderId());
+    }
+  }
+
+  @Test
   void insertsBetweenPagesDoNotDuplicateOrGap() throws Exception {
     CatalogHttp.Shop httpShop = http.catalog().shop();
     OrderFixture.Shop shop = OrderFixture.shopFor(httpShop);
@@ -72,12 +107,12 @@ class OrderApiCursorStabilityTest extends OrderIntegrationTest {
         ids.add(item.path("id").asString());
       }
     }
-    assertThat(ids).hasSize(6);
+    assertThat(ids).hasSize(5);
     assertThat(ids).hasSameSizeAs(new HashSet<>(ids));
     assertThat(ids).doesNotContain((String) null);
   }
 
-  private static void stamp(SalesOrder order, Instant orderedAt) throws Exception {
+  private static SalesOrder stamp(SalesOrder order, Instant orderedAt) throws Exception {
     try (Connection admin = AuthTestSupport.admin();
         PreparedStatement ps =
             admin.prepareStatement("UPDATE sales_order SET ordered_at = ? WHERE id = ?")) {
@@ -85,5 +120,6 @@ class OrderApiCursorStabilityTest extends OrderIntegrationTest {
       ps.setObject(2, order.id());
       ps.executeUpdate();
     }
+    return order;
   }
 }

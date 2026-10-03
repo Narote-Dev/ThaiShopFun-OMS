@@ -99,7 +99,7 @@ public class OrderQueryService {
                   : OrderListCursor.decode(cursorRaw);
           List<Object> countParams = new ArrayList<>(filter.params());
           StringBuilder countWhere = new StringBuilder(filter.where());
-          countWhere.append(" AND o.ordered_at <= ?");
+          countWhere.append(" AND o.created_at <= ?");
           countParams.add(java.sql.Timestamp.from(cursor.snapshotBefore()));
           long total =
               jdbc.queryForObject(
@@ -108,7 +108,7 @@ public class OrderQueryService {
                   countParams.toArray());
           List<Object> whereParams = new ArrayList<>(filter.params());
           StringBuilder where = new StringBuilder(filter.where());
-          where.append(" AND o.ordered_at <= ?");
+          where.append(" AND o.created_at <= ?");
           whereParams.add(java.sql.Timestamp.from(cursor.snapshotBefore()));
           if (cursor.hasKeyset()) {
             where.append(" AND (o.ordered_at < ? OR (o.ordered_at = ? AND o.id < ?))");
