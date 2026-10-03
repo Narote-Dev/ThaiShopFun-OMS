@@ -17,7 +17,7 @@ test('owner creates a SKU, finds it by search, and sees a CSV row error', async 
   await expect(page.getByRole('heading', { name: 'New SKU' })).toBeVisible()
 
   // Step 2: Create the SKU with a new product in the same call.
-  const productSelect = page.getByLabel('Product')
+  const productSelect = page.getByRole('main').getByRole('combobox')
   await expect
     .poll(
       async () => {
