@@ -3,6 +3,7 @@ package com.thaishopfun.oms.order.web;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.thaishopfun.mocktsf.MockTsfApplication;
+import com.thaishopfun.mocktsf.OmsEndpoint;
 import com.thaishopfun.mocktsf.contract.ContractValidator;
 import com.thaishopfun.oms.auth.AuthTestSupport;
 import com.thaishopfun.oms.catalog.CatalogHttp;
@@ -94,6 +95,7 @@ class OrderCancelApiTest extends OrderIntegrationTest {
 
   @BeforeEach
   void fixture() {
+    mock.getBean(OmsEndpoint.class).setBaseUrl("http://127.0.0.1:" + port);
     fixture = new OrderFixture(orders, recipients, history, transactions);
   }
 
@@ -524,7 +526,7 @@ class OrderCancelApiTest extends OrderIntegrationTest {
 
   private static String tsfToken() {
     return AuthTestSupport.token(
-        "tsf",
+        "tsf-checkout",
         "shop",
         "ACTIVE",
         null,
