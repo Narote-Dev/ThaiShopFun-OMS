@@ -103,17 +103,15 @@ class FlywayV12UpgradeTest {
           .locations("classpath:db/migration")
           .load()
           .migrate();
-      try (Connection app = openApp(database)) {
-        setTenant(app, tenant);
-        try (PreparedStatement statement =
-            app.prepareStatement(
-                "SELECT mapping_source, mapped_at IS NOT NULL AS mapped FROM channel_listing WHERE id = ?")) {
-          statement.setObject(1, listing);
-          try (ResultSet rows = statement.executeQuery()) {
-            assertThat(rows.next()).isTrue();
-            assertThat(rows.getString("mapping_source")).isEqualTo("MANUAL");
-            assertThat(rows.getBoolean("mapped")).isTrue();
-          }
+      try (Connection admin = openAdmin(database);
+          PreparedStatement statement =
+              admin.prepareStatement(
+                  "SELECT mapping_source, mapped_at FROM channel_listing WHERE id = ?")) {
+        statement.setObject(1, listing);
+        try (ResultSet rows = statement.executeQuery()) {
+          assertThat(rows.next()).isTrue();
+          assertThat(rows.getString("mapping_source")).isEqualTo("MANUAL");
+          assertThat(rows.getTimestamp("mapped_at")).isNotNull();
         }
       }
     } finally {
@@ -140,23 +138,4 @@ class FlywayV12UpgradeTest {
         postgres.getPassword());
   }
 
-  private static void setTenant(Connection connection, UUID tenantId) throws SQLException {
-    try (PreparedStatement statement =
-        connection.prepareStatement("SELECT set_config('app.tenant_id', ?, true)")) {
-      statement.setString(1, tenantId.toString());
-      statement.execute();
-    }
-  }
-
-  private static Connection openApp(String database) throws SQLException {
-    return DriverManager.getConnection(
-        "jdbc:postgresql://"
-            + postgres.getHost()
-            + ":"
-            + postgres.getMappedPort(PostgreSQLContainer.POSTGRESQL_PORT)
-            + "/"
-            + database,
-        "oms_app",
-        APP_PASSWORD);
-  }
 }
