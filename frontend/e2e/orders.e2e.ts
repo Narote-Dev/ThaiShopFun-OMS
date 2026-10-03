@@ -33,7 +33,7 @@ test('owner browses orders, opens detail with masked phone, requests cancel', as
   await expect(page.getByRole('list', { name: 'Status timeline' })).not.toBeEmpty()
 
   await page.getByRole('link', { name: '← Orders' }).click()
-  await page.getByLabel('Hold', { exact: true }).selectOption('SKU_NOT_MAPPED')
+  await page.getByLabel('Hold filter').selectOption('SKU_NOT_MAPPED')
   await search.fill('')
   await page.getByRole('button', { name: 'Apply' }).click()
   await expect
@@ -46,7 +46,7 @@ test('owner browses orders, opens detail with masked phone, requests cancel', as
   await expect(page.getByRole('list', { name: 'Status timeline' })).not.toBeEmpty()
 
   await page.getByRole('link', { name: '← Orders' }).click()
-  await page.getByLabel('Hold', { exact: true }).selectOption('OUT_OF_STOCK')
+  await page.getByLabel('Hold filter').selectOption('OUT_OF_STOCK')
   await search.fill('')
   await page.getByRole('button', { name: 'Apply' }).click()
   await expect
@@ -60,7 +60,7 @@ test('owner browses orders, opens detail with masked phone, requests cancel', as
   await expect(page.getByRole('heading', { name: 'Order DEMO-OOS' })).toBeVisible()
 
   await page.getByRole('link', { name: '← Orders' }).click()
-  await page.getByLabel('Hold', { exact: true }).selectOption('')
+  await page.getByLabel('Hold filter').selectOption('')
   await search.fill('DEMO-COD')
   await page.getByRole('button', { name: 'Apply' }).click()
   await page.getByRole('link', { name: 'DEMO-COD' }).click()
@@ -87,7 +87,7 @@ test('owner maps unmapped listing and order becomes ready to pick', async ({ pag
   expect(seed.ok()).toBeTruthy()
 
   await page.getByRole('link', { name: 'Orders', exact: true }).click()
-  await page.getByLabel('Hold', { exact: true }).selectOption('SKU_NOT_MAPPED')
+  await page.getByLabel('Hold filter').selectOption('SKU_NOT_MAPPED')
   await page.getByRole('button', { name: 'Apply' }).click()
   await expect(page.getByRole('link', { name: 'DEMO-UNMAPPED' })).toBeVisible({ timeout: 120_000 })
 
@@ -104,7 +104,7 @@ test('owner maps unmapped listing and order becomes ready to pick', async ({ pag
   await expect(page.getByText(/released 1/)).toBeVisible({ timeout: 60_000 })
 
   await page.getByRole('link', { name: 'Orders', exact: true }).click()
-  await page.getByLabel('Hold', { exact: true }).selectOption('')
+  await page.getByLabel('Hold filter').selectOption('')
   await page.getByLabel('Search').fill('DEMO-UNMAPPED')
   await page.getByRole('button', { name: 'Apply' }).click()
   await page.getByRole('link', { name: 'DEMO-UNMAPPED' }).click()

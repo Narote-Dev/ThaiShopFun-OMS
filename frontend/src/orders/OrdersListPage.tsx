@@ -149,6 +149,7 @@ export default function OrdersListPage() {
         <label>
           Hold
           <select
+            aria-label="Hold filter"
             value={filters.hold_reason}
             onChange={(e) => setFilters({ ...filters, hold_reason: e.target.value })}
           >
