@@ -21,9 +21,7 @@ class OrderController {
   private final OrderHoldRecheckService holdRecheck;
 
   OrderController(
-      OrderQueryService queries,
-      OrderCancelService cancel,
-      OrderHoldRecheckService holdRecheck) {
+      OrderQueryService queries, OrderCancelService cancel, OrderHoldRecheckService holdRecheck) {
     this.queries = queries;
     this.cancel = cancel;
     this.holdRecheck = holdRecheck;
@@ -76,8 +74,7 @@ class OrderController {
 
   @PostMapping("/{id}/hold-rechecks")
   ResponseEntity<OrderViews.HoldRecheckResponse> holdRecheck(
-      @PathVariable UUID id,
-      @RequestHeader(name = "Idempotency-Key") String idempotencyKey) {
+      @PathVariable UUID id, @RequestHeader(name = "Idempotency-Key") String idempotencyKey) {
     return ok(holdRecheck.recheck(id, idempotencyKey));
   }
 

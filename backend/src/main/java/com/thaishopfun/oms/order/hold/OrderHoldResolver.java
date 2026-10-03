@@ -16,9 +16,9 @@ import com.thaishopfun.oms.stock.ReservationEngine;
 import com.thaishopfun.oms.stock.ReserveDemandPlanner;
 import com.thaishopfun.oms.stock.ReserveItem;
 import com.thaishopfun.oms.stock.Shortfall;
-import com.thaishopfun.oms.stock.StockError;
 import com.thaishopfun.oms.stock.StockBusyException;
 import com.thaishopfun.oms.stock.StockConflictException;
+import com.thaishopfun.oms.stock.StockError;
 import com.thaishopfun.oms.stock.StockOperationException;
 import com.thaishopfun.oms.stock.StockOwner;
 import com.thaishopfun.oms.stock.StockRetry;
@@ -26,10 +26,10 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
-import java.util.HexFormat;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -84,8 +84,8 @@ public class OrderHoldResolver {
   }
 
   /**
-   * Re-evaluates one held order inside the caller's transaction. {@code idempotencyPrefix} is {@code
-   * order.remap} or {@code order.recheck}.
+   * Re-evaluates one held order inside the caller's transaction. {@code idempotencyPrefix} is
+   * {@code order.remap} or {@code order.recheck}.
    */
   public Outcome resolveHeldOrder(
       UUID orderId, String idempotencyPrefix, String recheckIdempotencyKey) {
@@ -141,7 +141,8 @@ public class OrderHoldResolver {
                 .componentlessBundleSkus(reserveItems.stream().map(ReserveItem::skuId).toList())
                 .isEmpty();
     if (componentlessBundle) {
-      order = effects.applyHold(order, "OUT_OF_STOCK", OrderHoldEffects.BUNDLE_WITHOUT_COMPONENTS_NOTE);
+      order =
+          effects.applyHold(order, "OUT_OF_STOCK", OrderHoldEffects.BUNDLE_WITHOUT_COMPONENTS_NOTE);
       if ("SHADOW".equals(tsf.mode())) {
         shadowDiff.insertOrderDiff(
             tsf.id(),
@@ -166,8 +167,7 @@ public class OrderHoldResolver {
     hooks.beforeEngineWrite();
     try {
       EnsureHoldResult held =
-          engine.ensureOrderHold(
-              StockOwner.order(orderId.toString()), reserveItems, engineKey);
+          engine.ensureOrderHold(StockOwner.order(orderId.toString()), reserveItems, engineKey);
       order = orders.findById(orderId).orElseThrow();
       if (held.held()) {
         if (!"NONE".equals(order.holdReason())) {
@@ -180,13 +180,9 @@ public class OrderHoldResolver {
       effects.recordOversell(tsf, holdLines, shortfalls);
       if ("SHADOW".equals(tsf.mode())) {
         shadowDiff.insertOrderDiff(
-            tsf.id(),
-            order.externalOrderId(),
-            effects.shadowDiffJson(holdLines, shortfalls),
-            now);
+            tsf.id(), order.externalOrderId(), effects.shadowDiffJson(holdLines, shortfalls), now);
       }
-      order =
-          effects.applyHold(order, "OUT_OF_STOCK", OrderHoldEffects.shortfallNote(shortfalls));
+      order = effects.applyHold(order, "OUT_OF_STOCK", OrderHoldEffects.shortfallNote(shortfalls));
       return Outcome.OUT_OF_STOCK;
     } catch (StockOperationException ex) {
       if (ex.error() != StockError.UNKNOWN_SKU) {
@@ -251,9 +247,7 @@ public class OrderHoldResolver {
             """,
             (rs, row) ->
                 new TsfAccount(
-                    rs.getObject("id", UUID.class),
-                    rs.getString("mode"),
-                    rs.getString("status")),
+                    rs.getObject("id", UUID.class), rs.getString("mode"), rs.getString("status")),
             channelAccountId);
     return rows.isEmpty() ? Optional.empty() : Optional.of(rows.get(0));
   }

@@ -51,7 +51,8 @@ public class ChannelListingMappingService {
     ReevalSummary summary = resolverJob.reevalAfterMapping(channelAccountId, externalSkuId);
     ChannelListingRepository.ListingRow after =
         tx.read(() -> listings.findById(listingId).orElseThrow(ListingApiException::notFound));
-    return new ChannelListingViews.MappingPutResponse(ChannelListingViews.from(after), toView(summary));
+    return new ChannelListingViews.MappingPutResponse(
+        ChannelListingViews.from(after), toView(summary));
   }
 
   public ChannelListingViews.ListingView deleteMapping(UUID listingId) {

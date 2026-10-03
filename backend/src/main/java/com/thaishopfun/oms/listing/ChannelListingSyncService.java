@@ -5,7 +5,6 @@ import com.thaishopfun.oms.channel.ChannelAccountRef;
 import com.thaishopfun.oms.channel.ChannelAdapter;
 import com.thaishopfun.oms.channel.ChannelAdapterRegistry;
 import com.thaishopfun.oms.channel.api.ListingPage;
-import com.thaishopfun.oms.channel.exception.UnsupportedCapabilityException;
 import com.thaishopfun.oms.order.hold.OrderHoldResolverJob;
 import com.thaishopfun.oms.tenant.TenantContext;
 import java.util.ArrayList;
@@ -51,10 +50,7 @@ public class ChannelListingSyncService {
   public SyncResult sync(UUID channelAccountId) {
     access.requireWriter();
     AccountRow account =
-        tx.read(
-            () ->
-                loadAccount(channelAccountId)
-                    .orElseThrow(ListingApiException::notFound));
+        tx.read(() -> loadAccount(channelAccountId).orElseThrow(ListingApiException::notFound));
     if ("DISCONNECTED".equals(account.status())) {
       throw ListingApiException.disconnected();
     }
@@ -114,9 +110,7 @@ public class ChannelListingSyncService {
             (rs, row) ->
                 new AccountRow(
                     new ChannelAccountRef(
-                        tenantId,
-                        rs.getObject("id", UUID.class),
-                        rs.getString("external_shop_id")),
+                        tenantId, rs.getObject("id", UUID.class), rs.getString("external_shop_id")),
                     rs.getString("channel"),
                     rs.getString("status")),
             channelAccountId,

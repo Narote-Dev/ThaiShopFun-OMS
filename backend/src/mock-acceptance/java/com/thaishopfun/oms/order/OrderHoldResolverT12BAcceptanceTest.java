@@ -76,6 +76,7 @@ class OrderHoldResolverT12BAcceptanceTest {
   @Autowired ChannelListingRepository listings;
 
   StockFixture fixture;
+
   @BeforeEach
   void setup() throws Exception {
     OrderIntakeMockRuntime.mock().getBean(OmsEndpoint.class).setBaseUrl("http://127.0.0.1:" + port);
@@ -207,10 +208,14 @@ class OrderHoldResolverT12BAcceptanceTest {
             .header("Content-Type", "application/json")
             .header("X-Event-Id", eventId)
             .header("X-Signature", sign(INBOX_SECRET, now(), body))
-            .header("Authorization", "Bearer " + OrderIntakeMockRuntime.mock().getBean(TokenIssuer.class).tsfServiceToken())
+            .header(
+                "Authorization",
+                "Bearer "
+                    + OrderIntakeMockRuntime.mock().getBean(TokenIssuer.class).tsfServiceToken())
             .POST(HttpRequest.BodyPublishers.ofByteArray(body))
             .build();
-    assertThat(HTTP.send(request, HttpResponse.BodyHandlers.ofString()).statusCode()).isEqualTo(202);
+    assertThat(HTTP.send(request, HttpResponse.BodyHandlers.ofString()).statusCode())
+        .isEqualTo(202);
   }
 
   private static String sign(String secret, String timestamp, byte[] body) throws Exception {

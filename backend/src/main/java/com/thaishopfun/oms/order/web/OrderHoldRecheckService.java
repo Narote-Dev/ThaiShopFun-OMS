@@ -45,7 +45,8 @@ public class OrderHoldRecheckService {
   public OrderViews.HoldRecheckResponse recheck(UUID orderId, String idempotencyKeyHeader) {
     OrderAccess.Actor actor = access.requireOwnerOrAdmin();
     if (idempotencyKeyHeader == null || idempotencyKeyHeader.isBlank()) {
-      throw OrderApiException.fieldValidationFailed("Idempotency-Key", "Idempotency-Key is required");
+      throw OrderApiException.fieldValidationFailed(
+          "Idempotency-Key", "Idempotency-Key is required");
     }
     String key = "hold-recheck:" + orderId;
     String hash = sha256(orderId + "|" + idempotencyKeyHeader);
@@ -60,8 +61,7 @@ public class OrderHoldRecheckService {
         && !"OUT_OF_STOCK".equals(before.holdReason())) {
       throw OrderApiException.conflict("HOLD_NOT_RECHECKABLE", "Order hold is not recheckable");
     }
-    ReevalSummary summary =
-        resolverJob.resolveOrderRecheck(orderId, idempotencyKeyHeader.trim());
+    ReevalSummary summary = resolverJob.resolveOrderRecheck(orderId, idempotencyKeyHeader.trim());
     SalesOrder after =
         tx.write(
             () -> {

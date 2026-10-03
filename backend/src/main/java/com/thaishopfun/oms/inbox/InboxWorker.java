@@ -345,8 +345,7 @@ public class InboxWorker {
           }
           OffsetDateTime expires = rs.getObject("entitlement_expires_at", OffsetDateTime.class);
           OffsetDateTime receivedAt = rs.getObject("received_at", OffsetDateTime.class);
-          OffsetDateTime orphanRecorded =
-              rs.getObject("orphan_recorded_at", OffsetDateTime.class);
+          OffsetDateTime orphanRecorded = rs.getObject("orphan_recorded_at", OffsetDateTime.class);
           return new InboxRow(
               rs.getObject("id", UUID.class),
               rs.getObject("tenant_id", UUID.class),

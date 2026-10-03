@@ -10,7 +10,11 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 
 @Configuration
-@EnableConfigurationProperties({OrderProperties.class, OrderIntakeProperties.class, OrderHoldProperties.class})
+@EnableConfigurationProperties({
+  OrderProperties.class,
+  OrderIntakeProperties.class,
+  OrderHoldProperties.class
+})
 public class OrderConfig {
 
   @Bean

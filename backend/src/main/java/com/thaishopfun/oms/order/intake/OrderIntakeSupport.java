@@ -9,12 +9,9 @@ import com.thaishopfun.oms.order.ChannelAccountLookup;
 import com.thaishopfun.oms.order.ChannelAccountLookup.TsfAccount;
 import com.thaishopfun.oms.order.OrderIntakeHooks;
 import com.thaishopfun.oms.order.OrderLineRepository;
-import com.thaishopfun.oms.order.hold.OrderHoldEffects;
-import com.thaishopfun.oms.order.hold.OrderHoldEffects.HoldLine;
 import com.thaishopfun.oms.order.OrderProperties;
 import com.thaishopfun.oms.order.OrderRecipientRepository;
 import com.thaishopfun.oms.order.OrderReservationCoverage;
-import com.thaishopfun.oms.order.OrderStateException;
 import com.thaishopfun.oms.order.OrderStateMachine;
 import com.thaishopfun.oms.order.OrderStateMachine.GuardContext;
 import com.thaishopfun.oms.order.OrderStateMachine.TransitionResult;
@@ -24,6 +21,8 @@ import com.thaishopfun.oms.order.ReconciliationIssueRepository;
 import com.thaishopfun.oms.order.SalesOrder;
 import com.thaishopfun.oms.order.SalesOrderRepository;
 import com.thaishopfun.oms.order.ShadowDiffRepository;
+import com.thaishopfun.oms.order.hold.OrderHoldEffects;
+import com.thaishopfun.oms.order.hold.OrderHoldEffects.HoldLine;
 import com.thaishopfun.oms.stock.AdoptResult;
 import com.thaishopfun.oms.stock.EnsureHoldResult;
 import com.thaishopfun.oms.stock.ReservationEngine;
@@ -54,7 +53,8 @@ public class OrderIntakeSupport {
 
   public static final String TSF_CHANNEL_ACCOUNT_MISSING = "TSF_CHANNEL_ACCOUNT_MISSING";
   public static final String BUSINESS_OVERSELL_METRIC = OrderHoldEffects.BUSINESS_OVERSELL_METRIC;
-  static final String BUNDLE_WITHOUT_COMPONENTS_NOTE = OrderHoldEffects.BUNDLE_WITHOUT_COMPONENTS_NOTE;
+  static final String BUNDLE_WITHOUT_COMPONENTS_NOTE =
+      OrderHoldEffects.BUNDLE_WITHOUT_COMPONENTS_NOTE;
 
   private final ChannelAccountLookup channels;
   private final SalesOrderRepository orders;

@@ -4,9 +4,9 @@ import com.thaishopfun.oms.auth.UuidV7;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Instant;
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Optional;
-import java.time.OffsetDateTime;
 import java.util.UUID;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -81,8 +81,7 @@ public class ChannelListingRepository {
       sql.append(mapped ? " AND cl.sku_id IS NOT NULL " : " AND cl.sku_id IS NULL ");
     }
     if (q != null && !q.isBlank()) {
-      sql.append(
-          " AND (cl.external_sku_id ILIKE ? OR cl.seller_sku ILIKE ? OR cl.name ILIKE ?) ");
+      sql.append(" AND (cl.external_sku_id ILIKE ? OR cl.seller_sku ILIKE ? OR cl.name ILIKE ?) ");
       String pattern = "%" + q.trim() + "%";
       args.add(pattern);
       args.add(pattern);
@@ -107,8 +106,7 @@ public class ChannelListingRepository {
       sql.append(mapped ? " AND cl.sku_id IS NOT NULL " : " AND cl.sku_id IS NULL ");
     }
     if (q != null && !q.isBlank()) {
-      sql.append(
-          " AND (cl.external_sku_id ILIKE ? OR cl.seller_sku ILIKE ? OR cl.name ILIKE ?) ");
+      sql.append(" AND (cl.external_sku_id ILIKE ? OR cl.seller_sku ILIKE ? OR cl.name ILIKE ?) ");
       String pattern = "%" + q.trim() + "%";
       args.add(pattern);
       args.add(pattern);
@@ -179,13 +177,11 @@ public class ChannelListingRepository {
             channelAccountId,
             externalSkuId);
     UUID newSku =
-        jdbc.queryForObject(
-            "SELECT sku_id FROM channel_listing WHERE id = ?",
-            UUID.class,
-            id);
+        jdbc.queryForObject("SELECT sku_id FROM channel_listing WHERE id = ?", UUID.class, id);
     boolean mappingChanged = existingSku == null && newSku != null;
     boolean newlyMapped = Boolean.TRUE.equals(inserted) && newSku != null;
-    return new UpsertResult(id, mappingChanged || (existingSku == null && newSku != null), newlyMapped);
+    return new UpsertResult(
+        id, mappingChanged || (existingSku == null && newSku != null), newlyMapped);
   }
 
   public void markRemoved(UUID channelAccountId, String externalSkuId) {

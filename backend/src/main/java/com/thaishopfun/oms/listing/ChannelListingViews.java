@@ -33,7 +33,8 @@ final class ChannelListingViews {
 
   record MappingPutResponse(ListingView listing, ReevalSummary reevaluation) {}
 
-  record SyncResponse(int upserted, int removed, @JsonProperty("mapping_changes") int mappingChanges) {}
+  record SyncResponse(
+      int upserted, int removed, @JsonProperty("mapping_changes") int mappingChanges) {}
 
   static ListingView from(ChannelListingRepository.ListingRow row) {
     return new ListingView(

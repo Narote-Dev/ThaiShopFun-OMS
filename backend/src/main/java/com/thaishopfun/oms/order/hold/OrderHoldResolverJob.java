@@ -44,8 +44,7 @@ public class OrderHoldResolverJob {
     return reevalForListing(channelAccountId, externalSkuId, properties.getReevalCap());
   }
 
-  public ReevalSummary reevalForListing(
-      UUID channelAccountId, String externalSkuId, int cap) {
+  public ReevalSummary reevalForListing(UUID channelAccountId, String externalSkuId, int cap) {
     UUID tenantId = TenantContext.requireTenantId();
     List<UUID> orderIds =
         listings.findHeldOrderIdsForListing(channelAccountId, externalSkuId, cap + 1);
@@ -86,8 +85,7 @@ public class OrderHoldResolverJob {
 
   public ReevalSummary resolveOrderRecheck(UUID orderId, String clientIdempotencyKey) {
     UUID tenantId = TenantContext.requireTenantId();
-    return resolveOrders(
-        tenantId, List.of(orderId), 0, "order.recheck", clientIdempotencyKey);
+    return resolveOrders(tenantId, List.of(orderId), 0, "order.recheck", clientIdempotencyKey);
   }
 
   private ReevalSummary resolveOrders(
@@ -100,8 +98,7 @@ public class OrderHoldResolverJob {
     int outOfStock = 0;
     int stillHeld = 0;
     for (UUID orderId : orderIds) {
-      Outcome outcome =
-          resolveOneWithRetries(tenantId, orderId, keyPrefix, recheckIdempotencyKey);
+      Outcome outcome = resolveOneWithRetries(tenantId, orderId, keyPrefix, recheckIdempotencyKey);
       switch (outcome) {
         case RELEASED -> released++;
         case OUT_OF_STOCK -> outOfStock++;

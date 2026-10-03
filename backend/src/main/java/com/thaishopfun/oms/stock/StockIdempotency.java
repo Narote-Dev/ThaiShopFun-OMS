@@ -121,8 +121,7 @@ class StockIdempotency {
     fail(tenantId, scope, key, error, message, null);
   }
 
-  void fail(
-      UUID tenantId, String scope, String key, StockError error, String message, UUID skuId) {
+  void fail(UUID tenantId, String scope, String key, StockError error, String message, UUID skuId) {
     Map<String, Object> envelope = new LinkedHashMap<>();
     envelope.put("error", error.name());
     envelope.put("message", message);
@@ -147,9 +146,7 @@ class StockIdempotency {
         }
       }
       return Outcome.failure(
-          StockError.valueOf(error.asString()),
-          message == null ? "" : message.asString(),
-          skuId);
+          StockError.valueOf(error.asString()), message == null ? "" : message.asString(), skuId);
     }
     return Outcome.success(json.treeToValue(stored.body().get("result"), type));
   }

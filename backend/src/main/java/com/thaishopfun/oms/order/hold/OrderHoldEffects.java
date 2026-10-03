@@ -1,6 +1,5 @@
 package com.thaishopfun.oms.order.hold;
 
-import com.thaishopfun.oms.order.ChannelAccountLookup;
 import com.thaishopfun.oms.order.ChannelAccountLookup.TsfAccount;
 import com.thaishopfun.oms.order.OrderIntakeHooks;
 import com.thaishopfun.oms.order.OrderLineRepository;
@@ -22,7 +21,6 @@ import com.thaishopfun.oms.stock.StockOperationException;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Clock;
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -105,7 +103,8 @@ public class OrderHoldEffects {
     return hold.order();
   }
 
-  public void recordOversell(TsfAccount account, List<HoldLine> mapped, List<Shortfall> shortfalls) {
+  public void recordOversell(
+      TsfAccount account, List<HoldLine> mapped, List<Shortfall> shortfalls) {
     String mode = account.mode();
     boolean oversell =
         mapped.stream()
@@ -182,8 +181,7 @@ public class OrderHoldEffects {
     return unknownSkuHoldNote(mapped, missingSkuIds);
   }
 
-  public Set<UUID> missingSkuIdsForUnknownSku(
-      StockOperationException ex, List<ReserveItem> items) {
+  public Set<UUID> missingSkuIdsForUnknownSku(StockOperationException ex, List<ReserveItem> items) {
     UUID skuId = ex.skuId();
     if (skuId != null) {
       return Set.of(skuId);
