@@ -123,6 +123,8 @@ class OrderHoldResolverT12BCriteriaAcceptanceTest {
 
   StockFixture fixture;
   private final ListAppender<ILoggingEvent> rootLogs = new ListAppender<>();
+  private final java.util.concurrent.atomic.AtomicLong listingAggregateVersion =
+      new java.util.concurrent.atomic.AtomicLong(0);
 
   @AfterAll
   static void stopMockTsf() {
@@ -139,6 +141,7 @@ class OrderHoldResolverT12BCriteriaAcceptanceTest {
 
   @BeforeEach
   void setup() throws Exception {
+    listingAggregateVersion.set(0);
     OrderIntakeMockRuntime.mock().getBean(OmsEndpoint.class).setBaseUrl("http://127.0.0.1:" + port);
     fixture = new StockFixture(jdbc, transactions);
     attachRootLogs();
@@ -1009,6 +1012,7 @@ class OrderHoldResolverT12BCriteriaAcceptanceTest {
     body.put("tsf_shop_id", shopId);
     body.put("listing_sku_id", listingSkuId);
     body.put("action", action);
+    body.put("aggregate_version", listingAggregateVersion.incrementAndGet());
     if (sellerSku != null) {
       body.put("seller_sku", sellerSku);
     }
