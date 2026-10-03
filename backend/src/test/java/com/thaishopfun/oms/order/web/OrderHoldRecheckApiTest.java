@@ -40,10 +40,19 @@ class OrderHoldRecheckApiTest extends OrderIntegrationTest {
     assertThat(response.body().path("error").asString()).isEqualTo("VALIDATION_FAILED");
     assertThat(response.body().path("errors").get(0).path("field").asString())
         .isEqualTo("Idempotency-Key");
+    String storageKey = order.id() + ":" + key129;
     long rows =
-        CatalogHttp.count(
-            "SELECT count(*) FROM idempotency_key WHERE scope = ?",
-            OrderHoldRecheckIdempotency.SCOPE);
+        fixture.inTenant(
+            shop.tenantId(),
+            () ->
+                jdbc.queryForObject(
+                    """
+                    SELECT count(*) FROM idempotency_key
+                    WHERE scope = ? AND "key" = ?
+                    """,
+                    Long.class,
+                    OrderHoldRecheckIdempotency.SCOPE,
+                    storageKey));
     assertThat(rows).isZero();
   }
 
