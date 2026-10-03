@@ -108,7 +108,7 @@ class OrderStateMachinePropertyTest {
         assertThat(updated.paymentStatus()).isEqualTo(model.payment);
         assertThat(updated.fulfillmentStatus()).isEqualTo(model.fulfillment);
         assertThat(updated.holdReason()).isEqualTo(model.hold);
-        if (!from.equals(to) || "HOLD".equals(dimension)) {
+        if (!from.equals(to)) {
           assertThat(historyCount(shop, order.id())).isEqualTo(historyBefore + 1);
           assertLastHistory(shop, order.id(), dimension, from, to);
         } else {
