@@ -107,6 +107,7 @@ export type HoldGroup = {
     channel_account_id: string
     ordered_at: string
   }[]
+  channel_account_counts?: { channel_account_id: string; count: number }[]
 }
 
 export const ORDER_PAGE_SIZE = 25

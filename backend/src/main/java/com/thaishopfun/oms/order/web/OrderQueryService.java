@@ -314,9 +314,29 @@ public class OrderQueryService {
                             rs.getObject("ordered_at", java.time.OffsetDateTime.class).toInstant()),
                     group.holdReason(),
                     group.holdDetail());
+            List<OrderViews.ChannelAccountHoldCount> channelCounts = List.of();
+            if ("SKU_NOT_MAPPED".equals(group.holdReason())) {
+              channelCounts =
+                  jdbc.query(
+                      """
+                      SELECT channel_account_id, COUNT(*) AS cnt
+                      FROM sales_order
+                      WHERE hold_reason = 'SKU_NOT_MAPPED'
+                      GROUP BY channel_account_id
+                      ORDER BY channel_account_id
+                      """,
+                      (rs, rowNum) ->
+                          new OrderViews.ChannelAccountHoldCount(
+                              rs.getObject("channel_account_id", UUID.class),
+                              rs.getLong("cnt")));
+            }
             result.add(
                 new OrderViews.HoldGroup(
-                    group.holdReason(), group.holdDetail(), group.count(), samples));
+                    group.holdReason(),
+                    group.holdDetail(),
+                    group.count(),
+                    samples,
+                    channelCounts));
           }
           return new OrderViews.HoldsView(result);
         });

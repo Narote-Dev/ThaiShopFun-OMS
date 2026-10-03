@@ -33,7 +33,6 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
-import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
@@ -224,52 +223,54 @@ class OrderHoldResolverT12BRound3AcceptanceTest {
 
   @Test
   void concurrentMappingReevalSingleReservation() throws Exception {
-    StockFixture.Shop shop = fixture.shop("ACTIVE");
-    String shopId = fixture.tsfShopId(shop);
-    UUID account = fixture.tsfChannelAccount(shop, "ACTIVE", "CONNECTED");
-    UUID sku = fixture.sku(shop, 12);
-    fixture.channelListing(shop, account, "L-conc-reeval", null, true, false);
+    for (int threads = 2; threads <= 5; threads++) {
+      StockFixture.Shop shop = fixture.shop("ACTIVE");
+      String shopId = fixture.tsfShopId(shop);
+      UUID account = fixture.tsfChannelAccount(shop, "ACTIVE", "CONNECTED");
+      UUID sku = fixture.sku(shop, 12);
+      String listingSku = "L-conc-reeval-" + threads + "-" + UUID.randomUUID();
+      fixture.channelListing(shop, account, listingSku, null, true, false);
 
-    String externalOrderId = "TSF-R3-6C-" + UUID.randomUUID();
-    ingest(
-        OrderIntakeScenarioSupport.orderCreated(
-            JSON, externalOrderId, shopId, null, "COD", "L-conc-reeval", 1, 1));
-    worker.processAvailable(10);
-    UUID orderId = orderId(shop, externalOrderId);
-    UUID listingId = listingIdFromApi(shop, shopId, account, "L-conc-reeval");
-    String token = userToken(shopId);
+      String externalOrderId = "TSF-R3-6C-" + threads + "-" + UUID.randomUUID();
+      ingest(
+          OrderIntakeScenarioSupport.orderCreated(
+              JSON, externalOrderId, shopId, null, "COD", listingSku, 1, 1));
+      worker.processAvailable(10);
+      UUID orderId = orderId(shop, externalOrderId);
+      UUID listingId = listingIdFromApi(shop, shopId, account, listingSku);
+      String token = userToken(shopId);
 
-    int threads = ThreadLocalRandom.current().nextInt(2, 6);
-    CountDownLatch start = new CountDownLatch(1);
-    ExecutorService pool = Executors.newFixedThreadPool(threads);
-    try {
-      List<Future<?>> futures = new ArrayList<>();
-      for (int i = 0; i < threads; i++) {
-        final boolean usePut = i % 2 == 0;
-        futures.add(
-            pool.submit(
-                () -> {
-                  start.await(15, TimeUnit.SECONDS);
-                  if (usePut) {
-                    httpPutMapping(token, listingId, sku);
-                  } else {
-                    resolverJob.runScheduledBatch();
-                  }
-                  return null;
-                }));
+      CountDownLatch start = new CountDownLatch(1);
+      ExecutorService pool = Executors.newFixedThreadPool(threads);
+      try {
+        List<Future<?>> futures = new ArrayList<>();
+        for (int i = 0; i < threads; i++) {
+          final boolean usePut = i % 2 == 0;
+          futures.add(
+              pool.submit(
+                  () -> {
+                    start.await(15, TimeUnit.SECONDS);
+                    if (usePut) {
+                      httpPutMapping(token, listingId, sku);
+                    } else {
+                      resolverJob.runScheduledBatch();
+                    }
+                    return null;
+                  }));
+        }
+        start.countDown();
+        for (Future<?> future : futures) {
+          future.get(60, TimeUnit.SECONDS);
+        }
+      } finally {
+        pool.shutdownNow();
       }
-      start.countDown();
-      for (Future<?> future : futures) {
-        future.get(60, TimeUnit.SECONDS);
-      }
-    } finally {
-      pool.shutdownNow();
+
+      assertThat(activeOrderReservations(shop, externalOrderId)).isEqualTo(1);
+      assertThat(reservedLedgerRows(shop, orderId)).isEqualTo(1);
+      assertThat(fulfillmentReadyCount(shop, orderId)).isEqualTo(1);
+      fixture.assertInvariants(shop);
     }
-
-    assertThat(activeOrderReservations(shop, externalOrderId)).isEqualTo(1);
-    assertThat(reservedLedgerRows(shop, orderId)).isEqualTo(1);
-    assertThat(fulfillmentReadyCount(shop, orderId)).isEqualTo(1);
-    fixture.assertInvariants(shop);
   }
 
   @Test
@@ -468,6 +469,21 @@ class OrderHoldResolverT12BRound3AcceptanceTest {
   }
 
   @Test
+  void scenarioTenantIsolationPutMapping404OtherTenant() throws Exception {
+    StockFixture.Shop shopA = fixture.shop("ACTIVE");
+    String shopAId = fixture.tsfShopId(shopA);
+    UUID accountA = fixture.tsfChannelAccount(shopA, "ACTIVE", "CONNECTED");
+    UUID skuA = fixture.sku(shopA, 3);
+    fixture.channelListing(shopA, accountA, "L-iso-put", null, true, false);
+    UUID listingA = listingIdFromApi(shopA, shopAId, accountA, "L-iso-put");
+
+    StockFixture.Shop shopB = fixture.shop("ACTIVE");
+    String shopBId = fixture.tsfShopId(shopB);
+    UUID skuB = fixture.sku(shopB, 3);
+    assertThat(httpPutMapping(userToken(shopBId), listingA, skuB).statusCode()).isEqualTo(404);
+  }
+
+  @Test
   void scenarioBundleComponentlessOutOfStockNoEngineKey() throws Exception {
     StockFixture.Shop shop = fixture.shop("ACTIVE");
     String shopId = fixture.tsfShopId(shop);
@@ -560,7 +576,7 @@ class OrderHoldResolverT12BRound3AcceptanceTest {
   }
 
   @Test
-  void controlModeStubNotStockEnforcedUntilAllowlisted() throws Exception {
+  void controlModeStubMapsAndReservesLikeIntake() throws Exception {
     StockFixture.Shop shop = fixture.shop("ACTIVE");
     String shopId = fixture.tsfShopId(shop);
     UUID account = fixture.tsfChannelAccount(shop, "CONTROL", "CONNECTED");
@@ -604,8 +620,100 @@ class OrderHoldResolverT12BRound3AcceptanceTest {
                     account,
                     listingSku));
     assertThat(stockControlAfter).isFalse();
-    assertThat(activeOrderReservations(shop, externalOrderId)).isZero();
+    assertThat(activeOrderReservations(shop, externalOrderId)).isEqualTo(1);
     assertThat(holdReason(shop, externalOrderId)).isEqualTo("NONE");
+    assertThat(fulfillmentStatus(shop, externalOrderId)).isEqualTo("READY_TO_PICK");
+  }
+
+  @Test
+  void lateMapShadowZeroStockOutOfStockWithShadowDiff() throws Exception {
+    StockFixture.Shop shop = fixture.shop("ACTIVE");
+    String shopId = fixture.tsfShopId(shop);
+    UUID account = fixture.tsfChannelAccount(shop, "SHADOW", "CONNECTED");
+    UUID sku = fixture.sku(shop, 0);
+    fixture.channelListing(shop, account, "L-r4-sh-oos", null, true, false);
+
+    String externalOrderId = "TSF-R4-SH-OOS-" + UUID.randomUUID();
+    ingest(
+        OrderIntakeScenarioSupport.orderCreated(
+            JSON, externalOrderId, shopId, null, "COD", "L-r4-sh-oos", 1, 1));
+    worker.processAvailable(10);
+    assertThat(holdReason(shop, externalOrderId)).isEqualTo("SKU_NOT_MAPPED");
+
+    UUID listingId = listingIdFromApi(shop, shopId, account, "L-r4-sh-oos");
+    assertThat(httpPutMapping(userToken(shopId), listingId, sku).statusCode()).isEqualTo(200);
+
+    assertThat(holdReason(shop, externalOrderId)).isEqualTo("OUT_OF_STOCK");
+    String note = holdNote(shop, externalOrderId);
+    assertThat(note).isNotBlank();
+    assertThat(
+            fixture.inTenant(
+                shop.tenant(),
+                () ->
+                    jdbc.queryForObject(
+                        "SELECT count(*) FROM shadow_diff WHERE kind = 'ORDER' AND ref = ?",
+                        Long.class,
+                        externalOrderId)))
+        .isEqualTo(1);
+  }
+
+  @Test
+  void lateMapComponentlessBundleOutOfStockNoEngineKey() throws Exception {
+    for (String mode : List.of("SHADOW", "CONTROL")) {
+      StockFixture.Shop shop = fixture.shop("ACTIVE");
+      String shopId = fixture.tsfShopId(shop);
+      UUID account = fixture.tsfChannelAccount(shop, mode, "CONNECTED");
+      UUID bundle = fixture.componentlessBundle(shop);
+      String listingSku = "L-r4-bnd-" + mode + "-" + UUID.randomUUID();
+      fixture.channelListing(shop, account, listingSku, null, true, false);
+
+      String externalOrderId = "TSF-R4-BND-" + mode + "-" + UUID.randomUUID();
+      ingest(
+          OrderIntakeScenarioSupport.orderCreated(
+              JSON, externalOrderId, shopId, null, "COD", listingSku, 1, 1));
+      worker.processAvailable(10);
+      assertThat(holdReason(shop, externalOrderId)).isEqualTo("SKU_NOT_MAPPED");
+
+      long keysBefore = ensureHoldKeyCount(shop);
+      UUID listingId = listingIdFromApi(shop, shopId, account, listingSku);
+      assertThat(httpPutMapping(userToken(shopId), listingId, bundle).statusCode()).isEqualTo(200);
+
+      assertThat(holdReason(shop, externalOrderId)).isEqualTo("OUT_OF_STOCK");
+      assertThat(holdNote(shop, externalOrderId))
+          .isEqualTo(com.thaishopfun.oms.order.hold.OrderHoldEffects.BUNDLE_WITHOUT_COMPONENTS_NOTE);
+      assertThat(ensureHoldKeyCount(shop)).isEqualTo(keysBefore);
+      if ("SHADOW".equals(mode)) {
+        assertThat(
+                fixture.inTenant(
+                    shop.tenant(),
+                    () ->
+                        jdbc.queryForObject(
+                            "SELECT count(*) FROM shadow_diff WHERE kind = 'ORDER' AND ref = ?",
+                            Long.class,
+                            externalOrderId)))
+            .isEqualTo(1);
+      }
+    }
+  }
+
+  @Test
+  void lateMapObserveNoneZeroReservations() throws Exception {
+    StockFixture.Shop shop = fixture.shop("ACTIVE");
+    String shopId = fixture.tsfShopId(shop);
+    UUID account = fixture.tsfChannelAccount(shop, "OBSERVE", "CONNECTED");
+    UUID sku = fixture.sku(shop, 5);
+    fixture.channelListing(shop, account, "L-r4-obs", null, true, false);
+
+    String externalOrderId = "TSF-R4-OBS-" + UUID.randomUUID();
+    ingest(
+        OrderIntakeScenarioSupport.orderCreated(
+            JSON, externalOrderId, shopId, null, "COD", "L-r4-obs", 1, 1));
+    worker.processAvailable(10);
+    UUID listingId = listingIdFromApi(shop, shopId, account, "L-r4-obs");
+    assertThat(httpPutMapping(userToken(shopId), listingId, sku).statusCode()).isEqualTo(200);
+
+    assertThat(holdReason(shop, externalOrderId)).isEqualTo("NONE");
+    assertThat(activeOrderReservations(shop, externalOrderId)).isZero();
   }
 
   private record OrderSnapshot(String orderStatus, String fulfillmentStatus, String holdReason) {}
@@ -709,6 +817,16 @@ class OrderHoldResolverT12BRound3AcceptanceTest {
         () ->
             jdbc.queryForObject(
                 "SELECT hold_reason FROM sales_order WHERE external_order_id = ?",
+                String.class,
+                externalOrderId));
+  }
+
+  private String holdNote(StockFixture.Shop shop, String externalOrderId) {
+    return fixture.inTenant(
+        shop.tenant(),
+        () ->
+            jdbc.queryForObject(
+                "SELECT hold_note FROM sales_order WHERE external_order_id = ?",
                 String.class,
                 externalOrderId));
   }

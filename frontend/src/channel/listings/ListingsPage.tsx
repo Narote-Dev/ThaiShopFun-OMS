@@ -67,6 +67,7 @@ export default function ListingsPage({ me }: { me: Me }) {
   const [activeListing, setActiveListing] = useState<ChannelListing | null>(null)
   const [busy, setBusy] = useState(false)
   const searchDebounceBoot = useRef(true)
+  const channelAccountLoadBoot = useRef(false)
 
   const mappedParam = useMemo(() => {
     if (mappedFilter === 'all') return null
@@ -79,7 +80,13 @@ export default function ListingsPage({ me }: { me: Me }) {
       .then((page) => {
         setAccounts(page.items.map((row) => ({ id: row.id, external_shop_id: row.external_shop_id })))
         if (page.items[0]) {
-          setChannelAccountId((current) => current || page.items[0].id)
+          setChannelAccountId((current) => {
+            if (!current) {
+              channelAccountLoadBoot.current = true
+              return page.items[0].id
+            }
+            return current
+          })
         }
       })
       .catch(() => setAccounts([]))
@@ -102,6 +109,13 @@ export default function ListingsPage({ me }: { me: Me }) {
     const timer = window.setTimeout(() => {
       if (searchDebounceBoot.current) {
         searchDebounceBoot.current = false
+        if (searchDraft !== q) {
+          setQ(searchDraft)
+        }
+        return
+      }
+      if (channelAccountLoadBoot.current) {
+        channelAccountLoadBoot.current = false
         if (searchDraft !== q) {
           setQ(searchDraft)
         }

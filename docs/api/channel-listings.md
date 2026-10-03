@@ -13,7 +13,7 @@ User JWT (`aud=oms`). Paths under `/api/v1`. JSON snake_case. `Cache-Control: no
 
 Returns `{items, total, limit, offset}`. Each item includes mapping fields (`seller_sku`, `sku_id`, `mapping_source`, `mapped_at`), `removed_at` when the channel marked the listing deleted, `stock_control` (CONTROL allowlist), and `held_orders` (count of active orders on hold for that listing). Removed rows remain visible in list/count (UI shows a removed badge).
 
-Intake stubs (`ensureStub` for unknown `external_sku_id`) insert with `stock_control=false` until T40 explicitly allowlists the SKU.
+Intake stubs (`ensureStub` for unknown `external_sku_id`) insert with `stock_control=false` until T40 explicitly allowlists the SKU. `stock_control` affects checkout enforcement and CONTROL oversell metrics only; intake and hold resolution still reserve all mapped lines when the account mode enforces stock.
 
 `GET /channel-listings/{id}` — single listing.
 

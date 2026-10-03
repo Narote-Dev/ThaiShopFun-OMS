@@ -117,6 +117,19 @@ class ChannelListingApiTest extends OrderIntegrationTest {
   }
 
   @Test
+  void putMappingOtherTenantListingReturns404() throws Exception {
+    CatalogHttp.Shop other = http.catalog().shop();
+    assertThat(
+            http.catalog()
+                .put(
+                    "/api/v1/channel-listings/" + listingId + "/mapping",
+                    other.owner(),
+                    java.util.Map.of("sku_id", skuId.toString()))
+                .status())
+        .isEqualTo(404);
+  }
+
+  @Test
   void listReturnsTenantListingsOverHttp() throws Exception {
     CatalogHttp.Result response =
         http.get(

@@ -135,11 +135,7 @@ public class OrderHoldResolver {
     List<HoldLine> holdLines = holdLines(order);
     boolean hasUnmapped = holdLines.stream().anyMatch(line -> !line.mapped());
     List<ReserveItem> reserveItems =
-        holdLines.stream()
-            .filter(HoldLine::mapped)
-            .filter(line -> reserveEnforced(tsf, line))
-            .map(HoldLine::reserveItem)
-            .toList();
+        holdLines.stream().filter(HoldLine::mapped).map(HoldLine::reserveItem).toList();
     boolean stockEnforced = OrderStockEnforcement.enforced(tsf.mode(), tsf.status());
     Instant now = clock.instant();
     if (hasUnmapped) {
@@ -255,19 +251,6 @@ public class OrderHoldResolver {
     } catch (NoSuchAlgorithmException ex) {
       throw new IllegalStateException("SHA-256 is not available", ex);
     }
-  }
-
-  private static boolean reserveEnforced(TsfAccount account, HoldLine line) {
-    if ("SHADOW".equals(account.mode()) || "OBSERVE".equals(account.mode())) {
-      return false;
-    }
-    if ("ACTIVE".equals(account.mode())) {
-      return true;
-    }
-    if ("CONTROL".equals(account.mode())) {
-      return line.stockControl();
-    }
-    return false;
   }
 
   private List<HoldLine> holdLines(SalesOrder order) {

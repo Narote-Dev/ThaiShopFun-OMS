@@ -109,11 +109,21 @@ public final class OrderViews {
       RecipientView recipient,
       List<TimelineEntry> timeline) {}
 
+  public record ChannelAccountHoldCount(
+      @JsonProperty("channel_account_id") UUID channelAccountId, long count) {}
+
   public record HoldGroup(
       @JsonProperty("hold_reason") String holdReason,
       @JsonProperty("hold_detail") String holdDetail,
       long count,
-      List<HoldSample> samples) {}
+      List<HoldSample> samples,
+      @JsonProperty("channel_account_counts") List<ChannelAccountHoldCount> channelAccountCounts) {
+
+    public HoldGroup(
+        String holdReason, String holdDetail, long count, List<HoldSample> samples) {
+      this(holdReason, holdDetail, count, samples, List.of());
+    }
+  }
 
   public record HoldSample(
       UUID id,

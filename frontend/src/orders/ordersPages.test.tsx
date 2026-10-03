@@ -198,4 +198,36 @@ describe('HoldQueuePage', () => {
     expect(await screen.findByRole('link', { name: 'DEMO-OOS' })).toHaveAttribute('href', '#/orders/o-h')
     expect(screen.getByRole('table', { name: 'Hold groups' })).toHaveTextContent('OUT_OF_STOCK')
   })
+
+  it('renders per-channel map links for SKU_NOT_MAPPED', async () => {
+    const { fetchImpl } = stubFetch(() => ({
+      body: {
+        groups: [
+          {
+            hold_reason: 'SKU_NOT_MAPPED',
+            hold_detail: null,
+            count: 5,
+            samples: [
+              {
+                id: 'o1',
+                external_order_id: 'DEMO-1',
+                channel_account_id: 'ca-a',
+                ordered_at: '2026-01-01T00:00:00Z',
+              },
+            ],
+            channel_account_counts: [
+              { channel_account_id: 'ca-a', count: 3 },
+              { channel_account_id: 'ca-b', count: 2 },
+            ],
+          },
+        ],
+      },
+    }))
+    configureApi({ getAccessToken: () => 't', fetchImpl })
+    render(<HoldQueuePage />)
+    const linkA = await screen.findByRole('link', { name: 'Map unmapped listings (3)' })
+    const linkB = screen.getByRole('link', { name: 'Map unmapped listings (2)' })
+    expect(linkA).toHaveAttribute('href', '#/channel/listings?channel_account_id=ca-a&mapped=false')
+    expect(linkB).toHaveAttribute('href', '#/channel/listings?channel_account_id=ca-b&mapped=false')
+  })
 })
