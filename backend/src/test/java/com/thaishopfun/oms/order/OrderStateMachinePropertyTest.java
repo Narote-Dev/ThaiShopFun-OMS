@@ -148,6 +148,10 @@ class OrderStateMachinePropertyTest {
       return false;
     }
     if (from.equals(to) && !"HOLD".equals(dimension)) {
+      if ("FULFILLMENT".equals(dimension)
+          && ("CANCELLED".equals(orderStatus) || "COMPLETED".equals(orderStatus))) {
+        return false;
+      }
       return true;
     }
     if ("ORDER".equals(dimension) && "CANCELLED".equals(orderStatus) && !"CANCELLED".equals(to)) {
