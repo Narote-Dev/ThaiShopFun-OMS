@@ -556,11 +556,15 @@ public class OrderIntakeSupport {
   private Set<UUID> missingSkuIdsForUnknownSku(
       StockOperationException ex, List<ReserveItem> items) {
     String message = ex.getMessage();
-    if (message != null && message.startsWith("unknown sku ")) {
-      try {
-        return Set.of(UUID.fromString(message.substring("unknown sku ".length()).trim()));
-      } catch (IllegalArgumentException ignored) {
-        // fall through
+    if (message != null) {
+      int marker = message.indexOf("unknown sku ");
+      if (marker >= 0) {
+        try {
+          return Set.of(
+              UUID.fromString(message.substring(marker + "unknown sku ".length()).trim()));
+        } catch (IllegalArgumentException ignored) {
+          // fall through
+        }
       }
     }
     return missingCatalogSkuIds(items.stream().map(ReserveItem::skuId).toList());
