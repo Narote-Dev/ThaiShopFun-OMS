@@ -34,6 +34,28 @@ public class ChannelListingRepository {
     this.jdbc = jdbc;
   }
 
+  /** Ensures a listing row exists for intake / demo lines that reference an external sku id. */
+  public void ensureStub(
+      UUID tenantId, UUID channelAccountId, String externalSkuId, String sellerSku, String name) {
+    jdbc.update(
+        """
+        INSERT INTO channel_listing (
+          id, tenant_id, channel_account_id, external_sku_id, seller_sku, name, stock_control, removed_at
+        ) VALUES (?, ?, ?, ?, ?, ?, true, NULL)
+        ON CONFLICT (channel_account_id, external_sku_id) DO UPDATE SET
+          seller_sku = COALESCE(EXCLUDED.seller_sku, channel_listing.seller_sku),
+          name = COALESCE(EXCLUDED.name, channel_listing.name),
+          removed_at = NULL,
+          updated_at = now()
+        """,
+        UuidV7.generate(),
+        tenantId,
+        channelAccountId,
+        externalSkuId,
+        sellerSku,
+        name);
+  }
+
   public Optional<ListingRow> findById(UUID id) {
     List<ListingRow> rows =
         jdbc.query(

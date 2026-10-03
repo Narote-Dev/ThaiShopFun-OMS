@@ -5,6 +5,7 @@ import com.thaishopfun.oms.inbox.InboxDeferException;
 import com.thaishopfun.oms.inbox.InboxMessage;
 import com.thaishopfun.oms.inbox.InboxProperties;
 import com.thaishopfun.oms.inbox.NonRetryableInboxException;
+import com.thaishopfun.oms.listing.ChannelListingRepository;
 import com.thaishopfun.oms.order.ChannelAccountLookup;
 import com.thaishopfun.oms.order.ChannelAccountLookup.TsfAccount;
 import com.thaishopfun.oms.order.OrderIntakeHooks;
@@ -68,6 +69,7 @@ public class OrderIntakeSupport {
   private final ShadowDiffRepository shadowDiff;
   private final OrderIntakeHooks hooks;
   private final OrderHoldEffects holdEffects;
+  private final ChannelListingRepository listings;
   private final OrderProperties orderProperties;
   private final InboxProperties inboxProperties;
   private final JdbcTemplate jdbc;
@@ -86,6 +88,7 @@ public class OrderIntakeSupport {
       ShadowDiffRepository shadowDiff,
       OrderIntakeHooks hooks,
       OrderHoldEffects holdEffects,
+      ChannelListingRepository listings,
       OrderProperties orderProperties,
       InboxProperties inboxProperties,
       JdbcTemplate jdbc,
@@ -102,6 +105,7 @@ public class OrderIntakeSupport {
     this.shadowDiff = shadowDiff;
     this.hooks = hooks;
     this.holdEffects = holdEffects;
+    this.listings = listings;
     this.orderProperties = orderProperties;
     this.inboxProperties = inboxProperties;
     this.jdbc = jdbc;
@@ -158,7 +162,8 @@ public class OrderIntakeSupport {
             0);
     orders.insert(order);
     recipients.insert(orderId, payload.recipient(), payload.redactAfter());
-    List<LineMapping> mapped = insertLines(orderId, account.id(), payload.lines());
+    List<LineMapping> mapped =
+        insertLines(message.tenantId(), orderId, account.id(), payload.lines());
 
     boolean stockEnforced = stockEnforced(account);
     Instant holdExpires = null;
@@ -349,8 +354,13 @@ public class OrderIntakeSupport {
   }
 
   private List<LineMapping> insertLines(
-      UUID orderId, UUID channelAccountId, List<CreatedLine> payloadLines) {
+      UUID tenantId, UUID orderId, UUID channelAccountId, List<CreatedLine> payloadLines) {
     List<LineMapping> mapped = new ArrayList<>();
+    for (CreatedLine line : payloadLines) {
+      // Step 1: Stub channel_listing so unmapped lines are visible to mapping UI and resolver.
+      listings.ensureStub(
+          tenantId, channelAccountId, line.listingSkuId(), line.sellerSku(), line.name());
+    }
     for (CreatedLine line : payloadLines) {
       UUID skuId = lookupSku(channelAccountId, line.listingSkuId());
       UUID lineId = UuidV7.generate();

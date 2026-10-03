@@ -71,7 +71,17 @@ public class OrderDemoCatalogService {
     stock(shop, oos, 0);
     stock(shop, component, 50);
     List<UUID> tsfAccounts = listTsfChannelAccounts(shop.tenantId());
-    for (UUID channelAccountId : tsfAccounts) {
+    List<UUID> demoOrderAccounts =
+        jdbc.query(
+            """
+            SELECT DISTINCT so.channel_account_id
+            FROM sales_order so
+            WHERE so.tenant_id = ? AND so.external_order_id LIKE 'DEMO-%'
+            """,
+            (rs, rowNum) -> rs.getObject("channel_account_id", UUID.class), shop.tenantId());
+    java.util.LinkedHashSet<UUID> allAccounts = new java.util.LinkedHashSet<>(tsfAccounts);
+    allAccounts.addAll(demoOrderAccounts);
+    for (UUID channelAccountId : allAccounts) {
       ensureListing(
           shop, channelAccountId, "L-demo-ready", ready, true, "DEMO-SKU-READY", "Demo ready");
       ensureListing(shop, channelAccountId, "L-demo-cod", cod, true, "DEMO-SKU-COD", "Demo COD");
