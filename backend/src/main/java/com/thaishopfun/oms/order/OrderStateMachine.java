@@ -96,15 +96,15 @@ public class OrderStateMachine {
       String actor,
       Instant paidAt,
       GuardContext guards) {
-    requireMutable(order);
     requireAllowed("PAYMENT", to);
     requireTransition("PAYMENT", order.paymentStatus(), to);
+    requireRefundOnlyPaymentOnTerminalOrder(order, to);
     return persist(order, "PAYMENT", order.paymentStatus(), to, reason, actor, null, paidAt, null);
   }
 
   public TransitionResult applyFulfillmentStatus(
       SalesOrder order, String to, String reason, String actor, GuardContext guards) {
-    requireMutable(order);
+    requireFulfillmentAndHoldMutable(order);
     requireAllowed("FULFILLMENT", to);
     requireTransition("FULFILLMENT", order.fulfillmentStatus(), to);
     if (!"NONE".equals(order.holdReason()) && !to.equals(order.fulfillmentStatus())) {
@@ -119,7 +119,7 @@ public class OrderStateMachine {
 
   public TransitionResult applyHoldReason(
       SalesOrder order, String to, String holdNote, String reason, String actor) {
-    requireMutable(order);
+    requireFulfillmentAndHoldMutable(order);
     requireAllowed("HOLD", to);
     requireTransition("HOLD", order.holdReason(), to);
     if (!Objects.equals(to, order.holdReason())) {
@@ -131,9 +131,29 @@ public class OrderStateMachine {
     return new TransitionResult(order, false);
   }
 
-  private static void requireMutable(SalesOrder order) {
+  /**
+   * Fulfillment and hold are frozen on terminal order statuses; payment refunds may still apply.
+   */
+  private static void requireFulfillmentAndHoldMutable(SalesOrder order) {
     if ("CANCELLED".equals(order.orderStatus())) {
-      throw new OrderStateException("cancelled order is immutable");
+      throw new OrderStateException("cancelled order is immutable for fulfillment and hold");
+    }
+    if ("COMPLETED".equals(order.orderStatus())) {
+      throw new OrderStateException("completed order is immutable for fulfillment and hold");
+    }
+  }
+
+  /** On terminal orders, payment may only move into refund states (self no-op is allowed). */
+  private static void requireRefundOnlyPaymentOnTerminalOrder(SalesOrder order, String to) {
+    if (!"CANCELLED".equals(order.orderStatus()) && !"COMPLETED".equals(order.orderStatus())) {
+      return;
+    }
+    if (order.paymentStatus().equals(to)) {
+      return;
+    }
+    if (!Set.of("PARTIALLY_REFUNDED", "REFUNDED").contains(to)) {
+      throw new OrderStateException(
+          "cancelled or completed order is immutable for non-refund payment");
     }
   }
 
@@ -225,6 +245,9 @@ public class OrderStateMachine {
   }
 
   private static void guardReadyToPick(SalesOrder order, GuardContext guards) {
+    if (!"ACTIVE".equals(order.orderStatus())) {
+      throw new OrderStateException("READY_TO_PICK requires ACTIVE order");
+    }
     if (!Set.of("PAID", "COD_PENDING").contains(order.paymentStatus())) {
       throw new OrderStateException("READY_TO_PICK requires PAID or COD_PENDING payment");
     }

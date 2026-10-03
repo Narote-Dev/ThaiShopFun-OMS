@@ -113,6 +113,19 @@ final class OrderIntakeScenarioSupport {
     return event;
   }
 
+  static ObjectNode orderUpdated(
+      JsonMapper json, String orderId, String shopId, long aggregateVersion) throws IOException {
+    ObjectNode event = loadExample(json, "order.updated.json");
+    event.put("event_id", "evt-" + java.util.UUID.randomUUID());
+    event.put("tsf_shop_id", shopId);
+    event.put("aggregate_id", orderId);
+    event.put("aggregate_version", aggregateVersion);
+    event.put("occurred_at", Instant.now().truncatedTo(ChronoUnit.SECONDS).toString());
+    ((ObjectNode) event.get("data")).put("order_id", orderId);
+    assertThat(CONTRACT.envelopeErrors(json.writeValueAsString(event))).isEmpty();
+    return event;
+  }
+
   static ObjectNode orderCancelled(
       JsonMapper json, String orderId, String shopId, long aggregateVersion) throws IOException {
     ObjectNode event = loadExample(json, "order.cancelled.json");
