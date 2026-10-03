@@ -102,8 +102,7 @@ public class DemoOrdersController {
     event.put("occurred_at", Instant.now().truncatedTo(ChronoUnit.SECONDS).toString());
     ObjectNode data = (ObjectNode) event.get("data");
     data.put("order_id", orderId);
-    UUID reservationId =
-        DEMO_RESERVATION_IDS.getOrDefault(orderId, UUID.randomUUID());
+    UUID reservationId = DEMO_RESERVATION_IDS.getOrDefault(orderId, UUID.randomUUID());
     data.put("reservation_id", reservationId.toString());
     data.put("payment_method", payment);
     ArrayNode lines = json.createArrayNode();

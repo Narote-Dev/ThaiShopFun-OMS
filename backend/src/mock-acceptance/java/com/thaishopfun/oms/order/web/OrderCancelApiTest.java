@@ -270,20 +270,10 @@ class OrderCancelApiTest extends OrderIntegrationTest {
             1));
     ingest(
         orderCreated(
-            "DEMO-COD",
-            shop,
-            "a0000002-0002-4002-8002-000000000002",
-            "COD",
-            "L-demo-cod",
-            2));
+            "DEMO-COD", shop, "a0000002-0002-4002-8002-000000000002", "COD", "L-demo-cod", 2));
     ingest(
         orderCreated(
-            "DEMO-OOS",
-            shop,
-            "a0000003-0003-4003-8003-000000000003",
-            "COD",
-            "L-demo-oos",
-            3));
+            "DEMO-OOS", shop, "a0000003-0003-4003-8003-000000000003", "COD", "L-demo-oos", 3));
     ingest(
         orderCreated(
             "DEMO-UNMAPPED",
@@ -321,15 +311,10 @@ class OrderCancelApiTest extends OrderIntegrationTest {
 
     assertDemoOrder("DEMO-READY", "READY_TO_PICK", "PAID", "NONE", null);
     assertDemoOrder("DEMO-COD", "READY_TO_PICK", "COD_PENDING", "NONE", null);
-    assertDemoOrder(
-        "DEMO-OOS", "UNFULFILLED", "COD_PENDING", "OUT_OF_STOCK", null);
+    assertDemoOrder("DEMO-OOS", "UNFULFILLED", "COD_PENDING", "OUT_OF_STOCK", null);
     assertDemoOrder("DEMO-UNMAPPED", "UNFULFILLED", "COD_PENDING", "SKU_NOT_MAPPED", null);
     assertDemoOrder(
-        "DEMO-BUNDLE",
-        "UNFULFILLED",
-        "COD_PENDING",
-        "OUT_OF_STOCK",
-        "bundle has no components");
+        "DEMO-BUNDLE", "UNFULFILLED", "COD_PENDING", "OUT_OF_STOCK", "bundle has no components");
     assertDemoOrderStatus("DEMO-CANCELLED", "CANCELLED");
   }
 
