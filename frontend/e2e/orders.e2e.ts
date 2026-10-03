@@ -83,68 +83,58 @@ test('owner browses orders, opens detail with masked phone, requests cancel', as
   await expect(page.getByRole('status')).toContainText('CHANNEL_CANCEL_PENDING', { timeout: 30_000 })
 })
 
-test('owner maps unmapped listing and order becomes ready to pick', async ({ page, request }) => {
-  test.setTimeout(240_000)
+test('owner maps unmapped listing via listings UI and order becomes ready to pick', async ({
+  page,
+  request,
+}) => {
+  test.setTimeout(300_000)
   const token = await ownerToken(request)
-  const me = await request.get('http://127.0.0.1:8080/api/v1/me', {
-    headers: { Authorization: `Bearer ${token}` },
-  })
-  expect(me.ok()).toBeTruthy()
+  await page.goto('/')
+  await page.getByRole('link', { name: /^Active Shop/ }).click()
+
   const seed = await request.post('http://127.0.0.1:8090/control/demo/orders-seed')
   expect(seed.ok()).toBeTruthy()
 
-  let heldOrder: { external_order_id: string; channel_account_id: string } | undefined
+  let channelAccountId = ''
   await expect
     .poll(
       async () => {
+        const catalog = await request.post('http://127.0.0.1:8080/control/demo/order-catalog')
+        if (!catalog.ok()) return 0
         const ordersResponse = await request.get(
-          'http://127.0.0.1:8080/api/v1/orders?hold_reason=SKU_NOT_MAPPED&limit=10',
+          'http://127.0.0.1:8080/api/v1/orders?hold_reason=SKU_NOT_MAPPED&limit=20',
           { headers: { Authorization: `Bearer ${token}` } },
         )
         if (!ordersResponse.ok()) return 0
-        heldOrder = (await ordersResponse.json()).items.find(
+        const held = (await ordersResponse.json()).items.find(
           (row: { external_order_id: string }) => row.external_order_id === 'DEMO-UNMAPPED',
-        )
-        return heldOrder ? 1 : 0
+        ) as { channel_account_id: string } | undefined
+        if (!held) return 0
+        channelAccountId = held.channel_account_id
+        const body = await catalog.json()
+        return body.L_demo_missing_listing_id ? 1 : 0
       },
-      { timeout: 120_000, intervals: [2000] },
+      { timeout: 180_000, intervals: [3000] },
     )
     .toBeGreaterThan(0)
 
-  const catalog = await request.post('http://127.0.0.1:8080/control/demo/order-catalog')
-  expect(catalog.ok()).toBeTruthy()
-
-  const skuResponse = await request.get(
-    'http://127.0.0.1:8080/api/v1/skus?q=DEMO-SKU-READY&limit=10',
-    { headers: { Authorization: `Bearer ${token}` } },
+  await page.goto(
+    `/#/channel/listings?channel_account_id=${channelAccountId}&mapped=false&q=L-demo-missing`,
   )
-  expect(skuResponse.ok()).toBeTruthy()
-  const readySku = (await skuResponse.json()).items.find(
-    (row: { sku_code: string }) => row.sku_code === 'DEMO-SKU-READY',
-  )
-  expect(readySku).toBeTruthy()
+  await expect(page.getByRole('heading', { name: 'Channel listings' })).toBeVisible()
+  await expect(page.getByText('L-demo-missing')).toBeVisible({ timeout: 60_000 })
+  await page.getByRole('button', { name: 'Map' }).first().click()
+  await page.getByLabel('SKU search').fill('DEMO-SKU-READY')
+  await expect(page.getByRole('button', { name: /DEMO-SKU-READY/ })).toBeVisible({
+    timeout: 30_000,
+  })
+  await page.getByRole('button', { name: /DEMO-SKU-READY/ }).click()
+  await page.getByRole('button', { name: 'Save mapping' }).click()
+  await expect(page.getByText(/released 1/)).toBeVisible({ timeout: 90_000 })
 
-  const catalogBody = await catalog.json()
-  const listingId = catalogBody.L_demo_missing_listing_id as string
-  expect(listingId.length).toBeGreaterThan(0)
-
-  const mapResponse = await request.put(
-    `http://127.0.0.1:8080/api/v1/channel-listings/${listingId}/mapping`,
-    {
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      data: { sku_id: readySku.id },
-    },
-  )
-  if (!mapResponse.ok()) {
-    throw new Error(`mapping failed: ${mapResponse.status()} ${await mapResponse.text()}`)
-  }
-  expect((await mapResponse.json()).reevaluation.released).toBeGreaterThanOrEqual(1)
-
-  await page.goto('/')
-  await page.getByRole('link', { name: /^Active Shop/ }).click()
-  await page.getByRole('link', { name: 'Orders', exact: true }).click()
+  await page.getByRole('link', { name: '← Orders' }).click()
   await page.getByLabel('Search').fill('DEMO-UNMAPPED')
   await page.getByRole('button', { name: 'Apply' }).click()
   await page.getByRole('link', { name: 'DEMO-UNMAPPED' }).click()
-  await expect(page.getByText('READY_TO_PICK')).toBeVisible({ timeout: 60_000 })
+  await expect(page.getByText('READY_TO_PICK')).toBeVisible({ timeout: 90_000 })
 })
