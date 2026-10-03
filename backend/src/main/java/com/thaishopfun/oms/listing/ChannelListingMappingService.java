@@ -39,7 +39,7 @@ public class ChannelListingMappingService {
       return new ChannelListingViews.MappingPutResponse(
           ChannelListingViews.from(before), toView(ReevalSummary.zero()));
     }
-    ensureSku(skuId);
+    tx.read(() -> ensureSku(skuId));
     UUID channelAccountId = before.channelAccountId();
     String externalSkuId = before.externalSkuId();
     tx.write(
@@ -71,6 +71,7 @@ public class ChannelListingMappingService {
   }
 
   private void ensureSku(UUID skuId) {
+    // Step 1: SKU lookup must run under a tenant-scoped transaction (RLS).
     Long count = jdbc.queryForObject("SELECT count(*) FROM sku WHERE id = ?", Long.class, skuId);
     if (count == null || count == 0) {
       throw new ListingApiException(404, "NOT_FOUND", "SKU not found");

@@ -126,7 +126,9 @@ test('owner maps unmapped listing and order becomes ready to pick', async ({ pag
       data: { sku_id: readySku.id },
     },
   )
-  expect(mapResponse.ok()).toBeTruthy()
+  if (!mapResponse.ok()) {
+    throw new Error(`mapping failed: ${mapResponse.status()} ${await mapResponse.text()}`)
+  }
   expect((await mapResponse.json()).reevaluation.released).toBeGreaterThanOrEqual(1)
 
   await page.goto('/')
