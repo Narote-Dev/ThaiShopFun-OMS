@@ -60,7 +60,8 @@ public class OrderHoldRecheckService {
         && !"OUT_OF_STOCK".equals(before.holdReason())) {
       throw OrderApiException.conflict("HOLD_NOT_RECHECKABLE", "Order hold is not recheckable");
     }
-    ReevalSummary summary = tx.write(() -> resolverJob.resolveOrderRecheck(orderId));
+    ReevalSummary summary =
+        tx.write(() -> resolverJob.resolveOrderRecheck(orderId, idempotencyKeyHeader.trim()));
     SalesOrder after = orders.findById(orderId).orElseThrow();
     audit.write(
         actor,

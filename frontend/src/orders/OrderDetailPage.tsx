@@ -28,6 +28,24 @@ export default function OrderDetailPage({ id, me }: { id: string; me: Me }) {
     }
   }, [id])
 
+  async function holdRecheck() {
+    if (!order) return
+    const ok = window.confirm('Re-check hold and try to reserve stock again?')
+    if (!ok) return
+    setBusy(true)
+    setError('')
+    try {
+      const key = `ui-${Date.now()}`
+      await ordersApi.holdRecheck(order.id, key)
+      const refreshed = await ordersApi.detail(id)
+      setOrder(refreshed)
+    } catch (err: unknown) {
+      setError(ordersMessage(err, 'Re-check failed'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   async function requestCancel() {
     if (!order) return
     const ok = window.confirm('Send a cancel request to the sales channel?')
@@ -54,6 +72,7 @@ export default function OrderDetailPage({ id, me }: { id: string; me: Me }) {
   }
 
   const showCancel = access.canRequestCancel(order)
+  const showRecheck = access.canHoldRecheck(order)
   return (
     <main className="wide">
       <p><a href="#/orders">← Orders</a></p>
@@ -110,7 +129,13 @@ export default function OrderDetailPage({ id, me }: { id: string; me: Me }) {
                 <td>{line.name}</td>
                 <td>{line.qty}</td>
                 <td>
-                  {line.mapped ? 'Mapped' : 'Not mapped'}
+                  {line.mapped ? (
+                    'Mapped'
+                  ) : (
+                    <a href={`#/channel/listings?mapped=false&q=${encodeURIComponent(line.external_sku_id)}`}>
+                      Not mapped
+                    </a>
+                  )}
                   {line.bundle && line.components.length > 0 ? (
                     <ul>
                       {line.components.map((c) => (
@@ -161,6 +186,13 @@ export default function OrderDetailPage({ id, me }: { id: string; me: Me }) {
           ))}
         </ol>
       </section>
+      {showRecheck ? (
+        <section aria-label="Hold recheck">
+          <button type="button" disabled={busy} onClick={() => void holdRecheck()}>
+            Re-check hold
+          </button>
+        </section>
+      ) : null}
       {showCancel ? (
         <section aria-label="Request cancel">
           <h2>Request cancel</h2>

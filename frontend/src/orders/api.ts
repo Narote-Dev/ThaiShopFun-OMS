@@ -133,6 +133,19 @@ export const ordersApi = {
       body: JSON.stringify({ reason }),
     })
   },
+  holdRecheck(id: string, idempotencyKey: string): Promise<{
+    id: string
+    hold_reason: string
+    released: number
+    out_of_stock: number
+    still_held: number
+  }> {
+    return apiRequest(`/api/v1/orders/${id}/hold-rechecks`, {
+      method: 'POST',
+      headers: { 'Idempotency-Key': idempotencyKey },
+      body: '{}',
+    })
+  },
 }
 
 export function ordersMessage(err: unknown, fallback: string): string {

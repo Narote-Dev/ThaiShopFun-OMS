@@ -17,7 +17,12 @@ public class OrderHoldResolverJob {
 
   private static final Logger log = LoggerFactory.getLogger(OrderHoldResolverJob.class);
 
-  public record ReevalSummary(int released, int outOfStock, int stillHeld, int deferred) {}
+  public record ReevalSummary(int released, int outOfStock, int stillHeld, int deferred) {
+
+    public static ReevalSummary zero() {
+      return new ReevalSummary(0, 0, 0, 0);
+    }
+  }
 
   private final OrderHoldResolver resolver;
   private final ChannelListingRepository listings;
@@ -48,7 +53,7 @@ public class OrderHoldResolverJob {
     if (orderIds.size() > cap) {
       orderIds = orderIds.subList(0, cap);
     }
-    return resolveOrders(tenantId, orderIds, deferred, "order.remap");
+    return resolveOrders(tenantId, orderIds, deferred, "order.remap", null);
   }
 
   public int runScheduledBatch() {
@@ -65,7 +70,7 @@ public class OrderHoldResolverJob {
         TenantContext.set(tenantId, null);
         try {
           List<UUID> orderIds = listings.findHeldOrderIds(tenantId, properties.getBatchSize());
-          ReevalSummary summary = resolveOrders(tenantId, orderIds, 0, "order.remap");
+          ReevalSummary summary = resolveOrders(tenantId, orderIds, 0, "order.remap", null);
           processed += summary.released() + summary.outOfStock() + summary.stillHeld();
         } catch (RuntimeException ex) {
           log.error("hold resolver failed for tenant {}", tenantId, ex);
@@ -79,18 +84,24 @@ public class OrderHoldResolverJob {
     return processed;
   }
 
-  public ReevalSummary resolveOrderRecheck(UUID orderId) {
+  public ReevalSummary resolveOrderRecheck(UUID orderId, String clientIdempotencyKey) {
     UUID tenantId = TenantContext.requireTenantId();
-    return resolveOrders(tenantId, List.of(orderId), 0, "order.recheck");
+    return resolveOrders(
+        tenantId, List.of(orderId), 0, "order.recheck", clientIdempotencyKey);
   }
 
   private ReevalSummary resolveOrders(
-      UUID tenantId, List<UUID> orderIds, int deferred, String keyPrefix) {
+      UUID tenantId,
+      List<UUID> orderIds,
+      int deferred,
+      String keyPrefix,
+      String recheckIdempotencyKey) {
     int released = 0;
     int outOfStock = 0;
     int stillHeld = 0;
     for (UUID orderId : orderIds) {
-      Outcome outcome = resolveOneWithRetries(tenantId, orderId, keyPrefix);
+      Outcome outcome =
+          resolveOneWithRetries(tenantId, orderId, keyPrefix, recheckIdempotencyKey);
       switch (outcome) {
         case RELEASED -> released++;
         case OUT_OF_STOCK -> outOfStock++;
@@ -102,12 +113,13 @@ public class OrderHoldResolverJob {
     return new ReevalSummary(released, outOfStock, stillHeld, deferred);
   }
 
-  private Outcome resolveOneWithRetries(UUID tenantId, UUID orderId, String keyPrefix) {
+  private Outcome resolveOneWithRetries(
+      UUID tenantId, UUID orderId, String keyPrefix, String recheckIdempotencyKey) {
     int attempts = properties.getLockRetries();
     for (int attempt = 1; attempt <= attempts; attempt++) {
       try {
         return tenantTx.execute(
-            status -> resolver.resolveHeldOrder(orderId, keyPrefix));
+            status -> resolver.resolveHeldOrder(orderId, keyPrefix, recheckIdempotencyKey));
       } catch (RuntimeException ex) {
         if (OrderHoldResolver.retryableLock(ex) && attempt < attempts) {
           continue;

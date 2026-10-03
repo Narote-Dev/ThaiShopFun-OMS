@@ -1,6 +1,7 @@
 package com.thaishopfun.oms.listing;
 
-import com.thaishopfun.oms.order.hold.ListingHoldHooks;
+import com.thaishopfun.oms.order.hold.OrderHoldResolverJob;
+import com.thaishopfun.oms.order.hold.OrderHoldResolverJob.ReevalSummary;
 import java.util.UUID;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -12,7 +13,7 @@ public class ChannelListingMappingService {
   private final ListingTransactions tx;
   private final ChannelListingRepository listings;
   private final ListingAudit audit;
-  private final ListingHoldHooks holdHooks;
+  private final OrderHoldResolverJob resolverJob;
   private final JdbcTemplate jdbc;
 
   public ChannelListingMappingService(
@@ -20,29 +21,37 @@ public class ChannelListingMappingService {
       ListingTransactions tx,
       ChannelListingRepository listings,
       ListingAudit audit,
-      ListingHoldHooks holdHooks,
+      OrderHoldResolverJob resolverJob,
       JdbcTemplate jdbc) {
     this.access = access;
     this.tx = tx;
     this.listings = listings;
     this.audit = audit;
-    this.holdHooks = holdHooks;
+    this.resolverJob = resolverJob;
     this.jdbc = jdbc;
   }
 
-  public ChannelListingViews.ListingView putMapping(UUID listingId, UUID skuId) {
+  public ChannelListingViews.MappingPutResponse putMapping(UUID listingId, UUID skuId) {
     ChannelListingAccess.Actor actor = access.requireWriter();
-    return tx.write(
+    ChannelListingRepository.ListingRow before =
+        tx.read(() -> listings.findById(listingId).orElseThrow(ListingApiException::notFound));
+    if (skuId.equals(before.skuId())) {
+      return new ChannelListingViews.MappingPutResponse(
+          ChannelListingViews.from(before), toView(ReevalSummary.zero()));
+    }
+    ensureSku(skuId);
+    UUID channelAccountId = before.channelAccountId();
+    String externalSkuId = before.externalSkuId();
+    tx.write(
         () -> {
-          ChannelListingRepository.ListingRow row =
-              listings.findById(listingId).orElseThrow(ListingApiException::notFound);
-          ensureSku(skuId);
-          UUID previous = row.skuId();
           listings.putManualMapping(listingId, skuId);
           audit.mapped(actor, listingId, skuId);
-          holdHooks.afterMappingCommit(row.channelAccountId(), row.externalSkuId());
-          return ChannelListingViews.from(listings.findById(listingId).orElseThrow());
+          return null;
         });
+    ReevalSummary summary = resolverJob.reevalAfterMapping(channelAccountId, externalSkuId);
+    ChannelListingRepository.ListingRow after =
+        tx.read(() -> listings.findById(listingId).orElseThrow(ListingApiException::notFound));
+    return new ChannelListingViews.MappingPutResponse(ChannelListingViews.from(after), toView(summary));
   }
 
   public ChannelListingViews.ListingView deleteMapping(UUID listingId) {
@@ -53,16 +62,22 @@ public class ChannelListingMappingService {
               listings.findById(listingId).orElseThrow(ListingApiException::notFound);
           UUID previous = row.skuId();
           listings.clearMapping(listingId);
-          audit.unmapped(actor, listingId, previous);
+          if (previous != null) {
+            audit.unmapped(actor, listingId, previous);
+          }
           return ChannelListingViews.from(listings.findById(listingId).orElseThrow());
         });
   }
 
   private void ensureSku(UUID skuId) {
-    Long count =
-        jdbc.queryForObject("SELECT count(*) FROM sku WHERE id = ?", Long.class, skuId);
+    Long count = jdbc.queryForObject("SELECT count(*) FROM sku WHERE id = ?", Long.class, skuId);
     if (count == null || count == 0) {
       throw new ListingApiException(404, "NOT_FOUND", "SKU not found");
     }
+  }
+
+  private static ChannelListingViews.ReevalSummary toView(ReevalSummary summary) {
+    return new ChannelListingViews.ReevalSummary(
+        summary.released(), summary.outOfStock(), summary.stillHeld(), summary.deferred());
   }
 }

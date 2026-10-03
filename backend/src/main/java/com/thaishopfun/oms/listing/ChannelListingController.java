@@ -41,7 +41,7 @@ class ChannelListingController {
   }
 
   @PutMapping("/{id}/mapping")
-  ResponseEntity<ChannelListingViews.ListingView> putMapping(
+  ResponseEntity<ChannelListingViews.MappingPutResponse> putMapping(
       @PathVariable UUID id, @RequestBody ChannelListingViews.MappingBody body) {
     if (body == null || body.skuId() == null) {
       throw new ListingApiException(422, "VALIDATION_FAILED", "sku_id is required");

@@ -6,7 +6,7 @@ import com.thaishopfun.oms.channel.ChannelAdapter;
 import com.thaishopfun.oms.channel.ChannelAdapterRegistry;
 import com.thaishopfun.oms.channel.api.ListingPage;
 import com.thaishopfun.oms.channel.exception.UnsupportedCapabilityException;
-import com.thaishopfun.oms.order.hold.ListingHoldHooks;
+import com.thaishopfun.oms.order.hold.OrderHoldResolverJob;
 import com.thaishopfun.oms.tenant.TenantContext;
 import java.util.ArrayList;
 import java.util.List;
@@ -19,13 +19,18 @@ public class ChannelListingSyncService {
 
   private record AccountRow(ChannelAccountRef ref, String channel, String status) {}
 
-  public record SyncResult(int upserted, int removed, int mappingChanges) {}
+  public record SyncResult(int upserted, int removed, int mappingChanges, List<String> mappedSkus) {
+
+    SyncResult(int upserted, int removed, int mappingChanges) {
+      this(upserted, removed, mappingChanges, List.of());
+    }
+  }
 
   private final ChannelListingAccess access;
   private final ListingTransactions tx;
   private final ChannelListingRepository listings;
   private final ChannelAdapterRegistry adapters;
-  private final ListingHoldHooks holdHooks;
+  private final OrderHoldResolverJob resolverJob;
   private final JdbcTemplate jdbc;
 
   public ChannelListingSyncService(
@@ -33,13 +38,13 @@ public class ChannelListingSyncService {
       ListingTransactions tx,
       ChannelListingRepository listings,
       ChannelAdapterRegistry adapters,
-      ListingHoldHooks holdHooks,
+      OrderHoldResolverJob resolverJob,
       JdbcTemplate jdbc) {
     this.access = access;
     this.tx = tx;
     this.listings = listings;
     this.adapters = adapters;
-    this.holdHooks = holdHooks;
+    this.resolverJob = resolverJob;
     this.jdbc = jdbc;
   }
 
@@ -64,36 +69,38 @@ public class ChannelListingSyncService {
       fetched.addAll(page.listings());
       cursor = page.nextCursor();
     } while (cursor != null && !cursor.isBlank());
-    return tx.write(
-        () -> {
-          UUID tenantId = TenantContext.requireTenantId();
-          int upserted = 0;
-          int mappingChanges = 0;
-          List<String> mappedSkus = new ArrayList<>();
-          for (ListingPage.Listing listing : fetched) {
-            ChannelListingRepository.UpsertResult result =
-                listings.upsertFromChannel(
-                    tenantId,
-                    channelAccountId,
-                    listing.listingSkuId(),
-                    listing.sellerSku(),
-                    listing.name(),
-                    listing.available(),
-                    listing.stockVersion());
-            upserted++;
-            if (result.mappingChanged()) {
-              mappingChanges++;
-              mappedSkus.add(listing.listingSkuId());
-            }
-          }
-          jdbc.update(
-              "UPDATE channel_account SET last_synced_at = now() WHERE id = ?",
-              channelAccountId);
-          for (String externalSkuId : mappedSkus) {
-            holdHooks.afterMappingCommit(channelAccountId, externalSkuId);
-          }
-          return new SyncResult(upserted, 0, mappingChanges);
-        });
+    SyncResult written =
+        tx.write(
+            () -> {
+              UUID tenantId = TenantContext.requireTenantId();
+              int upserted = 0;
+              int mappingChanges = 0;
+              List<String> mappedSkus = new ArrayList<>();
+              for (ListingPage.Listing listing : fetched) {
+                ChannelListingRepository.UpsertResult result =
+                    listings.upsertFromChannel(
+                        tenantId,
+                        channelAccountId,
+                        listing.listingSkuId(),
+                        listing.sellerSku(),
+                        listing.name(),
+                        listing.available(),
+                        listing.stockVersion());
+                upserted++;
+                if (result.mappingChanged()) {
+                  mappingChanges++;
+                  mappedSkus.add(listing.listingSkuId());
+                }
+              }
+              jdbc.update(
+                  "UPDATE channel_account SET last_synced_at = now() WHERE id = ?",
+                  channelAccountId);
+              return new SyncResult(upserted, 0, mappingChanges, mappedSkus);
+            });
+    for (String externalSkuId : written.mappedSkus()) {
+      resolverJob.reevalAfterMapping(channelAccountId, externalSkuId);
+    }
+    return new SyncResult(written.upserted(), written.removed(), written.mappingChanges());
   }
 
   private java.util.Optional<AccountRow> loadAccount(UUID channelAccountId) {

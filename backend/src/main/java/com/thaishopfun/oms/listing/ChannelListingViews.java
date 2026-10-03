@@ -25,6 +25,14 @@ final class ChannelListingViews {
 
   record MappingBody(@JsonProperty("sku_id") UUID skuId) {}
 
+  record ReevalSummary(
+      int released,
+      @JsonProperty("out_of_stock") int outOfStock,
+      @JsonProperty("still_held") int stillHeld,
+      int deferred) {}
+
+  record MappingPutResponse(ListingView listing, ReevalSummary reevaluation) {}
+
   record SyncResponse(int upserted, int removed, @JsonProperty("mapping_changes") int mappingChanges) {}
 
   static ListingView from(ChannelListingRepository.ListingRow row) {

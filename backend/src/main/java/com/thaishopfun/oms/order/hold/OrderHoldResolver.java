@@ -17,8 +17,11 @@ import com.thaishopfun.oms.stock.ReserveDemandPlanner;
 import com.thaishopfun.oms.stock.ReserveItem;
 import com.thaishopfun.oms.stock.Shortfall;
 import com.thaishopfun.oms.stock.StockError;
+import com.thaishopfun.oms.stock.StockBusyException;
+import com.thaishopfun.oms.stock.StockConflictException;
 import com.thaishopfun.oms.stock.StockOperationException;
 import com.thaishopfun.oms.stock.StockOwner;
+import com.thaishopfun.oms.stock.StockRetry;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -84,10 +87,19 @@ public class OrderHoldResolver {
    * Re-evaluates one held order inside the caller's transaction. {@code idempotencyPrefix} is {@code
    * order.remap} or {@code order.recheck}.
    */
-  public Outcome resolveHeldOrder(UUID orderId, String idempotencyPrefix) {
+  public Outcome resolveHeldOrder(
+      UUID orderId, String idempotencyPrefix, String recheckIdempotencyKey) {
     // Step 1: Load the order and skip work that does not apply.
     SalesOrder order = orders.findById(orderId).orElse(null);
     if (order == null || !"ACTIVE".equals(order.orderStatus())) {
+      return Outcome.STILL_HELD;
+    }
+    if (!"UNFULFILLED".equals(order.fulfillmentStatus())) {
+      return Outcome.STILL_HELD;
+    }
+    if ("CHANNEL_CANCEL_PENDING".equals(order.holdReason())
+        && order.holdNote() != null
+        && order.holdNote().contains("previous hold: SKU_NOT_MAPPED")) {
       return Outcome.STILL_HELD;
     }
     if (!"SKU_NOT_MAPPED".equals(order.holdReason())
@@ -147,7 +159,10 @@ public class OrderHoldResolver {
       return Outcome.RELEASED;
     }
     // Step 6: Try to ensure ORDER reservation with a stable idempotency key.
-    String engineKey = engineKey(idempotencyPrefix, orderId, reserveItems);
+    String engineKey =
+        "order.recheck".equals(idempotencyPrefix) && recheckIdempotencyKey != null
+            ? idempotencyPrefix + ":" + orderId + ":" + recheckIdempotencyKey
+            : engineKey(idempotencyPrefix, orderId, reserveItems);
     hooks.beforeEngineWrite();
     try {
       EnsureHoldResult held =
@@ -244,6 +259,11 @@ public class OrderHoldResolver {
   }
 
   static boolean retryableLock(RuntimeException ex) {
-    return ex instanceof OrderOptimisticLockException;
+    if (ex instanceof OrderOptimisticLockException
+        || ex instanceof StockConflictException
+        || ex instanceof StockBusyException) {
+      return true;
+    }
+    return StockRetry.classify(ex) != null;
   }
 }
