@@ -98,6 +98,7 @@ public class OrderStateMachine {
       GuardContext guards) {
     requireAllowed("PAYMENT", to);
     requireTransition("PAYMENT", order.paymentStatus(), to);
+    requireRefundOnlyPaymentOnTerminalOrder(order, to);
     return persist(order, "PAYMENT", order.paymentStatus(), to, reason, actor, null, paidAt, null);
   }
 
@@ -139,6 +140,20 @@ public class OrderStateMachine {
     }
     if ("COMPLETED".equals(order.orderStatus())) {
       throw new OrderStateException("completed order is immutable for fulfillment and hold");
+    }
+  }
+
+  /** On terminal orders, payment may only move into refund states (self no-op is allowed). */
+  private static void requireRefundOnlyPaymentOnTerminalOrder(SalesOrder order, String to) {
+    if (!"CANCELLED".equals(order.orderStatus()) && !"COMPLETED".equals(order.orderStatus())) {
+      return;
+    }
+    if (order.paymentStatus().equals(to)) {
+      return;
+    }
+    if (!Set.of("PARTIALLY_REFUNDED", "REFUNDED").contains(to)) {
+      throw new OrderStateException(
+          "cancelled or completed order is immutable for non-refund payment");
     }
   }
 

@@ -210,7 +210,7 @@ public class OrderIntakeSupport {
           throw ex;
         }
         unknownSkuAtAdopt = true;
-        unknownSkuNote = unknownSkuHoldNote(mapped, reserveItems);
+        unknownSkuNote = unknownSkuHoldNote(mapped, missingSkuIdsForUnknownSku(ex, reserveItems));
       }
     }
 
@@ -288,7 +288,11 @@ public class OrderIntakeSupport {
         if (ex.error() != StockError.UNKNOWN_SKU) {
           throw ex;
         }
-        order = applyHold(order, "SKU_NOT_MAPPED", unknownSkuHoldNoteFromLines(order.id(), items));
+        order =
+            applyHold(
+                order,
+                "SKU_NOT_MAPPED",
+                unknownSkuHoldNoteFromLines(order.id(), missingSkuIdsForUnknownSku(ex, items)));
       }
     }
     maybeReadyToPick(orders.findById(order.id()).orElseThrow(), account, items, paidAt);
@@ -522,19 +526,17 @@ public class OrderIntakeSupport {
     }
   }
 
-  private String unknownSkuHoldNote(List<LineMapping> mapped, List<ReserveItem> failedItems) {
+  private String unknownSkuHoldNote(List<LineMapping> mapped, Set<UUID> missingSkuIds) {
     StringBuilder note = new StringBuilder("mapped sku not found");
-    Set<UUID> failedSkus = new LinkedHashSet<>();
-    failedItems.forEach(item -> failedSkus.add(item.skuId()));
     for (LineMapping line : mapped) {
-      if (line.skuId() != null && failedSkus.contains(line.skuId())) {
+      if (line.skuId() != null && missingSkuIds.contains(line.skuId())) {
         note.append(';').append(line.listingSkuId());
       }
     }
     return note.toString();
   }
 
-  private String unknownSkuHoldNoteFromLines(UUID orderId, List<ReserveItem> failedItems) {
+  private String unknownSkuHoldNoteFromLines(UUID orderId, Set<UUID> missingSkuIds) {
     List<LineMapping> mapped =
         lines.findByOrderId(orderId).stream()
             .map(
@@ -548,7 +550,47 @@ public class OrderIntakeSupport {
                         false,
                         line.skuId() != null))
             .toList();
-    return unknownSkuHoldNote(mapped, failedItems);
+    return unknownSkuHoldNote(mapped, missingSkuIds);
+  }
+
+  private Set<UUID> missingSkuIdsForUnknownSku(
+      StockOperationException ex, List<ReserveItem> items) {
+    List<UUID> skuIds = items.stream().map(ReserveItem::skuId).toList();
+    Set<UUID> missing = missingCatalogSkuIds(skuIds);
+    if (!missing.isEmpty()) {
+      return missing;
+    }
+    String message = ex.getMessage();
+    if (message != null && message.startsWith("unknown sku ")) {
+      try {
+        return Set.of(UUID.fromString(message.substring("unknown sku ".length()).trim()));
+      } catch (IllegalArgumentException ignored) {
+        // fall through
+      }
+    }
+    return Set.of();
+  }
+
+  private Set<UUID> missingCatalogSkuIds(List<UUID> skuIds) {
+    if (skuIds.isEmpty()) {
+      return Set.of();
+    }
+    Set<UUID> unique = new LinkedHashSet<>(skuIds);
+    List<UUID> found =
+        jdbc.query(
+            "SELECT id FROM sku WHERE id = ANY (?)",
+            ps -> {
+              ps.setArray(1, ps.getConnection().createArrayOf("uuid", unique.toArray(UUID[]::new)));
+            },
+            (rs, row) -> rs.getObject("id", UUID.class));
+    Set<UUID> present = new LinkedHashSet<>(found);
+    Set<UUID> missing = new LinkedHashSet<>();
+    for (UUID skuId : unique) {
+      if (!present.contains(skuId)) {
+        missing.add(skuId);
+      }
+    }
+    return missing;
   }
 
   private String componentlessBundleShadowJson(List<ReserveItem> reserveItems) {

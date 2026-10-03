@@ -148,7 +148,7 @@ class OrderIntakeT13OutOfOrderAcceptanceTest {
     StockFixture.Shop shop = fixture.shop("ACTIVE");
     String shopId = fixture.tsfShopId(shop);
     UUID account = fixture.tsfChannelAccount(shop, "ACTIVE", "CONNECTED");
-    UUID sku = fixture.sku(shop, 3);
+    UUID sku = fixture.sku(shop, 10);
     fixture.channelListing(shop, account, "L-t13-stale", sku, true);
     String externalOrderId = "TSF-T13-STALE-" + UUID.randomUUID();
     ingest(
@@ -157,7 +157,7 @@ class OrderIntakeT13OutOfOrderAcceptanceTest {
             externalOrderId,
             shopId,
             UUID.randomUUID().toString(),
-            "COD",
+            "PREPAID",
             "L-t13-stale",
             1,
             1));
@@ -165,7 +165,27 @@ class OrderIntakeT13OutOfOrderAcceptanceTest {
     ObjectNode paid = OrderIntakeScenarioSupport.orderPaid(JSON, externalOrderId, shopId, 2);
     ingest(paid);
     assertThat(worker.processAvailable(10)).isEqualTo(1);
-    ObjectNode stale = OrderIntakeScenarioSupport.orderPaid(JSON, externalOrderId, shopId, 1);
+    UUID orderId =
+        fixture.inTenant(
+            shop.tenant(),
+            () ->
+                jdbc.queryForObject(
+                    "SELECT id FROM sales_order WHERE external_order_id = ?",
+                    UUID.class,
+                    externalOrderId));
+    assertThat(
+            fixture.inTenant(
+                shop.tenant(),
+                () ->
+                    jdbc.queryForObject(
+                        """
+                        SELECT count(*) FROM stock_reservation
+                        WHERE owner_type = 'ORDER' AND owner_ref = ?::text AND status = 'ACTIVE'
+                        """,
+                        Long.class,
+                        orderId.toString())))
+        .isGreaterThan(0);
+    ObjectNode stale = OrderIntakeScenarioSupport.orderCancelled(JSON, externalOrderId, shopId, 1);
     stale.put("event_id", "evt-stale-" + UUID.randomUUID());
     ingest(stale);
     assertThat(worker.processAvailable(10)).isEqualTo(1);
@@ -179,14 +199,34 @@ class OrderIntakeT13OutOfOrderAcceptanceTest {
                 shop.tenant(),
                 () ->
                     jdbc.queryForObject(
+                        "SELECT order_status FROM sales_order WHERE id = ?",
+                        String.class,
+                        orderId)))
+        .isEqualTo("ACTIVE");
+    assertThat(
+            fixture.inTenant(
+                shop.tenant(),
+                () ->
+                    jdbc.queryForObject(
                         """
-                        SELECT count(*) FROM order_status_history h
-                        JOIN sales_order o ON o.id = h.order_id
-                        WHERE o.external_order_id = ? AND h.dimension = 'PAYMENT'
+                        SELECT count(*) FROM order_status_history
+                        WHERE order_id = ? AND dimension = 'ORDER' AND to_value = 'CANCELLED'
                         """,
                         Long.class,
-                        externalOrderId)))
-        .isEqualTo(1);
+                        orderId)))
+        .isZero();
+    assertThat(
+            fixture.inTenant(
+                shop.tenant(),
+                () ->
+                    jdbc.queryForObject(
+                        """
+                        SELECT count(*) FROM stock_reservation
+                        WHERE owner_type = 'ORDER' AND owner_ref = ?::text AND status = 'ACTIVE'
+                        """,
+                        Long.class,
+                        orderId.toString())))
+        .isGreaterThan(0);
   }
 
   @Test

@@ -129,6 +129,9 @@ class OrderStateMachinePropertyTest {
     if ("FULFILLMENT".equals(dimension)) {
       return oracleFulfillmentTarget(order, from, to, guards);
     }
+    if ("PAYMENT".equals(dimension)) {
+      return oraclePaymentTarget(order, from, to);
+    }
     if (from.equals(to) && !"HOLD".equals(dimension)) {
       return true;
     }
@@ -161,6 +164,16 @@ class OrderStateMachinePropertyTest {
     if ("HOLD".equals(dimension)
         && ("CANCELLED".equals(order.orderStatus()) || "COMPLETED".equals(order.orderStatus()))) {
       return false;
+    }
+    return true;
+  }
+
+  private static boolean oraclePaymentTarget(SalesOrder order, String from, String to) {
+    if ("CANCELLED".equals(order.orderStatus()) || "COMPLETED".equals(order.orderStatus())) {
+      if (from.equals(to)) {
+        return true;
+      }
+      return Set.of("PARTIALLY_REFUNDED", "REFUNDED").contains(to);
     }
     return true;
   }

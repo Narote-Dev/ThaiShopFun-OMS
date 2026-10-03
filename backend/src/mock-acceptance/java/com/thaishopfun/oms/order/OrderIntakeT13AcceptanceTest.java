@@ -150,6 +150,44 @@ class OrderIntakeT13AcceptanceTest {
   }
 
   @Test
+  void shadowMixedOrderShadowDiffListsOnlyComponentlessBundleSkus() throws Exception {
+    StockFixture.Shop shop = fixture.shop("ACTIVE");
+    String shopId = fixture.tsfShopId(shop);
+    UUID account = fixture.tsfChannelAccount(shop, "SHADOW", "CONNECTED");
+    UUID bundle = fixture.componentlessBundle(shop);
+    UUID normalSku = fixture.sku(shop, 5);
+    fixture.channelListing(shop, account, "L-t13-sh-b", bundle, true);
+    fixture.channelListing(shop, account, "L-t13-sh-n", normalSku, true);
+    String externalOrderId = "TSF-T13-SH-MIX-" + UUID.randomUUID();
+    ObjectNode created =
+        OrderIntakeScenarioSupport.orderCreatedTwoLines(
+            JSON,
+            externalOrderId,
+            shopId,
+            UuidV7.generate().toString(),
+            "COD",
+            "L-t13-sh-b",
+            "L-t13-sh-n",
+            1,
+            1,
+            1);
+    ingest(created);
+    assertThat(worker.processAvailable(10)).isEqualTo(1);
+    JsonNode diff =
+        fixture.inTenant(
+            shop.tenant(),
+            () ->
+                JSON.readTree(
+                    jdbc.queryForObject(
+                        "SELECT oms_value::text FROM shadow_diff WHERE ref = ?",
+                        String.class,
+                        externalOrderId)));
+    assertThat(diff.path("reason").asString()).isEqualTo("BUNDLE_WITHOUT_COMPONENTS");
+    assertThat(diff.path("bundle_skus").size()).isEqualTo(1);
+    assertThat(diff.path("bundle_skus").get(0).asText()).isEqualTo(bundle.toString());
+  }
+
+  @Test
   void shadowComponentlessBundleWritesSingleOrderShadowDiff() throws Exception {
     StockFixture.Shop shop = fixture.shop("ACTIVE");
     String shopId = fixture.tsfShopId(shop);
@@ -251,6 +289,24 @@ class OrderIntakeT13AcceptanceTest {
                         Long.class,
                         externalOrderId)))
         .isZero();
+    assertThat(
+            fixture.inTenant(
+                shop.tenant(),
+                () ->
+                    jdbc.queryForObject(
+                        "SELECT hold_reason FROM sales_order WHERE external_order_id = ?",
+                        String.class,
+                        externalOrderId)))
+        .isEqualTo("OUT_OF_STOCK");
+    assertThat(
+            fixture.inTenant(
+                shop.tenant(),
+                () ->
+                    jdbc.queryForObject(
+                        "SELECT hold_note FROM sales_order WHERE external_order_id = ?",
+                        String.class,
+                        externalOrderId)))
+        .isEqualTo("bundle has no components");
   }
 
   @Test

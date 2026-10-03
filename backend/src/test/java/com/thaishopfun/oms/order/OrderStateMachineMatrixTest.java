@@ -248,6 +248,92 @@ class OrderStateMachineMatrixTest {
     }
   }
 
+  @Test
+  void terminalOrdersPaymentMatrixOnlyAllowsRefunds() {
+    for (String orderStatus : List.of("CANCELLED", "COMPLETED")) {
+      for (String from : OrderStateMachine.allowedValues("PAYMENT")) {
+        for (String to : OrderStateMachine.allowedValues("PAYMENT")) {
+          clearInvocations(orders, history);
+          SalesOrder order = sampleOrder(orderStatus, from, "DELIVERED", "NONE");
+          boolean legalEdge = OrderStateMachineExpectedTransitions.isLegalEdge("PAYMENT", from, to);
+          boolean allowed = legalEdge && oracleTerminalPaymentAllowed(from, to);
+          if (allowed) {
+            if (from.equals(to)) {
+              apply("PAYMENT", order, to, guard(true, true, false));
+              verifyNoRepositoryWrites();
+            } else {
+              stubSuccessfulUpdate(order, "PAYMENT", to);
+              apply("PAYMENT", order, to, guard(true, true, false));
+              verify(history)
+                  .append(
+                      eq(order.id()), eq("PAYMENT"), eq(from), eq(to), anyString(), anyString());
+            }
+          } else {
+            assertRejected(() -> apply("PAYMENT", order, to, guard(true, true, false)));
+          }
+        }
+      }
+    }
+  }
+
+  @Test
+  void completedRejectsWhenOpenReturn() {
+    SalesOrder order = sampleOrder("ACTIVE", "PAID", "DELIVERED", "NONE");
+    when(history.transitionedAt(order.id(), "FULFILLMENT", "DELIVERED"))
+        .thenReturn(Optional.of(NOW.minus(8, ChronoUnit.DAYS)));
+    assertRejected(
+        () -> machine.applyOrderStatus(order, "COMPLETED", "t", "A", guard(true, true, true)));
+  }
+
+  @Test
+  void orderTargetGuardsAcrossPaymentFulfillmentAndHold() {
+    List<String> payments = OrderStateMachine.allowedValues("PAYMENT");
+    List<String> fulfillments = OrderStateMachine.allowedValues("FULFILLMENT");
+    List<String> holds = OrderStateMachine.allowedValues("HOLD");
+    for (String payment : payments) {
+      for (String fulfillment : fulfillments) {
+        for (String hold : holds) {
+          SalesOrder order = sampleOrder("ACTIVE", payment, fulfillment, hold);
+          for (String to : List.of("CANCELLED", "COMPLETED")) {
+            clearInvocations(orders, history);
+            if ("CANCELLED".equals(to)) {
+              if (Set.of("SHIPPED", "DELIVERED").contains(fulfillment)) {
+                assertRejected(
+                    () ->
+                        machine.applyOrderStatus(
+                            order, "CANCELLED", "t", "A", guard(true, true, false)));
+              } else {
+                stubSuccessfulUpdate(order, "ORDER", "CANCELLED");
+                machine.applyOrderStatus(order, "CANCELLED", "t", "A", guard(true, true, false));
+              }
+              continue;
+            }
+            boolean completedOk =
+                "DELIVERED".equals(fulfillment) && "PAID".equals(payment) && order.paidAt() != null;
+            if (!completedOk) {
+              assertRejected(
+                  () ->
+                      machine.applyOrderStatus(
+                          order, "COMPLETED", "t", "A", guard(true, true, false)));
+              continue;
+            }
+            when(history.transitionedAt(order.id(), "FULFILLMENT", "DELIVERED"))
+                .thenReturn(Optional.of(NOW.minus(8, ChronoUnit.DAYS)));
+            stubSuccessfulUpdate(order, "ORDER", "COMPLETED");
+            machine.applyOrderStatus(order, "COMPLETED", "t", "A", guard(true, true, false));
+          }
+        }
+      }
+    }
+  }
+
+  private static boolean oracleTerminalPaymentAllowed(String from, String to) {
+    if (from.equals(to)) {
+      return true;
+    }
+    return Set.of("PARTIALLY_REFUNDED", "REFUNDED").contains(to);
+  }
+
   private static boolean oracleFulfillmentTarget(
       SalesOrder order, String fromFulfillment, String to, GuardContext guards) {
     if (!OrderStateMachineExpectedTransitions.isLegalEdge("FULFILLMENT", fromFulfillment, to)) {

@@ -204,7 +204,7 @@ class OrderStateMachineTest {
   }
 
   @Test
-  void cancelledOrderRejectsIllegalPaymentTransition() {
+  void cancelledOrderRejectsPaymentChange() {
     Shop shop = shop();
     SalesOrder order =
         new SalesOrder(
@@ -213,8 +213,8 @@ class OrderStateMachineTest {
             shop.channelAccount(),
             "TSF-" + UuidV7.generate(),
             "CANCELLED",
-            "REFUNDED",
-            "DELIVERED",
+            "PENDING",
+            "UNFULFILLED",
             "NONE",
             null,
             null,
@@ -225,7 +225,7 @@ class OrderStateMachineTest {
             BigDecimal.ZERO,
             new BigDecimal("100.00"),
             Instant.now().truncatedTo(ChronoUnit.MICROS),
-            Instant.now(),
+            null,
             null,
             1L,
             0);
@@ -236,19 +236,16 @@ class OrderStateMachineTest {
           return null;
         });
     GuardContext guards = new GuardContext(true, true, Instant.now());
+
     assertThatThrownBy(
             () ->
                 as(
                     shop,
                     () ->
                         stateMachine.applyPaymentStatus(
-                            orders.findById(order.id()).orElseThrow(),
-                            "PAID",
-                            "test",
-                            "TEST",
-                            Instant.now(),
-                            guards)))
-        .isInstanceOf(OrderStateException.class);
+                            order, "PAID", "test", "TEST", Instant.now(), guards)))
+        .isInstanceOf(OrderStateException.class)
+        .hasMessageContaining("immutable");
   }
 
   @Test

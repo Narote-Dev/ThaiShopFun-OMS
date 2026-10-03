@@ -632,7 +632,7 @@ class InboxApiTest {
   }
 
   @Test
-  void orderUpdatedThenLowerPaidVersionStillRunsHandler() throws Exception {
+  void orderPaidWithLowerAggregateVersionAfterUpdatedIsStale() throws Exception {
     Shop shop = seed("ACTIVE", future(), 1);
     String aggregate = "ord-delta-" + UUID.randomUUID();
     postBusinessEvent(shop, id(), aggregate, "order.updated", 3);
@@ -641,7 +641,12 @@ class InboxApiTest {
     orderUpdated.reset();
     postBusinessEvent(shop, id(), aggregate, "order.paid", 2);
     worker.processAvailable();
-    assertThat(orderPaid.calls.get()).isEqualTo(1);
+    assertThat(orderPaid.calls.get()).isZero();
+    assertThat(
+            count(
+                "SELECT count(*) FROM inbox_event WHERE aggregate_id = ? AND event_type = 'order.paid' AND status = 'PROCESSED'",
+                aggregate))
+        .isEqualTo(1);
   }
 
   @Test

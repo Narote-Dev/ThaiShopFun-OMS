@@ -3,9 +3,8 @@ package com.thaishopfun.oms.order;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
-import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doCallRealMethod;
-import static org.mockito.Mockito.doThrow;
 
 import com.thaishopfun.mocktsf.OmsEndpoint;
 import com.thaishopfun.mocktsf.idp.TokenIssuer;
@@ -13,6 +12,7 @@ import com.thaishopfun.oms.auth.AuthTestSupport;
 import com.thaishopfun.oms.auth.UuidV7;
 import com.thaishopfun.oms.inbox.InboxWorker;
 import com.thaishopfun.oms.stock.ReservationEngine;
+import com.thaishopfun.oms.stock.ReserveDemandPlanner;
 import com.thaishopfun.oms.stock.ReserveItem;
 import com.thaishopfun.oms.stock.StockError;
 import com.thaishopfun.oms.stock.StockFixture;
@@ -76,19 +76,33 @@ class OrderIntakeT13UnknownSkuAcceptanceTest {
   @Autowired InboxWorker worker;
   @Autowired JdbcTemplate jdbc;
   @Autowired PlatformTransactionManager transactions;
-  @MockitoSpyBean ReservationEngine reservationEngine;
+  @Autowired ReservationEngine reservationEngine;
+  @MockitoSpyBean ReserveDemandPlanner demandPlanner;
 
   StockFixture fixture;
+  UUID omitSkuFromCatalog;
 
   @BeforeEach
   void setup() throws Exception {
     OrderIntakeMockRuntime.mock().getBean(OmsEndpoint.class).setBaseUrl("http://127.0.0.1:" + port);
     fixture = new StockFixture(jdbc, transactions);
-    doCallRealMethod()
-        .when(reservationEngine)
-        .adoptForOrder(any(), any(), anyList(), any(), anyString());
-    doCallRealMethod().when(reservationEngine).ensureOrderHold(any(), anyList(), anyString());
-    doCallRealMethod().when(reservationEngine).reserve(any(), anyList(), anyString());
+    omitSkuFromCatalog = null;
+    doAnswer(
+            inv -> {
+              List<ReserveItem> items = inv.getArgument(0);
+              if (omitSkuFromCatalog != null) {
+                for (ReserveItem item : items) {
+                  if (omitSkuFromCatalog.equals(item.skuId())) {
+                    throw new StockOperationException(
+                        StockError.UNKNOWN_SKU, "unknown sku " + omitSkuFromCatalog);
+                  }
+                }
+              }
+              return inv.callRealMethod();
+            })
+        .when(demandPlanner)
+        .componentDemandPlan(anyList());
+    doCallRealMethod().when(demandPlanner).componentlessBundleSkus(any());
     try (Connection admin = AuthTestSupport.admin();
         var statement = admin.createStatement()) {
       statement.execute("SET session_replication_role = replica");
@@ -101,93 +115,68 @@ class OrderIntakeT13UnknownSkuAcceptanceTest {
   }
 
   @Test
-  void unknownSkuAtCreatedSetsSkuNotMappedWithoutDeadInbox() throws Exception {
+  void unknownSkuAtCreatedUsesPlannerLookupAndIsIdempotentOnRetry() throws Exception {
     StockFixture.Shop shop = fixture.shop("ACTIVE");
     String shopId = fixture.tsfShopId(shop);
     UUID account = fixture.tsfChannelAccount(shop, "ACTIVE", "CONNECTED");
-    UUID sku = fixture.sku(shop, 5);
-    fixture.channelListing(shop, account, "L-unk-c", sku, true);
-    doThrow(new StockOperationException(StockError.UNKNOWN_SKU, "injected"))
-        .when(reservationEngine)
-        .adoptForOrder(any(), any(), anyList(), any(), anyString());
+    UUID goodSku = fixture.sku(shop, 8);
+    UUID badSku = fixture.sku(shop, 2);
+    fixture.channelListing(shop, account, "L-good", goodSku, true);
+    fixture.channelListing(shop, account, "L-bad", badSku, true);
+    omitSkuFromCatalog = badSku;
 
-    String externalOrderId = "TSF-T13-UNK-C-" + UUID.randomUUID();
+    String externalOrderId = "TSF-T13-UNK-2L-" + UUID.randomUUID();
     ObjectNode created =
-        OrderIntakeScenarioSupport.orderCreated(
-            JSON, externalOrderId, shopId, UuidV7.generate().toString(), "COD", "L-unk-c", 1, 1);
+        OrderIntakeScenarioSupport.orderCreatedTwoLines(
+            JSON,
+            externalOrderId,
+            shopId,
+            UuidV7.generate().toString(),
+            "COD",
+            "L-good",
+            "L-bad",
+            1,
+            1,
+            1);
     ingest(created);
-    assertThat(worker.processAvailable(10)).isEqualTo(1);
     String eventId = created.path("event_id").asString();
-    assertThat(text("SELECT status FROM inbox_event WHERE event_id = ?", eventId))
-        .isEqualTo("PROCESSED");
-    assertThat(text("SELECT attempts FROM inbox_event WHERE event_id = ?", eventId)).isEqualTo("1");
-    assertThat(text("SELECT last_error FROM inbox_event WHERE event_id = ?", eventId)).isNull();
-    UUID orderId =
-        fixture.inTenant(
-            shop.tenant(),
-            () ->
-                jdbc.queryForObject(
-                    "SELECT id FROM sales_order WHERE external_order_id = ?",
-                    UUID.class,
-                    externalOrderId));
-    assertThat(
-            fixture.inTenant(
-                shop.tenant(),
-                () ->
-                    jdbc.queryForObject(
-                        "SELECT count(*) FROM order_line WHERE order_id = ?", Long.class, orderId)))
-        .isEqualTo(1);
-    assertThat(
-            fixture.inTenant(
-                shop.tenant(),
-                () ->
-                    jdbc.queryForObject(
-                        "SELECT hold_reason FROM sales_order WHERE id = ?", String.class, orderId)))
-        .isEqualTo("SKU_NOT_MAPPED");
-    assertThat(
-            fixture.inTenant(
-                shop.tenant(),
-                () ->
-                    jdbc.queryForObject(
-                        """
-                        SELECT count(*) FROM order_status_history
-                        WHERE order_id = ? AND dimension = 'HOLD'
-                        """,
-                        Long.class,
-                        orderId)))
-        .isEqualTo(1);
-    assertThat(
-            fixture.inTenant(
-                shop.tenant(),
-                () ->
-                    jdbc.queryForObject(
-                        """
-                        SELECT count(*) FROM stock_reservation
-                        WHERE owner_type = 'ORDER' AND owner_ref = ?::text
-                        """,
-                        Long.class,
-                        orderId.toString())))
-        .isZero();
+    assertThat(worker.processAvailable(10)).isEqualTo(1);
+    assertInboxProcessedOnce(eventId);
+    UUID orderId = orderId(shop, externalOrderId);
+    assertThat(holdReason(shop, orderId)).isEqualTo("SKU_NOT_MAPPED");
+    String holdNote = holdNote(shop, orderId);
+    assertThat(holdNote).startsWith("mapped sku not found");
+    assertThat(holdNote).contains("L-bad");
+    assertThat(holdNote).doesNotContain("L-good");
+    assertThat(historyHoldCount(shop, orderId)).isEqualTo(1);
+    assertThat(orderReservationCount(shop, orderId)).isZero();
 
-    doCallRealMethod()
-        .when(reservationEngine)
-        .adoptForOrder(any(), any(), anyList(), any(), anyString());
+    resetInboxToPending(eventId);
+    assertThat(worker.processAvailable(10)).isEqualTo(1);
+    assertInboxProcessedOnce(eventId);
+    assertThat(holdReason(shop, orderId)).isEqualTo("SKU_NOT_MAPPED");
+    assertThat(holdNote(shop, orderId)).isEqualTo(holdNote);
+    assertThat(historyHoldCount(shop, orderId)).isEqualTo(1);
+
+    omitSkuFromCatalog = null;
     fixture.inTenant(
         shop.tenant(),
         () ->
             reservationEngine.reserve(
                 StockOwner.order(orderId.toString()),
-                List.of(ReserveItem.of(sku, 1)),
+                List.of(ReserveItem.of(goodSku, 1), ReserveItem.of(badSku, 1)),
                 "order.retry:" + UUID.randomUUID()));
+    assertThat(orderReservationCount(shop, orderId)).isGreaterThan(0);
   }
 
   @Test
-  void unknownSkuAtPaidSetsSkuNotMappedWithoutFailedRetries() throws Exception {
+  void unknownSkuAtPaidSetsSkuNotMappedWithHoldHistory() throws Exception {
     StockFixture.Shop shop = fixture.shop("ACTIVE");
     String shopId = fixture.tsfShopId(shop);
     UUID account = fixture.tsfChannelAccount(shop, "ACTIVE", "CONNECTED");
     UUID sku = fixture.sku(shop, 5);
     fixture.channelListing(shop, account, "L-unk-p", sku, true);
+    omitSkuFromCatalog = sku;
     String externalOrderId = "TSF-T13-UNK-P-" + UUID.randomUUID();
     ingest(
         OrderIntakeScenarioSupport.orderCreated(
@@ -201,26 +190,85 @@ class OrderIntakeT13UnknownSkuAcceptanceTest {
             1));
     assertThat(worker.processAvailable(10)).isEqualTo(1);
 
-    doThrow(new StockOperationException(StockError.UNKNOWN_SKU, "injected"))
-        .when(reservationEngine)
-        .ensureOrderHold(any(), anyList(), anyString());
     ObjectNode paid = OrderIntakeScenarioSupport.orderPaid(JSON, externalOrderId, shopId, 2);
     ingest(paid);
     assertThat(worker.processAvailable(10)).isEqualTo(1);
     String eventId = paid.path("event_id").asString();
+    assertInboxProcessedOnce(eventId);
+    UUID orderId = orderId(shop, externalOrderId);
+    assertThat(holdReason(shop, orderId)).isEqualTo("SKU_NOT_MAPPED");
+    assertThat(holdNote(shop, orderId)).contains("L-unk-p");
+    assertThat(historyHoldCount(shop, orderId)).isEqualTo(1);
+    assertThat(orderReservationCount(shop, orderId)).isZero();
+  }
+
+  private void assertInboxProcessedOnce(String eventId) throws Exception {
     assertThat(text("SELECT status FROM inbox_event WHERE event_id = ?", eventId))
         .isEqualTo("PROCESSED");
     assertThat(text("SELECT attempts FROM inbox_event WHERE event_id = ?", eventId)).isEqualTo("1");
     assertThat(text("SELECT last_error FROM inbox_event WHERE event_id = ?", eventId)).isNull();
-    assertThat(
-            fixture.inTenant(
-                shop.tenant(),
-                () ->
-                    jdbc.queryForObject(
-                        "SELECT hold_reason FROM sales_order WHERE external_order_id = ?",
-                        String.class,
-                        externalOrderId)))
-        .isEqualTo("SKU_NOT_MAPPED");
+  }
+
+  private void resetInboxToPending(String eventId) throws Exception {
+    try (Connection admin = AuthTestSupport.admin();
+        var statement =
+            admin.prepareStatement(
+                "UPDATE inbox_event SET status = 'PENDING', attempts = 0, last_error = NULL WHERE event_id = ?")) {
+      statement.setString(1, eventId);
+      assertThat(statement.executeUpdate()).isEqualTo(1);
+    }
+  }
+
+  private UUID orderId(StockFixture.Shop shop, String externalOrderId) {
+    return fixture.inTenant(
+        shop.tenant(),
+        () ->
+            jdbc.queryForObject(
+                "SELECT id FROM sales_order WHERE external_order_id = ?",
+                UUID.class,
+                externalOrderId));
+  }
+
+  private String holdReason(StockFixture.Shop shop, UUID orderId) {
+    return fixture.inTenant(
+        shop.tenant(),
+        () ->
+            jdbc.queryForObject(
+                "SELECT hold_reason FROM sales_order WHERE id = ?", String.class, orderId));
+  }
+
+  private String holdNote(StockFixture.Shop shop, UUID orderId) {
+    return fixture.inTenant(
+        shop.tenant(),
+        () ->
+            jdbc.queryForObject(
+                "SELECT hold_note FROM sales_order WHERE id = ?", String.class, orderId));
+  }
+
+  private long historyHoldCount(StockFixture.Shop shop, UUID orderId) {
+    return fixture.inTenant(
+        shop.tenant(),
+        () ->
+            jdbc.queryForObject(
+                """
+                SELECT count(*) FROM order_status_history
+                WHERE order_id = ? AND dimension = 'HOLD'
+                """,
+                Long.class,
+                orderId));
+  }
+
+  private long orderReservationCount(StockFixture.Shop shop, UUID orderId) {
+    return fixture.inTenant(
+        shop.tenant(),
+        () ->
+            jdbc.queryForObject(
+                """
+                SELECT count(*) FROM stock_reservation
+                WHERE owner_type = 'ORDER' AND owner_ref = ?::text
+                """,
+                Long.class,
+                orderId.toString()));
   }
 
   private void ingest(ObjectNode event) throws Exception {
