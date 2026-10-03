@@ -23,6 +23,10 @@ public class ListingApiException extends RuntimeException {
     return new ListingApiException(422, "CAPABILITY_UNSUPPORTED", message);
   }
 
+  public static ListingApiException forbidden() {
+    return new ListingApiException(403, "FORBIDDEN", "OWNER or ADMIN role is required");
+  }
+
   public int status() {
     return status;
   }

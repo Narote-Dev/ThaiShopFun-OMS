@@ -21,7 +21,9 @@ Returns `{items, total, limit, offset}`. Each item includes mapping fields (`sel
 
 ## Sync
 
-`POST /channel-accounts/{id}/listing-syncs` — pulls listings from the channel adapter (outside DB transaction), upserts rows, auto-maps when `seller_sku` matches `sku_code`, then re-evaluates holds.
+`POST /channel-accounts/{id}/listing-syncs` — pulls listings from the channel adapter (outside DB transaction), upserts rows, auto-maps when `seller_sku` matches `sku_code` (counts both new stubs and existing unmapped rows that become mapped on this upsert), then re-evaluates holds for SKUs whose mapping changed.
+
+Response `reevaluated_orders` is the sum of released, out-of-stock, and still-held outcomes across all re-evaluations in the sync. At most **200 orders** are re-evaluated per sync (shared cap); additional held orders are left for the scheduled hold sweeper (`deferred` within each SKU batch).
 
 - `422 DISCONNECTED` when the account is disconnected.
 - `422 CAPABILITY_UNSUPPORTED` when the adapter does not support listing pull.

@@ -403,13 +403,22 @@ class OrderHoldResolverT12BCriteriaAcceptanceTest {
                 }));
       }
       start.countDown();
+      List<Integer> statuses = new ArrayList<>();
       List<String> bodies = new ArrayList<>();
       for (Future<HttpResponse<String>> future : futures) {
         HttpResponse<String> response = future.get(30, TimeUnit.SECONDS);
-        assertThat(response.statusCode()).isEqualTo(200);
-        bodies.add(response.body());
+        int status = response.statusCode();
+        assertThat(status).isIn(200, 409);
+        statuses.add(status);
+        if (status == 200) {
+          bodies.add(response.body());
+        } else {
+          assertThat(JSON.readTree(response.body()).path("error").asString())
+              .isEqualTo("IDEMPOTENCY_IN_PROGRESS");
+        }
       }
-      assertThat(bodies).hasSize(5);
+      assertThat(statuses).contains(200);
+      assertThat(bodies).isNotEmpty();
       assertThat(bodies).allMatch(body -> body.equals(bodies.get(0)));
     } finally {
       pool.shutdownNow();

@@ -12,6 +12,7 @@ export type ChannelListing = {
   sku_name: string | null
   mapping_source: string | null
   mapped_at: string | null
+  removed_at: string | null
   stock_control: boolean
   held_orders: number
 }

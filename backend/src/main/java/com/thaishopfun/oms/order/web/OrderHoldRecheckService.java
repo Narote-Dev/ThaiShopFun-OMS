@@ -53,19 +53,33 @@ public class OrderHoldRecheckService {
     String key = orderId + ":" + clientKey;
     String hash = sha256(orderId + "|" + clientKey);
 
+    tx.read(() -> orders.findById(orderId).orElseThrow(OrderApiException::notFound));
+
+    OrderHoldRecheckIdempotency.LookupResult existing =
+        tx.read(() -> idempotency.lookup(actor.tenantId(), key, hash));
+    OrderViews.HoldRecheckResponse replay = replayIfCompleted(existing);
+    if (replay != null) {
+      return replay;
+    }
+    if (existing.state() == OrderHoldRecheckIdempotency.LookupState.IN_PROGRESS) {
+      throw OrderApiException.idempotencyInProgress();
+    }
+
     SalesOrder before =
         tx.read(() -> orders.findById(orderId).orElseThrow(OrderApiException::notFound));
-    if (!"ACTIVE".equals(before.orderStatus())
-        || !"UNFULFILLED".equals(before.fulfillmentStatus())
-        || (!"SKU_NOT_MAPPED".equals(before.holdReason())
-            && !"OUT_OF_STOCK".equals(before.holdReason()))) {
+    if (!isRecheckable(before)) {
       throw OrderApiException.conflict("HOLD_NOT_RECHECKABLE", "Order hold is not recheckable");
     }
 
-    OrderHoldRecheckIdempotency.Stored stored =
-        tx.write(() -> idempotency.claim(actor.tenantId(), key, hash));
-    if (stored != null) {
-      return json.treeToValue(stored.body(), OrderViews.HoldRecheckResponse.class);
+    boolean claimed = tx.write(() -> idempotency.tryClaim(actor.tenantId(), key, hash));
+    if (!claimed) {
+      OrderHoldRecheckIdempotency.LookupResult raced =
+          tx.read(() -> idempotency.lookup(actor.tenantId(), key, hash));
+      replay = replayIfCompleted(raced);
+      if (replay != null) {
+        return replay;
+      }
+      throw OrderApiException.idempotencyInProgress();
     }
 
     try {
@@ -100,6 +114,21 @@ public class OrderHoldRecheckService {
           });
       throw ex;
     }
+  }
+
+  private OrderViews.HoldRecheckResponse replayIfCompleted(
+      OrderHoldRecheckIdempotency.LookupResult lookup) {
+    if (lookup.state() != OrderHoldRecheckIdempotency.LookupState.COMPLETED) {
+      return null;
+    }
+    return json.treeToValue(lookup.stored().body(), OrderViews.HoldRecheckResponse.class);
+  }
+
+  private static boolean isRecheckable(SalesOrder order) {
+    return "ACTIVE".equals(order.orderStatus())
+        && "UNFULFILLED".equals(order.fulfillmentStatus())
+        && ("SKU_NOT_MAPPED".equals(order.holdReason())
+            || "OUT_OF_STOCK".equals(order.holdReason()));
   }
 
   private static String sha256(String canonical) {

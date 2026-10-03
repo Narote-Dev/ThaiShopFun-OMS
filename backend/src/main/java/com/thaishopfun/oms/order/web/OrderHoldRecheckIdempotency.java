@@ -1,7 +1,6 @@
 package com.thaishopfun.oms.order.web;
 
 import com.thaishopfun.oms.stock.IdempotencyConflictException;
-import java.sql.ResultSet;
 import java.util.UUID;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.ResultSetExtractor;
@@ -16,6 +15,26 @@ class OrderHoldRecheckIdempotency {
 
   record Stored(int status, JsonNode body) {}
 
+  enum LookupState {
+    NOT_FOUND,
+    IN_PROGRESS,
+    COMPLETED
+  }
+
+  record LookupResult(LookupState state, Stored stored) {
+    static LookupResult notFound() {
+      return new LookupResult(LookupState.NOT_FOUND, null);
+    }
+
+    static LookupResult inProgress() {
+      return new LookupResult(LookupState.IN_PROGRESS, null);
+    }
+
+    static LookupResult completed(Stored stored) {
+      return new LookupResult(LookupState.COMPLETED, stored);
+    }
+  }
+
   private final JdbcTemplate jdbc;
   private final JsonMapper json;
 
@@ -24,23 +43,7 @@ class OrderHoldRecheckIdempotency {
     this.json = json;
   }
 
-  Stored claim(UUID tenantId, String key, String requestHash) {
-    Boolean inserted =
-        jdbc.query(
-            """
-            INSERT INTO idempotency_key (tenant_id, scope, "key", request_hash)
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT (tenant_id, scope, "key") DO NOTHING
-            RETURNING true
-            """,
-            (ResultSetExtractor<Boolean>) ResultSet::next,
-            tenantId,
-            SCOPE,
-            key,
-            requestHash);
-    if (Boolean.TRUE.equals(inserted)) {
-      return null;
-    }
+  LookupResult lookup(UUID tenantId, String key, String requestHash) {
     return jdbc.query(
         """
         SELECT request_hash, response_status, response_body::text AS body
@@ -49,7 +52,7 @@ class OrderHoldRecheckIdempotency {
         """,
         rs -> {
           if (!rs.next()) {
-            throw new IllegalStateException("idempotency key conflicted but is not visible");
+            return LookupResult.notFound();
           }
           if (!requestHash.equals(rs.getString("request_hash"))) {
             throw new IdempotencyConflictException(SCOPE);
@@ -57,13 +60,30 @@ class OrderHoldRecheckIdempotency {
           Integer status = rs.getObject("response_status", Integer.class);
           String body = rs.getString("body");
           if (status == null || body == null) {
-            throw new IllegalStateException("idempotency key has no stored result");
+            return LookupResult.inProgress();
           }
-          return new Stored(status, json.readTree(body));
+          return LookupResult.completed(new Stored(status, json.readTree(body)));
         },
         tenantId,
         SCOPE,
         key);
+  }
+
+  boolean tryClaim(UUID tenantId, String key, String requestHash) {
+    Boolean inserted =
+        jdbc.query(
+            """
+            INSERT INTO idempotency_key (tenant_id, scope, "key", request_hash)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT (tenant_id, scope, "key") DO NOTHING
+            RETURNING true
+            """,
+            (ResultSetExtractor<Boolean>) rs -> rs.next(),
+            tenantId,
+            SCOPE,
+            key,
+            requestHash);
+    return Boolean.TRUE.equals(inserted);
   }
 
   void complete(UUID tenantId, String key, int status, JsonNode body) {

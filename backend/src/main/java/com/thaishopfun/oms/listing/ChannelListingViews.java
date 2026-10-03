@@ -22,6 +22,7 @@ final class ChannelListingViews {
       @JsonProperty("sku_name") String skuName,
       @JsonProperty("mapping_source") String mappingSource,
       @JsonProperty("mapped_at") Instant mappedAt,
+      @JsonProperty("removed_at") Instant removedAt,
       @JsonProperty("stock_control") boolean stockControl,
       @JsonProperty("held_orders") long heldOrders) {}
 
@@ -54,6 +55,7 @@ final class ChannelListingViews {
         row.skuName(),
         row.mappingSource(),
         row.mappedAt(),
+        row.removedAt(),
         row.stockControl(),
         row.heldOrders());
   }

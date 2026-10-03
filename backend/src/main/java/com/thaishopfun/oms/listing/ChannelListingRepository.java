@@ -219,7 +219,7 @@ public class ChannelListingRepository {
     UUID newSku =
         jdbc.queryForObject("SELECT sku_id FROM channel_listing WHERE id = ?", UUID.class, id);
     boolean mappingChanged = existingSku == null && newSku != null;
-    boolean newlyMapped = Boolean.TRUE.equals(inserted) && newSku != null;
+    boolean newlyMapped = existingSku == null && newSku != null;
     return new UpsertResult(
         id,
         Boolean.TRUE.equals(inserted),

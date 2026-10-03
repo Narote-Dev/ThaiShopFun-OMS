@@ -8,6 +8,7 @@ import com.thaishopfun.oms.channel.api.ListingPage;
 import com.thaishopfun.oms.channel.exception.ChannelClientException;
 import com.thaishopfun.oms.channel.exception.ChannelServerErrorException;
 import com.thaishopfun.oms.channel.exception.ChannelUnavailableException;
+import com.thaishopfun.oms.order.hold.OrderHoldProperties;
 import com.thaishopfun.oms.order.hold.OrderHoldResolverJob;
 import com.thaishopfun.oms.order.hold.OrderHoldResolverJob.ReevalSummary;
 import com.thaishopfun.oms.tenant.TenantContext;
@@ -35,6 +36,7 @@ public class ChannelListingSyncService {
   private final ChannelListingRepository listings;
   private final ChannelAdapterRegistry adapters;
   private final OrderHoldResolverJob resolverJob;
+  private final OrderHoldProperties holdProperties;
   private final JdbcTemplate jdbc;
 
   public ChannelListingSyncService(
@@ -43,12 +45,14 @@ public class ChannelListingSyncService {
       ChannelListingRepository listings,
       ChannelAdapterRegistry adapters,
       OrderHoldResolverJob resolverJob,
+      OrderHoldProperties holdProperties,
       JdbcTemplate jdbc) {
     this.access = access;
     this.tx = tx;
     this.listings = listings;
     this.adapters = adapters;
     this.resolverJob = resolverJob;
+    this.holdProperties = holdProperties;
     this.jdbc = jdbc;
   }
 
@@ -111,9 +115,14 @@ public class ChannelListingSyncService {
               return new SyncResult(fetched.size(), created, updated, autoMapped, 0, mappedSkus);
             });
     int reevaluated = 0;
+    int remainingCap = holdProperties.getReevalCap();
     for (String externalSkuId : written.mappedSkus()) {
-      ReevalSummary summary = resolverJob.reevalAfterMapping(channelAccountId, externalSkuId);
-      reevaluated += summary.released() + summary.outOfStock();
+      ReevalSummary summary =
+          resolverJob.reevalForListing(
+              channelAccountId, externalSkuId, Math.max(0, remainingCap));
+      int processed = summary.released() + summary.outOfStock() + summary.stillHeld();
+      reevaluated += processed;
+      remainingCap -= processed;
     }
     return new SyncResult(
         written.fetched(),

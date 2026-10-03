@@ -98,9 +98,13 @@ export default function ListingsPage({ me }: { me: Me }) {
   }, [])
 
   useEffect(() => {
-    const timer = window.setTimeout(() => setQ(searchDraft), 400)
+    const timer = window.setTimeout(() => {
+      setQ(searchDraft)
+      setOffset(0)
+      writeHash(channelAccountId, mappedFilter, searchDraft, 0)
+    }, 400)
     return () => window.clearTimeout(timer)
-  }, [searchDraft])
+  }, [searchDraft, channelAccountId, mappedFilter])
 
   useEffect(() => {
     if (!channelAccountId) return
@@ -269,7 +273,12 @@ export default function ListingsPage({ me }: { me: Me }) {
         <tbody>
           {items.map((row) => (
             <tr key={row.id}>
-              <td>{row.external_sku_id}</td>
+              <td>
+                {row.external_sku_id}
+                {row.removed_at ? (
+                  <span className="badge removed" title="Removed on channel"> removed</span>
+                ) : null}
+              </td>
               <td>{row.seller_sku ?? '—'}</td>
               <td>{row.name ?? '—'}</td>
               <td>

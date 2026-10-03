@@ -6,14 +6,19 @@ import com.thaishopfun.oms.channel.exception.ChannelRateLimitedException;
 import com.thaishopfun.oms.channel.exception.ChannelServerErrorException;
 import com.thaishopfun.oms.channel.exception.ChannelUnavailableException;
 import com.thaishopfun.oms.channel.exception.UnsupportedCapabilityException;
+import com.thaishopfun.oms.catalog.CatalogApiException;
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 @RestControllerAdvice(basePackages = "com.thaishopfun.oms.listing")
 class ListingErrorHandler {
@@ -23,6 +28,32 @@ class ListingErrorHandler {
   @ExceptionHandler(ListingApiException.class)
   ResponseEntity<Map<String, Object>> handle(ListingApiException ex, HttpServletRequest request) {
     return body(request, ex.status(), ex.code(), ex.getMessage());
+  }
+
+  @ExceptionHandler(CatalogApiException.class)
+  ResponseEntity<Map<String, Object>> catalog(CatalogApiException ex, HttpServletRequest request) {
+    return body(request, ex.status(), ex.code(), ex.getMessage());
+  }
+
+  @ExceptionHandler(HttpMessageNotReadableException.class)
+  ResponseEntity<Map<String, Object>> unreadable(
+      HttpMessageNotReadableException ex, HttpServletRequest request) {
+    return body(request, 422, "VALIDATION_FAILED", "Request body is invalid");
+  }
+
+  @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+  ResponseEntity<Map<String, Object>> mismatch(
+      MethodArgumentTypeMismatchException ex, HttpServletRequest request) {
+    if (ex.getParameter().hasParameterAnnotation(PathVariable.class)) {
+      return body(request, 404, "NOT_FOUND", "Not found");
+    }
+    return body(request, 422, "VALIDATION_FAILED", ex.getName() + " is invalid");
+  }
+
+  @ExceptionHandler(MissingServletRequestParameterException.class)
+  ResponseEntity<Map<String, Object>> missing(
+      MissingServletRequestParameterException ex, HttpServletRequest request) {
+    return body(request, 422, "VALIDATION_FAILED", "A required parameter is missing");
   }
 
   @ExceptionHandler(UnsupportedCapabilityException.class)

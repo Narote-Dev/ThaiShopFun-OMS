@@ -49,6 +49,34 @@ class ChannelListingApiTest extends OrderIntegrationTest {
   }
 
   @Test
+  void staffCannotPutDeleteMappingOrSync() throws Exception {
+    UUID listing =
+        jdbc.queryForObject(
+            "SELECT id FROM channel_listing WHERE external_sku_id = 'L-api'",
+            UUID.class);
+    UUID sku =
+        jdbc.queryForObject(
+            "SELECT id FROM sku WHERE tenant_id = ? LIMIT 1", UUID.class, shop.tenantId());
+    String staff = http.catalog().member(shop, "STAFF");
+    assertThat(
+            http.catalog()
+                .put(
+                    "/api/v1/channel-listings/" + listing + "/mapping",
+                    staff,
+                    java.util.Map.of("sku_id", sku.toString()))
+                .status())
+        .isEqualTo(403);
+    assertThat(
+            http.catalog().delete("/api/v1/channel-listings/" + listing + "/mapping", staff).status())
+        .isEqualTo(403);
+    assertThat(
+            http.catalog()
+                .post("/api/v1/channel-accounts/" + accountId + "/listing-syncs", staff, null)
+                .status())
+        .isEqualTo(403);
+  }
+
+  @Test
   void listReturnsTenantListingsOverHttp() throws Exception {
     CatalogHttp.Result response =
         http.get(

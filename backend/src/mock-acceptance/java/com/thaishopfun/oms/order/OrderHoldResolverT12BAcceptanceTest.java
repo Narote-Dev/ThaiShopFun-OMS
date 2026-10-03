@@ -276,6 +276,18 @@ class OrderHoldResolverT12BAcceptanceTest {
     assertThat(first.statusCode()).isEqualTo(200);
     assertThat(second.statusCode()).isEqualTo(200);
     assertThat(first.body()).isEqualTo(second.body());
+    long auditRows =
+        fixture.inTenant(
+            shop.tenant(),
+            () ->
+                jdbc.queryForObject(
+                    """
+                    SELECT count(*) FROM audit_log
+                    WHERE action = 'ORDER_HOLD_RECHECKED' AND entity_id = ?
+                    """,
+                    Long.class,
+                    orderId));
+    assertThat(auditRows).isEqualTo(1);
   }
 
   private void ingest(ObjectNode event) throws Exception {
