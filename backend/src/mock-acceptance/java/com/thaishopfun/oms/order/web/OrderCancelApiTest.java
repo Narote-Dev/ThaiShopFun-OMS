@@ -537,6 +537,19 @@ class OrderCancelApiTest extends OrderIntegrationTest {
     }
   }
 
+  private void assertDemoOrderStatus(String externalId, String orderStatus) throws Exception {
+    try (Connection admin = AuthTestSupport.admin();
+        PreparedStatement ps =
+            admin.prepareStatement(
+                "SELECT order_status FROM sales_order WHERE external_order_id = ?")) {
+      ps.setString(1, externalId);
+      try (var rs = ps.executeQuery()) {
+        assertThat(rs.next()).as("order %s", externalId).isTrue();
+        assertThat(rs.getString("order_status")).isEqualTo(orderStatus);
+      }
+    }
+  }
+
   private void assertDemoOrderExists(String externalId) throws Exception {
     try (Connection admin = AuthTestSupport.admin();
         PreparedStatement ps =
