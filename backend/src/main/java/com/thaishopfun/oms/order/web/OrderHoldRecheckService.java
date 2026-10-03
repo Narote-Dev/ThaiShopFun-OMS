@@ -9,6 +9,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
@@ -17,6 +18,8 @@ import tools.jackson.databind.node.ObjectNode;
 
 @Service
 public class OrderHoldRecheckService {
+
+  static final int MAX_CLIENT_IDEMPOTENCY_KEY_LENGTH = 128;
 
   private final OrderAccess access;
   private final OrderTransactions tx;
@@ -50,6 +53,18 @@ public class OrderHoldRecheckService {
           "Idempotency-Key", "Idempotency-Key is required");
     }
     String clientKey = idempotencyKeyHeader.trim();
+    if (clientKey.length() > MAX_CLIENT_IDEMPOTENCY_KEY_LENGTH) {
+      throw new OrderApiException(
+          422,
+          "VALIDATION_FAILED",
+          "Idempotency-Key must be at most 128 characters",
+          List.of(
+              Map.of(
+                  "field",
+                  "Idempotency-Key",
+                  "message",
+                  "Idempotency-Key must be at most 128 characters")));
+    }
     String key = orderId + ":" + clientKey;
     String hash = sha256(orderId + "|" + clientKey);
 

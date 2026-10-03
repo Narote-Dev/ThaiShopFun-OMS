@@ -229,4 +229,26 @@ describe('ListingsPage', () => {
     expect(screen.queryByText('Selected: DEMO')).toBeNull()
     expect(screen.getByText('Map L-two')).toBeTruthy()
   })
+
+  it('resets offset on first search after fast account load', async () => {
+    vi.useFakeTimers()
+    window.location.hash = '#/channel/listings?channel_account_id=ca-1&mapped=false&offset=25'
+    const { fetchImpl } = stubFetch(({ url }) => {
+      if (url.includes('/channel-accounts') && !url.includes('listing-syncs')) {
+        return { body: { items: [{ id: 'ca-1', channel: 'TSF', external_shop_id: 'shop', status: 'CONNECTED' }] } }
+      }
+      if (url.includes('/channel-listings')) {
+        return { body: { items: [], total: 0, limit: 25, offset: 0 } }
+      }
+      return { body: { items: [], total: 0, limit: 10, offset: 0 } }
+    })
+    configureApi({ getAccessToken: () => 't', fetchImpl })
+    render(<ListingsPage me={owner} />)
+    await vi.runOnlyPendingTimersAsync()
+    fireEvent.change(screen.getByLabelText('Search listings'), { target: { value: 'widget' } })
+    await vi.advanceTimersByTimeAsync(400)
+    expect(window.location.hash).not.toContain('offset=25')
+    expect(window.location.hash).toContain('q=widget')
+    vi.useRealTimers()
+  })
 })

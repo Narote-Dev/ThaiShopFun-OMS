@@ -109,6 +109,7 @@ export default function ListingsPage({ me }: { me: Me }) {
     const timer = window.setTimeout(() => {
       if (searchDebounceBoot.current) {
         searchDebounceBoot.current = false
+        channelAccountLoadBoot.current = false
         if (searchDraft !== q) {
           setQ(searchDraft)
         }

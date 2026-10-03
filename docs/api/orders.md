@@ -41,6 +41,7 @@ List items may include `phone_masked`.
 
 `POST /orders/{id}/hold-rechecks` with header `Idempotency-Key` (required).
 
+- `Idempotency-Key`: non-blank after trim, at most **128** characters. Longer → `422 VALIDATION_FAILED` with field `Idempotency-Key` (no idempotency row is created).
 - Re-runs hold resolution for orders on `SKU_NOT_MAPPED` or `OUT_OF_STOCK`.
 - `409 HOLD_NOT_RECHECKABLE` when the order is not on a recheckable hold.
 - Idempotent per order and key: completed replays return the stored body without a second audit row; same key while a request is in flight → `409 IDEMPOTENCY_IN_PROGRESS` with `Retry-After: 1`; different payload hash → `422 IDEMPOTENCY_KEY_REUSED`.

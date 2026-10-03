@@ -426,6 +426,54 @@ class OrderIntakeAcceptanceTest {
     assertThat(note).isNotBlank();
   }
 
+  @Test
+  void removedListingTreatedAsUnmappedAtIntake() throws Exception {
+    StockFixture.Shop shop = fixture.shop("ACTIVE");
+    String shopId = fixture.tsfShopId(shop);
+    UUID account = fixture.tsfChannelAccount(shop, "ACTIVE", "CONNECTED");
+    UUID sku = fixture.sku(shop, 10);
+    fixture.channelListing(shop, account, "L-removed-intake", sku, true);
+    fixture.inTenant(
+        shop.tenant(),
+        () ->
+            jdbc.update(
+                """
+                UPDATE channel_listing SET removed_at = now()
+                WHERE channel_account_id = ? AND external_sku_id = ?
+                """,
+                account,
+                "L-removed-intake"));
+
+    String externalOrderId = "TSF-REM-INTAKE-" + UUID.randomUUID();
+    ObjectNode created =
+        orderCreated(
+            externalOrderId, shopId, UUID.randomUUID().toString(), "COD", "L-removed-intake", 1, 1);
+    ingest(created);
+    assertThat(worker.processAvailable(10)).isEqualTo(1);
+    assertThat(
+            fixture.inTenant(
+                shop.tenant(),
+                () ->
+                    jdbc.queryForObject(
+                        "SELECT hold_reason FROM sales_order WHERE external_order_id = ?",
+                        String.class,
+                        externalOrderId)))
+        .isEqualTo("SKU_NOT_MAPPED");
+    assertThat(
+            fixture.inTenant(
+                shop.tenant(),
+                () ->
+                    jdbc.queryForObject(
+                        """
+                        SELECT count(*) FROM stock_reservation sr
+                        JOIN sales_order so ON so.id::text = sr.owner_ref
+                        WHERE so.external_order_id = ?
+                        """,
+                        Long.class,
+                        externalOrderId)))
+        .isZero();
+  }
+
   private HttpResponse<String> checkoutPost(
       String checkoutId, String shopId, String listingSku, int qty) throws Exception {
     ObjectNode body = JSON.createObjectNode();

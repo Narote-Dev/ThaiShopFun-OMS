@@ -24,6 +24,11 @@ public final class OrderHttp {
     return catalog.post(path, token, body);
   }
 
+  public CatalogHttp.Result postHoldRecheck(String orderId, String token, String idempotencyKey) {
+    return catalog.postWithIdempotencyKey(
+        ordersPath("/" + orderId + "/hold-rechecks"), token, idempotencyKey);
+  }
+
   public static String ordersPath(String suffix) {
     return "/api/v1/orders" + suffix;
   }

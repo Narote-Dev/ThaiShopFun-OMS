@@ -399,6 +399,7 @@ public class OrderIntakeSupport {
             """
             SELECT sku_id FROM channel_listing
             WHERE channel_account_id = ? AND external_sku_id = ?
+              AND removed_at IS NULL
             """,
             (rs, row) -> rs.getObject("sku_id", UUID.class),
             channelAccountId,
