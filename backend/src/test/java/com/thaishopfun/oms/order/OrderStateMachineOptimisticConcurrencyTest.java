@@ -71,7 +71,7 @@ class OrderStateMachineOptimisticConcurrencyTest {
                       () -> {
                         SalesOrder current = orders.findById(order.id()).orElseThrow();
                         bothLoaded.countDown();
-                        release.await(10, TimeUnit.SECONDS);
+                        awaitRelease(release);
                         stateMachine.applyPaymentStatus(
                             current, "PAID", "race", "TEST", Instant.now(), guards);
                         return null;
@@ -91,7 +91,7 @@ class OrderStateMachineOptimisticConcurrencyTest {
                       () -> {
                         SalesOrder current = orders.findById(order.id()).orElseThrow();
                         bothLoaded.countDown();
-                        release.await(10, TimeUnit.SECONDS);
+                        awaitRelease(release);
                         stateMachine.applyHoldReason(current, "MANUAL", "race", "race", "TEST");
                         return null;
                       });
@@ -195,6 +195,17 @@ class OrderStateMachineOptimisticConcurrencyTest {
       throw new IllegalStateException(ex);
     }
     return new Shop(tenant, channelAccount);
+  }
+
+  private static void awaitRelease(CountDownLatch release) {
+    try {
+      if (!release.await(10, TimeUnit.SECONDS)) {
+        throw new IllegalStateException("release latch timed out");
+      }
+    } catch (InterruptedException ex) {
+      Thread.currentThread().interrupt();
+      throw new IllegalStateException(ex);
+    }
   }
 
   private static void exec(Connection admin, String sql, Object... params) throws SQLException {
