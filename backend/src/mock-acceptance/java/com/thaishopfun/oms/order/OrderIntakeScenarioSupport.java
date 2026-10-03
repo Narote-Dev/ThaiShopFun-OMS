@@ -37,7 +37,9 @@ final class OrderIntakeScenarioSupport {
     event.put("occurred_at", Instant.now().truncatedTo(ChronoUnit.SECONDS).toString());
     ObjectNode data = (ObjectNode) event.get("data");
     data.put("order_id", orderId);
-    data.put("reservation_id", reservationId);
+    if (reservationId != null) {
+      data.put("reservation_id", reservationId);
+    }
     data.put("payment_method", paymentMethod);
     if ("PREPAID".equals(paymentMethod)) {
       data.put("payment_expires_at", Instant.now().plus(30, ChronoUnit.MINUTES).toString());
@@ -76,7 +78,9 @@ final class OrderIntakeScenarioSupport {
     event.put("occurred_at", Instant.now().truncatedTo(ChronoUnit.SECONDS).toString());
     ObjectNode data = (ObjectNode) event.get("data");
     data.put("order_id", orderId);
-    data.put("reservation_id", reservationId);
+    if (reservationId != null) {
+      data.put("reservation_id", reservationId);
+    }
     data.put("payment_method", paymentMethod);
     ArrayNode lines = json.createArrayNode();
     ObjectNode lineA = json.createObjectNode();

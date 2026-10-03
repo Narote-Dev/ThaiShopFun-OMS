@@ -85,7 +85,7 @@ public abstract class BaseChannelAdapter implements ChannelAdapter {
 
   @Override
   public final ListingPage listListings(ChannelAccountRef account, String cursor) {
-    requireCapability("listListings", capabilities()::supportsStockPush);
+    requireCapability("listListings", capabilities()::supportsListingSync);
     return invoke(account, "listListings", deadline -> doListListings(account, cursor, deadline));
   }
 

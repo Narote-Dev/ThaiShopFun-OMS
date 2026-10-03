@@ -194,6 +194,7 @@ class DeliveryChaosTest {
   @Autowired private InboxHandlerRegistry registry;
   @Autowired private InboxEntitlementPolicy policy;
   @Autowired private ReconciliationIssueRepository reconciliation;
+  @Autowired private com.thaishopfun.oms.inbox.InboxAggregateLock aggregateLock;
   @Autowired private JdbcTemplate jdbc;
   @Autowired private PlatformTransactionManager transactions;
   @Autowired private JsonMapper jsonMapper;
@@ -787,7 +788,15 @@ class DeliveryChaosTest {
 
   private InboxWorker freshInboxWorker() {
     return new InboxWorker(
-        inboxProperties, registry, policy, reconciliation, jdbc, transactions, jsonMapper, meters);
+        inboxProperties,
+        registry,
+        policy,
+        reconciliation,
+        aggregateLock,
+        jdbc,
+        transactions,
+        jsonMapper,
+        meters);
   }
 
   private static final String INBOUND_ID_PATTERN = "chaos-in-" + SEED + "-%";

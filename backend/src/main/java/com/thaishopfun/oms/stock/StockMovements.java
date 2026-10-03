@@ -433,7 +433,7 @@ public class StockMovements {
     }
     SkuInfo sku = repository.skus(Set.of(skuId)).get(skuId);
     if (sku == null) {
-      throw new StockOperationException(StockError.UNKNOWN_SKU, "unknown sku " + skuId);
+      throw new StockOperationException(StockError.UNKNOWN_SKU, "unknown sku " + skuId, skuId);
     }
     if (sku.bundle()) {
       throw new StockOperationException(

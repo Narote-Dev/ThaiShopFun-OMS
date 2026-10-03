@@ -41,7 +41,19 @@ export default function HoldQueuePage() {
           {groups.map((group) => (
             <tr key={`${group.hold_reason}-${group.hold_detail ?? ''}`}>
               <td>{group.hold_reason}</td>
-              <td>{group.hold_detail ?? '—'}</td>
+              <td>
+                {group.hold_reason === 'SKU_NOT_MAPPED' ? (
+                  <a
+                    href={`#/channel/listings?channel_account_id=${encodeURIComponent(
+                      group.samples[0]?.channel_account_id ?? '',
+                    )}&mapped=false`}
+                  >
+                    Map unmapped listings
+                  </a>
+                ) : (
+                  group.hold_detail ?? '—'
+                )}
+              </td>
               <td>{group.count}</td>
               <td>
                 {group.samples[0] ? (

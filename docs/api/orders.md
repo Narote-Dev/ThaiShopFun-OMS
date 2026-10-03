@@ -37,6 +37,18 @@ List items may include `phone_masked`.
 
 `GET /orders/holds` — groups with `hold_reason`, optional `hold_detail` (`BUNDLE_WITHOUT_COMPONENTS` for componentless bundles on `OUT_OF_STOCK`), `count`, and up to five sample orders per group.
 
+## Hold recheck
+
+`POST /orders/{id}/hold-rechecks` with header `Idempotency-Key` (required).
+
+- Re-runs hold resolution for orders on `SKU_NOT_MAPPED` or `OUT_OF_STOCK`.
+- `409 HOLD_NOT_RECHECKABLE` when the order is not on a recheckable hold.
+- Idempotent per order and key: completed replays return the stored body without a second audit row; same key while a request is in flight → `409 IDEMPOTENCY_IN_PROGRESS` with `Retry-After: 1`; different payload hash → `422 IDEMPOTENCY_KEY_REUSED`.
+- Successful first completion writes audit `ORDER_HOLD_RECHECKED` once.
+- Stock engine idempotency keys for remap/recheck include a per-attempt UUID so a failed attempt does not block retries; safe because resolution runs inside the per-order transaction and is serialized by the order aggregate lock.
+- `409 ORDER_OPTIMISTIC_LOCK` when the order version changes under concurrent updates.
+- **PREPAID unpaid:** during hold recheck (and late mapping re-eval), `ensureOrderHold` may reserve stock **without** `expires_at` for unpaid PREPAID orders. TSF `order.cancelled` on payment timeout is expected to release that stock; the engine does not set a reservation expiry in this path.
+
 ## Request cancel
 
 `POST /orders/{id}/cancel-requests` body `{ "reason": "..." }`.

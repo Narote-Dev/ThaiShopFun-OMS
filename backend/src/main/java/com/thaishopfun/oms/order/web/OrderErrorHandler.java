@@ -10,6 +10,7 @@ import com.thaishopfun.oms.channel.exception.ChannelServerErrorException;
 import com.thaishopfun.oms.channel.exception.ChannelUnavailableException;
 import com.thaishopfun.oms.order.OrderOptimisticLockException;
 import com.thaishopfun.oms.order.OrderStateException;
+import com.thaishopfun.oms.stock.IdempotencyConflictException;
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -32,7 +33,26 @@ class OrderErrorHandler {
 
   @ExceptionHandler(OrderApiException.class)
   ResponseEntity<Map<String, Object>> order(OrderApiException ex, HttpServletRequest request) {
-    return body(request, ex.status(), ex.code(), ex.getMessage(), ex.details());
+    ResponseEntity<Map<String, Object>> response =
+        body(request, ex.status(), ex.code(), ex.getMessage(), ex.details());
+    if ("IDEMPOTENCY_IN_PROGRESS".equals(ex.code())) {
+      return ResponseEntity.status(ex.status())
+          .headers(response.getHeaders())
+          .header("Retry-After", "1")
+          .body(response.getBody());
+    }
+    return response;
+  }
+
+  @ExceptionHandler(IdempotencyConflictException.class)
+  ResponseEntity<Map<String, Object>> holdRecheckIdempotency(
+      IdempotencyConflictException ex, HttpServletRequest request) {
+    return body(
+        request,
+        422,
+        "IDEMPOTENCY_KEY_REUSED",
+        "Idempotency-Key was already used with a different request",
+        List.of());
   }
 
   @ExceptionHandler(ChannelIdempotencyConflictException.class)
@@ -46,9 +66,15 @@ class OrderErrorHandler {
         List.of());
   }
 
-  @ExceptionHandler({OrderStateException.class, OrderOptimisticLockException.class})
+  @ExceptionHandler(OrderOptimisticLockException.class)
+  ResponseEntity<Map<String, Object>> optimisticLock(
+      OrderOptimisticLockException ex, HttpServletRequest request) {
+    return body(request, 409, "ORDER_OPTIMISTIC_LOCK", ex.getMessage(), List.of());
+  }
+
+  @ExceptionHandler(OrderStateException.class)
   ResponseEntity<Map<String, Object>> stateConflict(
-      RuntimeException ex, HttpServletRequest request) {
+      OrderStateException ex, HttpServletRequest request) {
     return body(request, 409, "ORDER_NOT_CANCELLABLE", ex.getMessage(), List.of());
   }
 

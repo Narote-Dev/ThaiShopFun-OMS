@@ -70,17 +70,71 @@ public class OrderDemoCatalogService {
     stock(shop, cod, 50);
     stock(shop, oos, 0);
     stock(shop, component, 50);
-    ensureListing(shop, "L-demo-ready", ready, true);
-    ensureListing(shop, "L-demo-cod", cod, true);
-    ensureListing(shop, "L-demo-oos", oos, true);
-    ensureListing(shop, "L-demo-bundle", bundleEmpty, true);
-    ensureListing(shop, "L-demo-cancel", cod, true);
-    ensureListing(shop, "L-demo-missing", null, false);
+    List<UUID> tsfAccounts = listTsfChannelAccounts(shop.tenantId());
+    List<UUID> demoOrderAccounts =
+        jdbc.query(
+            """
+            SELECT DISTINCT so.channel_account_id
+            FROM sales_order so
+            WHERE so.tenant_id = ? AND so.external_order_id LIKE 'DEMO-%'
+            """,
+            (rs, rowNum) -> rs.getObject("channel_account_id", UUID.class), shop.tenantId());
+    java.util.LinkedHashSet<UUID> allAccounts = new java.util.LinkedHashSet<>(tsfAccounts);
+    allAccounts.addAll(demoOrderAccounts);
+    for (UUID channelAccountId : allAccounts) {
+      ensureListing(
+          shop, channelAccountId, "L-demo-ready", ready, true, "DEMO-SKU-READY", "Demo ready");
+      ensureListing(shop, channelAccountId, "L-demo-cod", cod, true, "DEMO-SKU-COD", "Demo COD");
+      ensureListing(shop, channelAccountId, "L-demo-oos", oos, true, "DEMO-SKU-OOS", "Demo OOS");
+      ensureListing(
+          shop,
+          channelAccountId,
+          "L-demo-bundle",
+          bundleEmpty,
+          true,
+          "DEMO-SKU-BUNDLE-EMPTY",
+          "Demo bundle");
+      ensureListing(
+          shop, channelAccountId, "L-demo-cancel", cod, true, "DEMO-SKU-COD", "Demo cancel");
+      ensureListing(
+          shop,
+          channelAccountId,
+          "L-demo-missing",
+          null,
+          false,
+          "DEMO-SKU-MISSING",
+          "Demo unmapped listing");
+    }
+    UUID missingListingAccountId = shop.channelAccountId();
+    List<UUID> unmappedOrderAccounts =
+        jdbc.query(
+            """
+            SELECT channel_account_id FROM sales_order
+            WHERE tenant_id = ? AND external_order_id = 'DEMO-UNMAPPED'
+            LIMIT 1
+            """,
+            (rs, rowNum) -> rs.getObject("channel_account_id", UUID.class),
+            shop.tenantId());
+    if (!unmappedOrderAccounts.isEmpty()) {
+      missingListingAccountId = unmappedOrderAccounts.get(0);
+    }
+    UUID missingListingId =
+        jdbc.queryForObject(
+            """
+            SELECT id FROM channel_listing
+            WHERE channel_account_id = ? AND external_sku_id = 'L-demo-missing'
+            """,
+            UUID.class,
+            missingListingAccountId);
     return Map.of(
         "status",
         "OK",
         "tenant_id",
         shop.tenantId().toString(),
+        "channel_account_id",
+        shop.channelAccountId().toString(),
+        "L_demo_missing_listing_id",
+        missingListingId.toString(),
         "listings",
         List.of(
             "L-demo-ready",
@@ -133,7 +187,10 @@ public class OrderDemoCatalogService {
             """
             SELECT t.id AS tenant_id, ca.id AS channel_account_id
             FROM tenant t
-            JOIN channel_account ca ON ca.tenant_id = t.id AND ca.channel = 'TSF'
+            JOIN channel_account ca
+              ON ca.tenant_id = t.id
+             AND ca.channel = 'TSF'
+             AND ca.external_shop_id = t.tsf_shop_id
             WHERE t.id = ?
             LIMIT 1
             """,
@@ -220,24 +277,56 @@ public class OrderDemoCatalogService {
         onHand);
   }
 
-  private void ensureListing(ShopContext shop, String externalSkuId, UUID skuId, boolean mapped) {
-    Long count =
-        jdbc.queryForObject(
-            "SELECT count(*) FROM channel_listing WHERE tenant_id = ? AND external_sku_id = ?",
-            Long.class,
-            shop.tenantId(),
-            externalSkuId);
-    if (count != null && count > 0) {
-      return;
-    }
+  private List<UUID> listTsfChannelAccounts(UUID tenantId) {
+    return jdbc.query(
+        "SELECT id FROM channel_account WHERE tenant_id = ? AND channel = 'TSF' ORDER BY created_at",
+        (rs, rowNum) -> rs.getObject("id", UUID.class),
+        tenantId);
+  }
+
+  private void ensureListing(
+      ShopContext shop,
+      UUID channelAccountId,
+      String externalSkuId,
+      UUID skuId,
+      boolean mapped,
+      String sellerSku,
+      String name) {
+    java.time.OffsetDateTime mappedAt = mapped ? java.time.OffsetDateTime.now() : null;
     jdbc.update(
-        "INSERT INTO channel_listing (id, tenant_id, channel_account_id, sku_id, external_sku_id, stock_control) "
-            + "VALUES (?, ?, ?, ?, ?, ?)",
+        """
+        INSERT INTO channel_listing (
+          id, tenant_id, channel_account_id, sku_id, external_sku_id, seller_sku, name,
+          stock_control, mapping_source, mapped_at, removed_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+        ON CONFLICT (channel_account_id, external_sku_id) DO UPDATE SET
+          seller_sku = EXCLUDED.seller_sku,
+          name = EXCLUDED.name,
+          stock_control = EXCLUDED.stock_control,
+          removed_at = NULL,
+          updated_at = now(),
+          sku_id = CASE
+            WHEN EXCLUDED.sku_id IS NOT NULL THEN EXCLUDED.sku_id
+            ELSE channel_listing.sku_id
+          END,
+          mapping_source = CASE
+            WHEN EXCLUDED.sku_id IS NOT NULL THEN EXCLUDED.mapping_source
+            ELSE channel_listing.mapping_source
+          END,
+          mapped_at = CASE
+            WHEN EXCLUDED.sku_id IS NOT NULL THEN EXCLUDED.mapped_at
+            ELSE channel_listing.mapped_at
+          END
+        """,
         UuidV7.generate(),
         shop.tenantId(),
-        shop.channelAccountId(),
+        channelAccountId,
         mapped ? skuId : null,
         externalSkuId,
-        true);
+        sellerSku,
+        name,
+        true,
+        mapped ? "MANUAL" : null,
+        mappedAt);
   }
 }

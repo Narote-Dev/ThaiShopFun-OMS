@@ -38,6 +38,11 @@ public class OrderApiException extends RuntimeException {
     return new OrderApiException(409, code, message);
   }
 
+  public static OrderApiException idempotencyInProgress() {
+    return new OrderApiException(
+        409, "IDEMPOTENCY_IN_PROGRESS", "A request with this Idempotency-Key is still in progress");
+  }
+
   public int status() {
     return status;
   }

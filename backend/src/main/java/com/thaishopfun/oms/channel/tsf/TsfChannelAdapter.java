@@ -30,7 +30,7 @@ import tools.jackson.databind.json.JsonMapper;
 public class TsfChannelAdapter extends BaseChannelAdapter {
 
   private static final ChannelCapabilities CAPABILITIES =
-      new ChannelCapabilities(true, true, true, true, true, true, false, true);
+      new ChannelCapabilities(true, true, true, true, true, true, true, false, true);
 
   private final TsfHttpTransport transport;
   private final JsonMapper json;
