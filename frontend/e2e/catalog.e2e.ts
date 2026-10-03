@@ -14,12 +14,21 @@ test('owner creates a SKU, finds it by search, and sees a CSV row error', async 
   await page.getByRole('link', { name: 'SKUs', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'SKUs' })).toBeVisible()
   await page.getByRole('link', { name: 'New SKU' }).click()
+  await expect(page.getByRole('heading', { name: 'New SKU' })).toBeVisible()
 
   // Step 2: Create the SKU with a new product in the same call.
-  await page.getByRole('combobox').selectOption({ label: 'New product…' })
-  const newProductName = page.getByLabel('New product name')
-  await expect(newProductName).toBeVisible()
-  await newProductName.fill('E2E Product')
+  const productSelect = page.getByLabel('Product')
+  await expect
+    .poll(
+      async () => {
+        if ((await productSelect.locator('option').count()) < 1) return false
+        await productSelect.selectOption('__new__')
+        return await page.getByLabel('New product name').isVisible()
+      },
+      { timeout: 30_000, intervals: [500] },
+    )
+    .toBeTruthy()
+  await page.getByLabel('New product name').fill('E2E Product')
   await page.getByLabel('SKU code').fill(code)
   await page.getByLabel('Name', { exact: true }).fill('E2E red mug')
   await page.getByLabel('Barcode').fill(`885${Date.now()}`)
