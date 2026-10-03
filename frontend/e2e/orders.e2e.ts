@@ -90,10 +90,10 @@ test('owner maps unmapped listing and order becomes ready to pick', async ({ pag
     headers: { Authorization: `Bearer ${token}` },
   })
   expect(me.ok()).toBeTruthy()
-  const catalog = await request.post('http://127.0.0.1:8080/control/demo/order-catalog')
-  expect(catalog.ok()).toBeTruthy()
   const seed = await request.post('http://127.0.0.1:8090/control/demo/orders-seed')
   expect(seed.ok()).toBeTruthy()
+  const catalog = await request.post('http://127.0.0.1:8080/control/demo/order-catalog')
+  expect(catalog.ok()).toBeTruthy()
 
   const ordersResponse = await request.get(
     'http://127.0.0.1:8080/api/v1/orders?hold_reason=SKU_NOT_MAPPED&limit=10',
