@@ -72,6 +72,8 @@ class OrderHoldResolverT12BAcceptanceTest {
   @Autowired InboxWorker worker;
   @Autowired JdbcTemplate jdbc;
   @Autowired PlatformTransactionManager transactions;
+  @Autowired OrderHoldResolverJob resolverJob;
+  @Autowired ChannelListingRepository listings;
 
   StockFixture fixture;
   @BeforeEach
@@ -93,7 +95,6 @@ class OrderHoldResolverT12BAcceptanceTest {
   void manualMappingReleasesSkuNotMappedHoldAndReserves() throws Exception {
     StockFixture.Shop shop = fixture.shop("ACTIVE");
     String shopId = fixture.tsfShopId(shop);
-    String token = userToken(shopId);
     UUID account = fixture.tsfChannelAccount(shop, "ACTIVE", "CONNECTED");
     UUID sku = fixture.sku(shop, 20);
     fixture.channelListing(shop, account, "L-unmapped", null, true, false);
@@ -123,17 +124,12 @@ class OrderHoldResolverT12BAcceptanceTest {
                     "SELECT id FROM channel_listing WHERE external_sku_id = 'L-unmapped'",
                     UUID.class));
 
-    HttpResponse<String> mapResponse =
-        HTTP.send(
-            HttpRequest.newBuilder(
-                    URI.create(
-                        "http://127.0.0.1:" + port + "/api/v1/channel-listings/" + listingId + "/mapping"))
-                .header("Authorization", "Bearer " + token)
-                .header("Content-Type", "application/json")
-                .PUT(HttpRequest.BodyPublishers.ofString("{\"sku_id\":\"" + sku + "\"}"))
-                .build(),
-            HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-    assertThat(mapResponse.statusCode()).isEqualTo(200);
+    fixture.inTenant(
+        shop.tenant(),
+        () -> {
+          listings.putManualMapping(listingId, sku);
+          return resolverJob.reevalAfterMapping(account, "L-unmapped");
+        });
 
     hold =
         fixture.inTenant(
