@@ -11,7 +11,6 @@ import com.thaishopfun.oms.order.OrderRecipientRepository;
 import com.thaishopfun.oms.order.OrderStatusHistoryRepository;
 import com.thaishopfun.oms.order.SalesOrder;
 import com.thaishopfun.oms.order.SalesOrderRepository;
-import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -53,8 +52,7 @@ class OrderApiReadTest extends OrderIntegrationTest {
     assertThat(list.body().path("items").get(0).path("phone_masked").asString())
         .isEqualTo("***-***-5678");
 
-    CatalogHttp.Result detail =
-        http.get(OrderHttp.ordersPath("/" + ready.id()), httpShop.owner());
+    CatalogHttp.Result detail = http.get(OrderHttp.ordersPath("/" + ready.id()), httpShop.owner());
     assertThat(detail.status()).isEqualTo(200);
     assertThat(detail.raw()).doesNotContain(OrderFixture.NAME).doesNotContain(OrderFixture.PHONE);
     assertThat(detail.body().path("recipient").path("phone_masked").asString())
@@ -77,12 +75,10 @@ class OrderApiReadTest extends OrderIntegrationTest {
     CatalogHttp.Shop httpShop = http.catalog().shop();
     OrderFixture.Shop shop = OrderFixture.shopFor(httpShop);
     fixture.insert(shop, "ORD-PHONE", "UNFULFILLED", "NONE");
-    CatalogHttp.Result found =
-        http.get(OrderHttp.ordersPath("?q=081-234-5678"), httpShop.owner());
+    CatalogHttp.Result found = http.get(OrderHttp.ordersPath("?q=081-234-5678"), httpShop.owner());
     assertThat(found.status()).isEqualTo(200);
     assertThat(found.body().path("total").asInt()).isEqualTo(1);
-    CatalogHttp.Result plus =
-        http.get(OrderHttp.ordersPath("?q=%2B66812345678"), httpShop.owner());
+    CatalogHttp.Result plus = http.get(OrderHttp.ordersPath("?q=%2B66812345678"), httpShop.owner());
     assertThat(plus.body().path("total").asInt()).isEqualTo(1);
   }
 
@@ -92,11 +88,9 @@ class OrderApiReadTest extends OrderIntegrationTest {
     OrderFixture.Shop shop = fixture.shopFor(a);
     SalesOrder order = fixture.insert(shop, "ORD-X", "UNFULFILLED", "NONE");
     CatalogHttp.Shop b = http.catalog().shop();
-    CatalogHttp.Result detail =
-        http.get(OrderHttp.ordersPath("/" + order.id()), b.owner());
+    CatalogHttp.Result detail = http.get(OrderHttp.ordersPath("/" + order.id()), b.owner());
     assertThat(detail.status()).isEqualTo(404);
-    CatalogHttp.Result random =
-        http.get(OrderHttp.ordersPath("/" + UUID.randomUUID()), a.owner());
+    CatalogHttp.Result random = http.get(OrderHttp.ordersPath("/" + UUID.randomUUID()), a.owner());
     assertThat(random.status()).isEqualTo(404);
   }
 
@@ -108,6 +102,7 @@ class OrderApiReadTest extends OrderIntegrationTest {
     CatalogHttp.Result holds = http.get(OrderHttp.ordersPath("/holds"), httpShop.owner());
     assertThat(holds.status()).isEqualTo(200);
     JsonNode groups = holds.body().path("groups");
-    assertThat(groups).anySatisfy(g -> assertThat(g.path("hold_reason").asString()).isEqualTo("SKU_NOT_MAPPED"));
+    assertThat(groups)
+        .anySatisfy(g -> assertThat(g.path("hold_reason").asString()).isEqualTo("SKU_NOT_MAPPED"));
   }
 }

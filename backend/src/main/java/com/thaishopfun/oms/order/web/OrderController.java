@@ -36,18 +36,19 @@ class OrderController {
       @RequestParam(name = "q", required = false) String q,
       @RequestParam(name = "limit", required = false) Integer limit,
       @RequestParam(name = "offset", required = false) Integer offset) {
-    return ok(queries.list(
-        orderStatus,
-        paymentStatus,
-        fulfillmentStatus,
-        holdReason,
-        channel,
-        channelAccountId,
-        orderedFrom,
-        orderedTo,
-        q,
-        limit,
-        offset));
+    return ok(
+        queries.list(
+            orderStatus,
+            paymentStatus,
+            fulfillmentStatus,
+            holdReason,
+            channel,
+            channelAccountId,
+            orderedFrom,
+            orderedTo,
+            q,
+            limit,
+            offset));
   }
 
   @GetMapping("/holds")

@@ -10,8 +10,6 @@ import com.thaishopfun.oms.order.OrderStatusHistoryRepository;
 import com.thaishopfun.oms.order.SalesOrder;
 import com.thaishopfun.oms.order.SalesOrderRepository;
 import com.thaishopfun.oms.stock.ReserveDemandPlanner;
-import com.thaishopfun.oms.tenant.TenantContext;
-import java.math.BigDecimal;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Instant;
@@ -92,9 +90,7 @@ public class OrderQueryService {
         () -> {
           long total =
               jdbc.queryForObject(
-                  "SELECT count(*) FROM sales_order o"
-                      + filter.joins()
-                      + filter.where(),
+                  "SELECT count(*) FROM sales_order o" + filter.joins() + filter.where(),
                   Long.class,
                   filter.params().toArray());
           List<Object> pageParams = new ArrayList<>(filter.params());
@@ -123,9 +119,13 @@ public class OrderQueryService {
     return tx.read(
         () -> {
           SalesOrder order = orders.findById(id).orElseThrow(OrderApiException::notFound);
-          ChannelAccountRow account = channelAccount(order.channelAccountId()).orElseThrow(OrderApiException::notFound);
+          ChannelAccountRow account =
+              channelAccount(order.channelAccountId()).orElseThrow(OrderApiException::notFound);
           boolean supportsCancel =
-              adapters.optional(Channel.valueOf(account.channel())).capabilities().supportsCancelRequest();
+              adapters
+                  .optional(Channel.valueOf(account.channel()))
+                  .capabilities()
+                  .supportsCancelRequest();
           List<OrderViews.LineView> lineViews = loadLines(order.id());
           List<OrderViews.ReservationView> reservations = loadReservations(order.id());
           List<OrderViews.ShipmentView> shipments = loadShipments(order.id());
@@ -195,7 +195,9 @@ public class OrderQueryService {
             counts.merge(key, 1L, Long::sum);
             samples.computeIfAbsent(key, k -> new ArrayList<>());
             if (samples.get(key).size() < 5) {
-              samples.get(key).add(new OrderViews.HoldSample(row.id(), row.externalOrderId(), row.orderedAt()));
+              samples
+                  .get(key)
+                  .add(new OrderViews.HoldSample(row.id(), row.externalOrderId(), row.orderedAt()));
             }
           }
           List<OrderViews.HoldGroup> groups = new ArrayList<>();
@@ -209,10 +211,7 @@ public class OrderQueryService {
             }
             groups.add(
                 new OrderViews.HoldGroup(
-                    holdReason,
-                    holdDetail,
-                    entry.getValue(),
-                    List.copyOf(samples.get(key))));
+                    holdReason, holdDetail, entry.getValue(), List.copyOf(samples.get(key))));
           }
           return new OrderViews.HoldsView(groups);
         });
@@ -408,8 +407,7 @@ public class OrderQueryService {
                   stored.postcode(),
                   stored.piiStatus());
             })
-        .orElse(
-            new OrderViews.RecipientView(null, null, null, null, "MISSING"));
+        .orElse(new OrderViews.RecipientView(null, null, null, null, "MISSING"));
   }
 
   private java.util.Optional<ChannelAccountRow> channelAccount(UUID id) {
@@ -456,9 +454,7 @@ public class OrderQueryService {
     }
     Boolean tracking =
         jdbc.queryForObject(
-            "SELECT EXISTS (SELECT 1 FROM shipment WHERE tracking_no = ?)",
-            Boolean.class,
-            query);
+            "SELECT EXISTS (SELECT 1 FROM shipment WHERE tracking_no = ?)", Boolean.class, query);
     if (Boolean.TRUE.equals(tracking)) {
       return new TrackingSearch(query);
     }
@@ -578,5 +574,4 @@ public class OrderQueryService {
       }
     }
   }
-
 }

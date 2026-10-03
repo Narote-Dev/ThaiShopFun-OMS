@@ -54,11 +54,13 @@ class OrderErrorHandler {
   @ExceptionHandler(ChannelUnavailableException.class)
   ResponseEntity<Map<String, Object>> unavailable(
       ChannelUnavailableException ex, HttpServletRequest request) {
-    return body(request, 503, "CHANNEL_UNAVAILABLE", "Channel is temporarily unavailable", List.of());
+    return body(
+        request, 503, "CHANNEL_UNAVAILABLE", "Channel is temporarily unavailable", List.of());
   }
 
   @ExceptionHandler(ChannelClientException.class)
-  ResponseEntity<Map<String, Object>> client(ChannelClientException ex, HttpServletRequest request) {
+  ResponseEntity<Map<String, Object>> client(
+      ChannelClientException ex, HttpServletRequest request) {
     return body(request, 502, "CHANNEL_ERROR", "Channel rejected the request", List.of());
   }
 

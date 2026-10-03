@@ -15,7 +15,6 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
-import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
@@ -128,7 +127,8 @@ public class DemoOrdersController {
   }
 
   private ObjectNode load(String name) throws IOException {
-    try (InputStream in = DemoOrdersController.class.getResourceAsStream("/contracts/examples/events/" + name)) {
+    try (InputStream in =
+        DemoOrdersController.class.getResourceAsStream("/contracts/examples/events/" + name)) {
       if (in == null) {
         throw new IllegalStateException("missing example " + name);
       }

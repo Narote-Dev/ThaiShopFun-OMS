@@ -9,11 +9,11 @@ import com.thaishopfun.oms.order.SalesOrder;
 import com.thaishopfun.oms.order.SalesOrderRepository;
 import com.thaishopfun.oms.tenant.TenantContext;
 import java.math.BigDecimal;
+import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.UUID;
-import java.sql.PreparedStatement;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -41,7 +41,8 @@ final class OrderFixture {
 
   record Shop(UUID tenantId, UUID channelAccountId, String tsfShopId) {}
 
-  static Shop channelFor(com.thaishopfun.oms.catalog.CatalogHttp.Shop httpShop) throws SQLException {
+  static Shop channelFor(com.thaishopfun.oms.catalog.CatalogHttp.Shop httpShop)
+      throws SQLException {
     return shopFor(httpShop);
   }
 

@@ -43,7 +43,8 @@ public class OrderCancelService {
     this.jdbc = jdbc;
   }
 
-  public OrderViews.CancelResponseView requestCancel(UUID orderId, OrderViews.CancelRequestBody body) {
+  public OrderViews.CancelResponseView requestCancel(
+      UUID orderId, OrderViews.CancelRequestBody body) {
     OrderAccess.Actor actor = access.requireOwnerOrAdmin();
     SalesOrder order = orders.findById(orderId).orElseThrow(OrderApiException::notFound);
     if ("CHANNEL_CANCEL_PENDING".equals(order.holdReason())) {
@@ -61,10 +62,7 @@ public class OrderCancelService {
     try {
       channelResponse =
           adapter.requestCancel(
-              accountRow.ref(),
-              order.externalOrderId(),
-              idempotencyKey,
-              new CancelRequest(reason));
+              accountRow.ref(), order.externalOrderId(), idempotencyKey, new CancelRequest(reason));
     } catch (UnsupportedCapabilityException ex) {
       throw new OrderApiException(422, "CAPABILITY_UNSUPPORTED", ex.getMessage());
     }
@@ -73,7 +71,9 @@ public class OrderCancelService {
           SalesOrder fresh = orders.findById(orderId).orElseThrow(OrderApiException::notFound);
           if ("CHANNEL_CANCEL_PENDING".equals(fresh.holdReason())) {
             return new OrderViews.CancelResponseView(
-                channelResponse.cancelRequestId(), fresh.externalOrderId(), channelResponse.status());
+                channelResponse.cancelRequestId(),
+                fresh.externalOrderId(),
+                channelResponse.status());
           }
           String holdNote = previousHoldNote(fresh);
           stateMachine.applyHoldReason(
