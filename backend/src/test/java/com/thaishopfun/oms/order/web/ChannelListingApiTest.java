@@ -31,11 +31,7 @@ class ChannelListingApiTest extends OrderIntegrationTest {
       statement.execute("SET session_replication_role = DEFAULT");
     }
     shop = http.catalog().shop();
-    accountId =
-        jdbc.queryForObject(
-            "SELECT id FROM channel_account WHERE tenant_id = ? AND channel = 'TSF' LIMIT 1",
-            UUID.class,
-            shop.tenantId());
+    accountId = OrderFixture.shopFor(shop).channelAccountId();
     UUID listing = UuidV7.generate();
     jdbc.update(
         """

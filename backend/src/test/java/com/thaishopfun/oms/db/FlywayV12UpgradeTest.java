@@ -22,8 +22,6 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 class FlywayV12UpgradeTest {
 
   private static final String APP_PASSWORD = "oms-app-test-only";
-  private static final String MIGRATOR_PASSWORD = "oms-migrator-test-only";
-
   @Container
   static PostgreSQLContainer postgres =
       new PostgreSQLContainer("postgres:16-alpine").withInitScript("db/test-oms-app-login.sql");
@@ -33,7 +31,6 @@ class FlywayV12UpgradeTest {
     try (Connection admin = openAdmin();
         Statement statement = admin.createStatement()) {
       statement.execute("ALTER ROLE oms_app LOGIN PASSWORD '" + APP_PASSWORD + "'");
-      statement.execute("ALTER ROLE oms_migrator LOGIN PASSWORD '" + MIGRATOR_PASSWORD + "'");
     }
   }
 
@@ -58,7 +55,7 @@ class FlywayV12UpgradeTest {
     UUID listing = UuidV7.generate();
     try {
       Flyway.configure()
-          .dataSource(url, "oms_migrator", MIGRATOR_PASSWORD)
+          .dataSource(url, postgres.getUsername(), postgres.getPassword())
           .locations("classpath:db/migration")
           .target("11")
           .load()
@@ -102,7 +99,7 @@ class FlywayV12UpgradeTest {
         listingStmt.executeUpdate();
       }
       Flyway.configure()
-          .dataSource(url, "oms_migrator", MIGRATOR_PASSWORD)
+          .dataSource(url, postgres.getUsername(), postgres.getPassword())
           .locations("classpath:db/migration")
           .load()
           .migrate();
@@ -120,7 +117,7 @@ class FlywayV12UpgradeTest {
     } finally {
       try (Connection admin = openAdmin();
           Statement statement = admin.createStatement()) {
-        statement.execute("DROP DATABASE IF EXISTS " + database);
+        statement.execute("DROP DATABASE IF EXISTS " + database + " WITH (FORCE)");
       }
     }
   }

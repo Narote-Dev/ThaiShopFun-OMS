@@ -11,6 +11,9 @@ import com.thaishopfun.oms.inbox.InboxWorker;
 import com.thaishopfun.oms.listing.ChannelListingRepository;
 import com.thaishopfun.oms.order.hold.OrderHoldResolverJob;
 import com.thaishopfun.oms.stock.StockFixture;
+import com.thaishopfun.oms.stock.StockTestConfig;
+import com.thaishopfun.oms.stock.StockTestConfig.Fault;
+import com.thaishopfun.oms.stock.StockTestConfig.FaultHooks;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -24,6 +27,7 @@ import java.util.HexFormat;
 import java.util.UUID;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -45,7 +49,7 @@ import tools.jackson.databind.node.ObjectNode;
       "spring.main.allow-bean-definition-overriding=true",
       "oms.order.hold-resolver.enabled=false"
     })
-@Import(OrderIntakeT12ScenariosAcceptanceTest.IntakeTestConfig.class)
+@Import({OrderIntakeT12ScenariosAcceptanceTest.IntakeTestConfig.class, StockTestConfig.class})
 class OrderHoldResolverT12BAcceptanceTest {
 
   private static final String INBOX_SECRET = "dev-inbox-hmac-secret";
@@ -74,8 +78,14 @@ class OrderHoldResolverT12BAcceptanceTest {
   @Autowired PlatformTransactionManager transactions;
   @Autowired OrderHoldResolverJob resolverJob;
   @Autowired ChannelListingRepository listings;
+  @Autowired FaultHooks faults;
 
   StockFixture fixture;
+
+  @AfterEach
+  void clearFaults() {
+    faults.reset();
+  }
 
   @BeforeEach
   void setup() throws Exception {
@@ -166,6 +176,60 @@ class OrderHoldResolverT12BAcceptanceTest {
                     Long.class,
                     externalOrderId));
     assertThat(reservations).isEqualTo(1);
+  }
+
+  @Test
+  void sweeperDefersOnFaultThenReleasesOnNextPass() throws Exception {
+    StockFixture.Shop shop = fixture.shop("ACTIVE");
+    String shopId = fixture.tsfShopId(shop);
+    UUID account = fixture.tsfChannelAccount(shop, "ACTIVE", "CONNECTED");
+    UUID sku = fixture.sku(shop, 20);
+    fixture.channelListing(shop, account, "L-sweep", null, true, false);
+
+    String externalOrderId = "TSF-SWEEP-" + UUID.randomUUID();
+    ObjectNode created =
+        OrderIntakeScenarioSupport.orderCreated(
+            JSON, externalOrderId, shopId, null, "COD", "L-sweep", 1, 1);
+    ingest(created);
+    worker.processAvailable(10);
+
+    fixture.inTenant(
+        shop.tenant(),
+        () ->
+            jdbc.update(
+                """
+                UPDATE channel_listing
+                SET sku_id = ?, mapping_source = 'MANUAL', mapped_at = now()
+                WHERE external_sku_id = 'L-sweep'
+                """,
+                sku));
+
+    faults.failNext(Fault.THROW);
+    resolverJob.runScheduledBatch();
+
+    String holdAfterFault =
+        fixture.inTenant(
+            shop.tenant(),
+            () ->
+                jdbc.queryForObject(
+                    "SELECT hold_reason FROM sales_order WHERE external_order_id = ?",
+                    String.class,
+                    externalOrderId));
+    assertThat(holdAfterFault).isEqualTo("SKU_NOT_MAPPED");
+    assertThat(faults.fired()).isEqualTo(1);
+
+    faults.reset();
+    resolverJob.runScheduledBatch();
+
+    holdAfterFault =
+        fixture.inTenant(
+            shop.tenant(),
+            () ->
+                jdbc.queryForObject(
+                    "SELECT hold_reason FROM sales_order WHERE external_order_id = ?",
+                    String.class,
+                    externalOrderId));
+    assertThat(holdAfterFault).isEqualTo("NONE");
   }
 
   @Test

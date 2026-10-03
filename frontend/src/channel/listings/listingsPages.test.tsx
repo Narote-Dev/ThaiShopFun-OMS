@@ -41,6 +41,8 @@ describe('ListingsPage', () => {
                 seller_sku: 'SKU-X',
                 name: 'Item',
                 sku_id: null,
+                sku_code: null,
+                sku_name: null,
                 mapping_source: null,
                 mapped_at: null,
                 stock_control: true,

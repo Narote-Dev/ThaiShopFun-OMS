@@ -77,8 +77,8 @@ export default function ListingsPage({ me }: { me: Me }) {
       .listAccounts()
       .then((page) => {
         setAccounts(page.items.map((row) => ({ id: row.id, external_shop_id: row.external_shop_id })))
-        if (!channelAccountId && page.items[0]) {
-          setChannelAccountId(page.items[0].id)
+        if (page.items[0]) {
+          setChannelAccountId((current) => current || page.items[0].id)
         }
       })
       .catch(() => setAccounts([]))
