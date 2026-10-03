@@ -68,6 +68,11 @@ class OrderApiReadTest extends OrderIntegrationTest {
         .isEqualTo("***-***-5678");
     assertThat(detail.body().path("timeline")).isNotEmpty();
 
+    CatalogHttp.Result byExternal =
+        http.get(OrderHttp.ordersPath("?q=ORD-READY"), httpShop.owner());
+    assertThat(byExternal.status()).isEqualTo(200);
+    assertThat(byExternal.body().path("total").asInt()).isEqualTo(1);
+
     CatalogHttp.Result staff =
         http.get(OrderHttp.ordersPath("/" + ready.id()), http.catalog().member(httpShop, "STAFF"));
     assertThat(staff.body().path("recipient").path("phone_masked").asString())

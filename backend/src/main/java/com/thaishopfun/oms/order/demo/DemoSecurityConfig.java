@@ -10,7 +10,7 @@ import org.springframework.security.web.SecurityFilterChain;
 
 /** Local/e2e harness endpoints (not part of the public API contract). */
 @Configuration
-@Profile({"local", "e2e"})
+@Profile({"local", "e2e", "test"})
 class DemoSecurityConfig {
 
   @Bean

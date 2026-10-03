@@ -19,7 +19,7 @@ abstract class OrderIntegrationTest {
     AuthTestSupport.register(registry);
   }
 
-  @LocalServerPort private int port;
+  @LocalServerPort protected int port;
 
   protected OrderHttp http;
 

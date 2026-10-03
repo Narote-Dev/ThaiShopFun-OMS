@@ -31,4 +31,10 @@ public class RestDebugController {
     catalog.clearCancelHits(orderId);
     return Map.of("order_id", orderId, "cleared", true);
   }
+
+  @PostMapping("/demo-order/{orderId}")
+  public Map<String, Object> ensureDemoOrder(@PathVariable String orderId) {
+    catalog.ensureDemoOrder(orderId);
+    return Map.of("order_id", orderId, "registered", true);
+  }
 }

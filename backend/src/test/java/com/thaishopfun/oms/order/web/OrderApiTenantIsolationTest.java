@@ -36,12 +36,16 @@ class OrderApiTenantIsolationTest extends OrderIntegrationTest {
     fixture.insert(shopA, "ORD-A-HOLD", "UNFULFILLED", "SKU_NOT_MAPPED");
     fixture.insert(shopB, "ORD-B-HOLD", "UNFULFILLED", "SKU_NOT_MAPPED");
 
-    assertThat(http.get(OrderHttp.ordersPath("?q=SHARED-EXT"), a.owner()).body().path("total").asInt())
+    assertThat(
+            http.get(OrderHttp.ordersPath("?q=SHARED-EXT"), a.owner()).body().path("total").asInt())
+        .isEqualTo(1);
+    assertThat(
+            http.get(OrderHttp.ordersPath("?q=SHARED-EXT"), b.owner()).body().path("total").asInt())
         .isEqualTo(1);
     assertThat(http.get(OrderHttp.ordersPath("?q=081-234-5678"), a.owner()).body().path("total").asInt())
         .isEqualTo(2);
     assertThat(http.get(OrderHttp.ordersPath("?q=081-234-5678"), b.owner()).body().path("total").asInt())
-        .isEqualTo(1);
+        .isEqualTo(2);
 
     int holdsA =
         http.get(OrderHttp.ordersPath("/holds"), a.owner()).body().path("groups").size();

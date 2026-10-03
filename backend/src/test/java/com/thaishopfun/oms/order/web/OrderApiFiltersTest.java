@@ -13,6 +13,8 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -124,9 +126,11 @@ class OrderApiFiltersTest extends OrderIntegrationTest {
     OrderFixture.Shop shop = OrderFixture.shopFor(httpShop);
     SalesOrder order = fixture.insert(shop, "ORD-TRACK", "SHIPPED", "NONE");
     UUID shipmentId = UuidV7.generate();
-    UUID warehouseId =
-        jdbc.queryForObject(
-            "SELECT id FROM warehouse WHERE tenant_id = ? LIMIT 1", UUID.class, shop.tenantId());
+    UUID warehouseId = UuidV7.generate();
+    jdbc.update(
+        "INSERT INTO warehouse (id, tenant_id, code, name, is_default) VALUES (?, ?, 'WH1', 'Main', true)",
+        warehouseId,
+        shop.tenantId());
     try (Connection admin = AuthTestSupport.admin();
         PreparedStatement ps =
             admin.prepareStatement(
@@ -149,11 +153,24 @@ class OrderApiFiltersTest extends OrderIntegrationTest {
   void likeEscapeAndWildcard() throws Exception {
     CatalogHttp.Shop httpShop = http.catalog().shop();
     OrderFixture.Shop shop = OrderFixture.shopFor(httpShop);
-    fixture.insert(shop, "ORD_1", "READY_TO_PICK", "NONE");
-    fixture.insert(shop, "ORDX1", "READY_TO_PICK", "NONE");
-    assertThat(http.get(OrderHttp.ordersPath("?q=ORD_1"), httpShop.owner()).body().path("total").asInt())
+    fixture.insert(shop, "ORD_LIKE_1", "READY_TO_PICK", "NONE");
+    fixture.insert(shop, "ORDXLIKE1", "READY_TO_PICK", "NONE");
+    assertThat(
+            http.get(
+                    OrderHttp.ordersPath(
+                        "?q=" + URLEncoder.encode("ORD_LIKE_1", StandardCharsets.UTF_8)),
+                    httpShop.owner())
+                .body()
+                .path("total")
+                .asInt())
         .isEqualTo(1);
-    assertThat(http.get(OrderHttp.ordersPath("?q=%25"), httpShop.owner()).body().path("total").asInt())
+    assertThat(
+            http.get(
+                    OrderHttp.ordersPath("?q=" + URLEncoder.encode("%", StandardCharsets.UTF_8)),
+                    httpShop.owner())
+                .body()
+                .path("total")
+                .asInt())
         .isZero();
   }
 
@@ -163,7 +180,14 @@ class OrderApiFiltersTest extends OrderIntegrationTest {
     OrderFixture.Shop shop = OrderFixture.shopFor(httpShop);
     String external = "9123456789012345";
     fixture.insert(shop, external, "READY_TO_PICK", "NONE");
-    assertThat(http.get(OrderHttp.ordersPath("?q=" + external), httpShop.owner()).body().path("total").asInt())
+    assertThat(
+            http.get(
+                    OrderHttp.ordersPath(
+                        "?q=" + URLEncoder.encode(external, StandardCharsets.UTF_8)),
+                    httpShop.owner())
+                .body()
+                .path("total")
+                .asInt())
         .isEqualTo(1);
   }
 

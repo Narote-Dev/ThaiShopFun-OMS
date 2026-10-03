@@ -3,14 +3,17 @@ package com.thaishopfun.oms.order.web;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.thaishopfun.mocktsf.MockTsfApplication;
+import com.thaishopfun.mocktsf.contract.ContractValidator;
 import com.thaishopfun.oms.auth.AuthTestSupport;
 import com.thaishopfun.oms.auth.UuidV7;
-import com.thaishopfun.oms.inbox.InboxWorker;
 import com.thaishopfun.oms.catalog.CatalogHttp;
+import com.thaishopfun.oms.inbox.InboxWorker;
 import com.thaishopfun.oms.order.OrderRecipientRepository;
 import com.thaishopfun.oms.order.OrderStatusHistoryRepository;
 import com.thaishopfun.oms.order.SalesOrder;
 import com.thaishopfun.oms.order.SalesOrderRepository;
+import java.io.IOException;
+import java.io.InputStream;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -19,8 +22,13 @@ import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.time.Duration;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
+import java.util.HexFormat;
 import java.util.Map;
 import java.util.UUID;
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -33,6 +41,8 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.transaction.PlatformTransactionManager;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 @ActiveProfiles("test")
 @SpringBootTest(
@@ -40,15 +50,19 @@ import org.springframework.transaction.PlatformTransactionManager;
     properties = "oms.outbox.publisher-enabled=false")
 class OrderCancelApiTest extends OrderIntegrationTest {
 
+  private static final String INBOX_SECRET = "dev-inbox-hmac-secret";
+  private static final JsonMapper JSON = JsonMapper.builder().build();
+  private static final ContractValidator CONTRACT = ContractValidator.classpath();
+  private static final Duration HTTP_TIMEOUT = Duration.ofSeconds(20);
+
   private static ConfigurableApplicationContext mock;
 
   @Autowired SalesOrderRepository orders;
+  @Autowired InboxWorker worker;
   @Autowired OrderRecipientRepository recipients;
   @Autowired OrderStatusHistoryRepository history;
   @Autowired PlatformTransactionManager transactions;
   @Autowired JdbcTemplate jdbc;
-  @Autowired InboxWorker inboxWorker;
-
   private OrderFixture fixture;
   private static final HttpClient HTTP =
       HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
@@ -66,6 +80,10 @@ class OrderCancelApiTest extends OrderIntegrationTest {
     registry.add("oms.channel.tsf.retry-max-attempts", () -> "1");
     registry.add("oms.channel.tsf.retry-wait-base", () -> "10ms");
     registry.add("oms.channel.tsf.retry-wait-max", () -> "20ms");
+    registry.add("oms.inbox.hmac-secrets", () -> INBOX_SECRET);
+    registry.add("oms.inbox.worker-enabled", () -> "true");
+    registry.add("oms.inbox.jitter-ratio", () -> "0");
+    registry.add("oms.security.internal-client-ids", () -> "tsf,tsf-checkout");
   }
 
   @AfterAll
@@ -80,9 +98,25 @@ class OrderCancelApiTest extends OrderIntegrationTest {
     fixture = new OrderFixture(orders, recipients, history, transactions);
   }
 
+  private void registerMockOrder(String externalOrderId) throws Exception {
+    HttpResponse<String> response =
+        HTTP.send(
+            HttpRequest.newBuilder(
+                    URI.create(
+                        "http://127.0.0.1:"
+                            + mockPort()
+                            + "/control/rest/demo-order/"
+                            + externalOrderId))
+                .POST(HttpRequest.BodyPublishers.noBody())
+                .build(),
+            HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+    assertThat(response.statusCode()).isEqualTo(200);
+  }
+
   @Test
   void ownerCancelIsIdempotent() throws Exception {
     ActiveShop shop = shopActive();
+    registerMockOrder("TSF-240929-000123");
     SalesOrder order = fixture.insert(shop.fixture(), "TSF-240929-000123", "READY_TO_PICK", "NONE");
     clearCancelHits(order.externalOrderId());
     CatalogHttp.Result first =
@@ -115,7 +149,8 @@ class OrderCancelApiTest extends OrderIntegrationTest {
   @Test
   void staffForbidden() throws Exception {
     ActiveShop shop = shopActive();
-    SalesOrder order = fixture.insert(shop.fixture(), "TSF-240929-000124", "READY_TO_PICK", "NONE");
+    registerMockOrder("TSF-240929-000132");
+    SalesOrder order = fixture.insert(shop.fixture(), "TSF-240929-000132", "READY_TO_PICK", "NONE");
     CatalogHttp.Result result =
         http.post(
             OrderHttp.ordersPath("/" + order.id() + "/cancel-requests"),
@@ -128,6 +163,7 @@ class OrderCancelApiTest extends OrderIntegrationTest {
   @Test
   void graceEntitlementBlocksWrite() throws Exception {
     ActiveShop shop = shopActiveGrace();
+    registerMockOrder("TSF-240929-000125");
     SalesOrder order = fixture.insert(shop.fixture(), "TSF-240929-000125", "READY_TO_PICK", "NONE");
     CatalogHttp.Result result =
         http.post(
@@ -141,6 +177,7 @@ class OrderCancelApiTest extends OrderIntegrationTest {
   @Test
   void shippedOrderConflict() throws Exception {
     ActiveShop shop = shopActive();
+    registerMockOrder("TSF-240929-000126");
     SalesOrder order = fixture.insert(shop.fixture(), "TSF-240929-000126", "SHIPPED", "NONE");
     clearCancelHits(order.externalOrderId());
     CatalogHttp.Result result =
@@ -157,6 +194,7 @@ class OrderCancelApiTest extends OrderIntegrationTest {
   @Test
   void cancelledOrderConflictWithoutTsfCall() throws Exception {
     ActiveShop shop = shopActive();
+    registerMockOrder("TSF-240929-000127");
     SalesOrder order =
         fixture.insert(
             shop.fixture(),
@@ -179,8 +217,9 @@ class OrderCancelApiTest extends OrderIntegrationTest {
   @Test
   void channelFaultLeavesOrderUnchanged() throws Exception {
     ActiveShop shop = shopActive();
-    SalesOrder order = fixture.insert(shop.fixture(), "TSF-240929-000124", "READY_TO_PICK", "NONE");
-    armFault("POST", "/internal/v1/orders/TSF-240929-000124/cancel-requests", 503, 1);
+    registerMockOrder("TSF-240929-000128");
+    SalesOrder order = fixture.insert(shop.fixture(), "TSF-240929-000128", "READY_TO_PICK", "NONE");
+    armFault("POST", "/internal/v1/orders/TSF-240929-000128/cancel-requests", 503, 1);
     CatalogHttp.Result result =
         http.post(
             OrderHttp.ordersPath("/" + order.id() + "/cancel-requests"),
@@ -192,15 +231,37 @@ class OrderCancelApiTest extends OrderIntegrationTest {
   }
 
   @Test
-  void orderCancelledEventSetsCancelled() throws Exception {
+  void channelRateLimitLeavesOrderUnchanged() throws Exception {
     ActiveShop shop = shopActive();
+    registerMockOrder("TSF-240929-000129");
     SalesOrder order = fixture.insert(shop.fixture(), "TSF-240929-000129", "READY_TO_PICK", "NONE");
-    http.post(
-        OrderHttp.ordersPath("/" + order.id() + "/cancel-requests"),
-        shop.owner(),
-        Map.of("reason", "buyer"));
-    sendCancelledEvent(order.externalOrderId());
-    inboxWorker.processAvailable();
+    armFault("POST", "/internal/v1/orders/TSF-240929-000129/cancel-requests", 429, 1);
+    CatalogHttp.Result result =
+        http.post(
+            OrderHttp.ordersPath("/" + order.id() + "/cancel-requests"),
+            shop.owner(),
+            Map.of("reason", "rate"));
+    assertThat(result.status()).isIn(502, 503, 429);
+    assertThat(holdReason(order.id())).isEqualTo("NONE");
+    assertThat(cancelHits(order.externalOrderId())).isEmpty();
+  }
+
+  @Test
+  void orderCancelledIngestSetsCancelled() throws Exception {
+    ActiveShop shop = shopActive();
+    registerMockOrder("TSF-240929-000130");
+    SalesOrder order = fixture.insert(shop.fixture(), "TSF-240929-000130", "READY_TO_PICK", "NONE");
+    CatalogHttp.Result cancel =
+        http.post(
+            OrderHttp.ordersPath("/" + order.id() + "/cancel-requests"),
+            shop.owner(),
+            Map.of("reason", "buyer"));
+    assertThat(cancel.status()).isEqualTo(202);
+    assertThat(holdReason(order.id())).isEqualTo("CHANNEL_CANCEL_PENDING");
+    ingest(
+        orderCancelled(
+            order.externalOrderId(), shop.fixture().tsfShopId(), 1));
+    assertThat(worker.processAvailable(10)).isEqualTo(1);
     assertThat(orderStatus(order.id())).isEqualTo("CANCELLED");
   }
 
@@ -215,10 +276,11 @@ class OrderCancelApiTest extends OrderIntegrationTest {
       ps.setObject(2, shop.fixture().tenantId());
       ps.executeUpdate();
     }
+    registerMockOrder("TSF-240929-000131");
     SalesOrder order =
         fixture.insert(
             shop.fixture(),
-            "TSF-240929-000124",
+            "TSF-240929-000131",
             "ACTIVE",
             "PAID",
             "READY_TO_PICK",
@@ -341,35 +403,6 @@ class OrderCancelApiTest extends OrderIntegrationTest {
     }
   }
 
-  private void sendCancelledEvent(String externalOrderId) throws Exception {
-    String eventId = "test-cancel-" + UuidV7.generate();
-    String body =
-        """
-        {
-          "event": {
-            "event_id": "%s",
-            "event_type": "order.cancelled",
-            "schema_version": 1,
-            "occurred_at": "2026-09-30T12:00:00Z",
-            "tsf_shop_id": "shop_active",
-            "aggregate_id": "%s",
-            "aggregate_version": 99,
-            "data": { "order_id": "%s", "reason": "BUYER" }
-          }
-        }
-        """
-            .formatted(eventId, externalOrderId, externalOrderId);
-    HttpResponse<String> response =
-        HTTP.send(
-            HttpRequest.newBuilder(
-                    URI.create("http://127.0.0.1:" + mockPort() + "/control/events/send"))
-                .header("Content-Type", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8))
-                .build(),
-            HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-    assertThat(response.statusCode()).isEqualTo(200);
-  }
-
   private tools.jackson.databind.JsonNode cancelHits(String externalOrderId) throws Exception {
     HttpResponse<String> response =
         HTTP.send(
@@ -406,6 +439,71 @@ class OrderCancelApiTest extends OrderIntegrationTest {
       return hit.path("idempotencyKey").asString();
     }
     return hit.path("idempotency_key").asString();
+  }
+
+  private void ingest(ObjectNode event) throws Exception {
+    byte[] body = JSON.writeValueAsBytes(event);
+    String eventId = event.path("event_id").asString();
+    HttpRequest request =
+        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + "/internal/v1/events"))
+            .timeout(HTTP_TIMEOUT)
+            .header("Content-Type", "application/json")
+            .header("X-Event-Id", eventId)
+            .header("X-Signature", sign(INBOX_SECRET, now(), body))
+            .header("Authorization", "Bearer " + tsfToken())
+            .POST(HttpRequest.BodyPublishers.ofByteArray(body))
+            .build();
+    HttpResponse<String> response =
+        HTTP.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+    assertThat(response.statusCode()).isEqualTo(202);
+  }
+
+  private ObjectNode orderCancelled(String orderId, String shopId, long aggregateVersion)
+      throws IOException {
+    ObjectNode event = loadExample("order.cancelled.json");
+    event.put("event_id", "evt-" + UUID.randomUUID());
+    event.put("tsf_shop_id", shopId);
+    event.put("aggregate_id", orderId);
+    event.put("aggregate_version", aggregateVersion);
+    event.put("occurred_at", Instant.now().truncatedTo(ChronoUnit.SECONDS).toString());
+    ((ObjectNode) event.get("data")).put("order_id", orderId);
+    assertThat(CONTRACT.envelopeErrors(JSON.writeValueAsString(event))).isEmpty();
+    return event;
+  }
+
+  private static ObjectNode loadExample(String name) throws IOException {
+    try (InputStream in =
+        MockTsfApplication.class.getResourceAsStream("/contracts/examples/events/" + name)) {
+      if (in == null) {
+        throw new IllegalStateException("missing example " + name);
+      }
+      return (ObjectNode) JSON.readTree(in);
+    }
+  }
+
+  private static String tsfToken() {
+    return AuthTestSupport.token(
+        "tsf",
+        "shop",
+        "ACTIVE",
+        null,
+        1,
+        "oms-internal",
+        Instant.now().plusSeconds(600),
+        java.util.List.of(),
+        "SERVICE");
+  }
+
+  private static String sign(String secret, String timestamp, byte[] body) throws Exception {
+    Mac mac = Mac.getInstance("HmacSHA256");
+    mac.init(new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
+    mac.update((timestamp + ".").getBytes(StandardCharsets.UTF_8));
+    mac.update(body);
+    return "t=" + timestamp + ",v1=" + HexFormat.of().formatHex(mac.doFinal());
+  }
+
+  private static String now() {
+    return Long.toString(Instant.now().getEpochSecond());
   }
 
   private static void armFault(String method, String path, int status, int times) throws Exception {

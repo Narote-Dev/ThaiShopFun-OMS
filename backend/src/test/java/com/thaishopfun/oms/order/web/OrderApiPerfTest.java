@@ -5,11 +5,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.thaishopfun.oms.auth.AuthTestSupport;
 import com.thaishopfun.oms.auth.UuidV7;
 import com.thaishopfun.oms.catalog.CatalogHttp;
+import com.thaishopfun.oms.pii.PiiCipher;
+import com.thaishopfun.oms.pii.PiiColumn;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.time.Instant;
 import java.util.UUID;
-import com.thaishopfun.oms.pii.PiiCipher;
 import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -19,6 +22,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 class OrderApiPerfTest extends OrderIntegrationTest {
 
   private static final Logger log = LoggerFactory.getLogger(OrderApiPerfTest.class);
+  private static final String PERF_PHONE = "081-234-5678";
+  private static final String PERF_PHONE_EXTERNAL = "PERF-PHONE";
 
   @Autowired PiiCipher cipher;
 
@@ -26,7 +31,7 @@ class OrderApiPerfTest extends OrderIntegrationTest {
   void listPagesUnderOneSecond() throws Exception {
     CatalogHttp.Shop shop = http.catalog().shop();
     OrderFixture.Shop seeded = OrderFixture.channelFor(shop);
-    seedOrders(shop.tenantId(), seeded.channelAccountId(), 10_000, true, cipher);
+    seedOrders(shop.tenantId(), seeded.channelAccountId(), 10_000, true);
     UUID noiseTenant = UuidV7.generate();
     UUID noiseChannel = UuidV7.generate();
     try (Connection admin = AuthTestSupport.admin()) {
@@ -50,10 +55,10 @@ class OrderApiPerfTest extends OrderIntegrationTest {
         statement.executeUpdate();
       }
     }
-    seedOrders(noiseTenant, noiseChannel, 50, false, cipher);
+    seedOrders(noiseTenant, noiseChannel, 50, false);
+    seedPhoneSearchOrder(shop.tenantId(), seeded.channelAccountId());
 
     assertUnder1s(shop.owner(), OrderHttp.ordersPath("?limit=50"), "warm-up");
-    assertUnder1s(shop.owner(), OrderHttp.ordersPath("?q=081-000-0001"), "phone search");
     assertNoSeqScanOnSalesOrder(shop.tenantId());
     assertUnder1s(shop.owner(), OrderHttp.ordersPath("?limit=50"), "first page");
     assertUnder2s(
@@ -70,8 +75,7 @@ class OrderApiPerfTest extends OrderIntegrationTest {
           http.get(
                   OrderHttp.ordersPath(
                       "?limit=50&cursor="
-                          + java.net.URLEncoder.encode(
-                              deep, java.nio.charset.StandardCharsets.UTF_8)),
+                          + URLEncoder.encode(deep, StandardCharsets.UTF_8)),
                   shop.owner())
               .body()
               .path("next_cursor")
@@ -81,9 +85,10 @@ class OrderApiPerfTest extends OrderIntegrationTest {
         shop.owner(),
         OrderHttp.ordersPath(
             "?limit=50&cursor="
-                + java.net.URLEncoder.encode(
-                    deep == null ? "" : deep, java.nio.charset.StandardCharsets.UTF_8)),
+                + URLEncoder.encode(deep == null ? "" : deep, StandardCharsets.UTF_8)),
         "deep page");
+    assertUnder1s(shop.owner(), OrderHttp.ordersPath("?q=0812345678"), "phone search");
+    assertUnder1s(shop.owner(), OrderHttp.ordersPath("?q=" + PERF_PHONE_EXTERNAL), "external id");
   }
 
   private void assertUnder2s(String token, String path, String label) {
@@ -105,8 +110,7 @@ class OrderApiPerfTest extends OrderIntegrationTest {
   }
 
   private static void seedOrders(
-      UUID tenantId, UUID channelAccountId, int count, boolean varied, PiiCipher cipher)
-      throws Exception {
+      UUID tenantId, UUID channelAccountId, int count, boolean varied) throws Exception {
     try (Connection admin = AuthTestSupport.admin()) {
       admin.setAutoCommit(false);
       try (PreparedStatement order =
@@ -118,46 +122,75 @@ class OrderApiPerfTest extends OrderIntegrationTest {
                 discount, grand_total, ordered_at, version
               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'PREPAID', 'THB', 100, 0, 0, 100, ?, 0)
               """)) {
-        try (PreparedStatement recipient =
-            admin.prepareStatement(
-                """
-                INSERT INTO order_recipient (
-                  order_id, tenant_id, name_enc, phone_enc, phone_hash, phone_last4, address_enc,
-                  province, postcode, pii_status
-                ) VALUES (?, ?, NULL, NULL, ?, '0001', NULL, 'BKK', '10110', 'ACTIVE')
-                """)) {
-          Instant now = Instant.now();
-          byte[] phoneHash = cipher.phoneHash("08100000001");
-          for (int i = 0; i < count; i++) {
-            UUID id = UuidV7.generate();
-            String fulfillment = varied && i % 7 == 0 ? "SHIPPED" : "READY_TO_PICK";
-            String hold = varied && i % 11 == 0 ? "SKU_NOT_MAPPED" : "NONE";
-            order.setObject(1, id);
-            order.setObject(2, tenantId);
-            order.setObject(3, channelAccountId);
-            order.setString(4, "PERF-" + i);
-            order.setString(5, "ACTIVE");
-            order.setString(6, i % 3 == 0 ? "UNPAID" : "PAID");
-            order.setString(7, fulfillment);
-            order.setString(8, hold);
-            order.setObject(9, java.sql.Timestamp.from(now.minusSeconds(i)));
-            order.addBatch();
-            if (i < 20) {
-              recipient.setObject(1, id);
-              recipient.setObject(2, tenantId);
-              recipient.setBytes(3, phoneHash);
-              recipient.addBatch();
-            }
-            if (i % 500 == 0) {
-              order.executeBatch();
-              recipient.executeBatch();
-            }
+        Instant now = Instant.now();
+        for (int i = 0; i < count; i++) {
+          UUID id = UuidV7.generate();
+          String fulfillment = varied && i % 7 == 0 ? "SHIPPED" : "READY_TO_PICK";
+          String hold = varied && i % 11 == 0 ? "SKU_NOT_MAPPED" : "NONE";
+          String payment = varied && i % 3 == 0 ? "COD_PENDING" : "PAID";
+          order.setObject(1, id);
+          order.setObject(2, tenantId);
+          order.setObject(3, channelAccountId);
+          order.setString(4, "PERF-" + i);
+          order.setString(5, "ACTIVE");
+          order.setString(6, payment);
+          order.setString(7, fulfillment);
+          order.setString(8, hold);
+          order.setObject(9, java.sql.Timestamp.from(now.minusSeconds(i)));
+          order.addBatch();
+          if (i % 500 == 0) {
+            order.executeBatch();
           }
-          order.executeBatch();
-          recipient.executeBatch();
         }
+        order.executeBatch();
       }
       admin.commit();
+    }
+  }
+
+  private void seedPhoneSearchOrder(UUID tenantId, UUID channelAccountId) throws Exception {
+    UUID orderId = UuidV7.generate();
+    Instant orderedAt = Instant.now();
+    try (Connection admin = AuthTestSupport.admin()) {
+      try (PreparedStatement order =
+          admin.prepareStatement(
+              """
+              INSERT INTO sales_order (
+                id, tenant_id, channel_account_id, external_order_id, order_status, payment_status,
+                fulfillment_status, hold_reason, payment_method, currency, subtotal, shipping_fee,
+                discount, grand_total, ordered_at, version
+              ) VALUES (?, ?, ?, ?, 'ACTIVE', 'PAID', 'READY_TO_PICK', 'NONE', 'PREPAID', 'THB',
+                100, 0, 0, 100, ?, 0)
+              """)) {
+        order.setObject(1, orderId);
+        order.setObject(2, tenantId);
+        order.setObject(3, channelAccountId);
+        order.setString(4, PERF_PHONE_EXTERNAL);
+        order.setObject(5, java.sql.Timestamp.from(orderedAt));
+        order.executeUpdate();
+      }
+      byte[] nameEnc = cipher.encrypt("Perf Phone", tenantId, orderId, PiiColumn.NAME);
+      byte[] phoneEnc = cipher.encrypt(PERF_PHONE, tenantId, orderId, PiiColumn.PHONE);
+      byte[] addressEnc =
+          cipher.encrypt("{\"line1\":\"perf\"}", tenantId, orderId, PiiColumn.ADDRESS);
+      byte[] phoneHash = cipher.phoneHash(PERF_PHONE);
+      try (PreparedStatement recipient =
+          admin.prepareStatement(
+              """
+              INSERT INTO order_recipient (
+                order_id, tenant_id, name_enc, phone_enc, phone_hash, phone_last4, address_enc,
+                province, postcode, pii_status
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, 'Bangkok', '10110', 'ACTIVE')
+              """)) {
+        recipient.setObject(1, orderId);
+        recipient.setObject(2, tenantId);
+        recipient.setBytes(3, nameEnc);
+        recipient.setBytes(4, phoneEnc);
+        recipient.setBytes(5, phoneHash);
+        recipient.setString(6, PiiCipher.phoneLast4(PERF_PHONE));
+        recipient.setBytes(7, addressEnc);
+        recipient.executeUpdate();
+      }
     }
   }
 
