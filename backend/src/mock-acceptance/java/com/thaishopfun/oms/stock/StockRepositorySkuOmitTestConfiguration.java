@@ -25,7 +25,8 @@ public class StockRepositorySkuOmitTestConfiguration {
             invocation -> {
               @SuppressWarnings("unchecked")
               Map<UUID, StockRepository.SkuInfo> skus =
-                  new LinkedHashMap<>((Map<UUID, StockRepository.SkuInfo>) invocation.callRealMethod());
+                  new LinkedHashMap<>(
+                      (Map<UUID, StockRepository.SkuInfo>) invocation.callRealMethod());
               UUID omit = StockSkuLookupTestSupport.omittedSkuId();
               if (omit != null) {
                 skus.remove(omit);
