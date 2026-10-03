@@ -58,7 +58,8 @@ public class OrderHoldResolverJob {
     List<UUID> orderIds =
         tenantReadTx.execute(
             status ->
-                listings.findSkuNotMappedOrderIdsForListing(channelAccountId, externalSkuId, cap + 1));
+                listings.findSkuNotMappedOrderIdsForListing(
+                    channelAccountId, externalSkuId, cap + 1));
     int deferred = Math.max(0, orderIds.size() - cap);
     if (orderIds.size() > cap) {
       orderIds = orderIds.subList(0, cap);
@@ -82,8 +83,7 @@ public class OrderHoldResolverJob {
                   status ->
                       listings.findResolvableSkuNotMappedOrderIds(
                           tenantId, properties.getBatchSize()));
-          ReevalSummary summary =
-              resolveOrders(tenantId, orderIds, 0, "order.remap", null, false);
+          ReevalSummary summary = resolveOrders(tenantId, orderIds, 0, "order.remap", null, false);
           processed += summary.released() + summary.outOfStock() + summary.stillHeld();
         } catch (RuntimeException ex) {
           log.error("hold resolver failed for tenant {}", tenantId, ex);
@@ -116,8 +116,7 @@ public class OrderHoldResolverJob {
     int stillHeld = 0;
     for (UUID orderId : orderIds) {
       Outcome outcome =
-          resolveOneWithRetries(
-              orderId, keyPrefix, recheckIdempotencyKey, surfaceErrors);
+          resolveOneWithRetries(orderId, keyPrefix, recheckIdempotencyKey, surfaceErrors);
       switch (outcome) {
         case RELEASED -> released++;
         case OUT_OF_STOCK -> outOfStock++;
@@ -130,18 +129,14 @@ public class OrderHoldResolverJob {
   }
 
   private Outcome resolveOneWithRetries(
-      UUID orderId,
-      String keyPrefix,
-      String recheckIdempotencyKey,
-      boolean surfaceErrors) {
+      UUID orderId, String keyPrefix, String recheckIdempotencyKey, boolean surfaceErrors) {
     int attempts = properties.getLockRetries();
     UUID attemptId = UUID.randomUUID();
     for (int attempt = 1; attempt <= attempts; attempt++) {
       try {
         return tenantWriteTx.execute(
             status ->
-                resolver.resolveHeldOrder(
-                    orderId, keyPrefix, recheckIdempotencyKey, attemptId));
+                resolver.resolveHeldOrder(orderId, keyPrefix, recheckIdempotencyKey, attemptId));
       } catch (RuntimeException ex) {
         if (OrderHoldResolver.retryableLock(ex) && attempt < attempts) {
           continue;

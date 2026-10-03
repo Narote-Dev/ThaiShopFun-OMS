@@ -197,7 +197,10 @@ public class OrderHoldResolver {
         effects.recordOversell(tsf, holdLines, shortfalls);
         if ("SHADOW".equals(tsf.mode())) {
           shadowDiff.insertOrderDiff(
-              tsf.id(), order.externalOrderId(), effects.shadowDiffJson(holdLines, shortfalls), now);
+              tsf.id(),
+              order.externalOrderId(),
+              effects.shadowDiffJson(holdLines, shortfalls),
+              now);
         }
       }
       order =
@@ -224,8 +227,7 @@ public class OrderHoldResolver {
     }
   }
 
-  static String engineKey(
-      String prefix, UUID orderId, List<ReserveItem> items, UUID attemptId) {
+  static String engineKey(String prefix, UUID orderId, List<ReserveItem> items, UUID attemptId) {
     List<ReserveItem> sorted = new ArrayList<>(items);
     sorted.sort(
         Comparator.comparing((ReserveItem item) -> item.skuId().toString())

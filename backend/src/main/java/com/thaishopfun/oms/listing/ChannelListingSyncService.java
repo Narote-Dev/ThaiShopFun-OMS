@@ -74,7 +74,8 @@ public class ChannelListingSyncService {
     } catch (ChannelServerErrorException | ChannelClientException ex) {
       throw new ListingApiException(502, "CHANNEL_ERROR", "Channel listing sync failed");
     } catch (ChannelUnavailableException ex) {
-      throw new ListingApiException(503, "CHANNEL_UNAVAILABLE", "Channel is temporarily unavailable");
+      throw new ListingApiException(
+          503, "CHANNEL_UNAVAILABLE", "Channel is temporarily unavailable");
     }
     SyncResult written =
         tx.write(
@@ -107,8 +108,7 @@ public class ChannelListingSyncService {
               jdbc.update(
                   "UPDATE channel_account SET last_synced_at = now() WHERE id = ?",
                   channelAccountId);
-              return new SyncResult(
-                  fetched.size(), created, updated, autoMapped, 0, mappedSkus);
+              return new SyncResult(fetched.size(), created, updated, autoMapped, 0, mappedSkus);
             });
     int reevaluated = 0;
     for (String externalSkuId : written.mappedSkus()) {

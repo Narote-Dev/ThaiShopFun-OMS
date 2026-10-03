@@ -168,11 +168,7 @@ public class ChannelListingRepository {
   }
 
   public UpsertResult upsertFromChannel(
-      UUID tenantId,
-      UUID channelAccountId,
-      String externalSkuId,
-      String sellerSku,
-      String name) {
+      UUID tenantId, UUID channelAccountId, String externalSkuId, String sellerSku, String name) {
     UUID existingSku =
         jdbc.query(
             """
@@ -225,7 +221,10 @@ public class ChannelListingRepository {
     boolean mappingChanged = existingSku == null && newSku != null;
     boolean newlyMapped = Boolean.TRUE.equals(inserted) && newSku != null;
     return new UpsertResult(
-        id, Boolean.TRUE.equals(inserted), mappingChanged || (existingSku == null && newSku != null), newlyMapped);
+        id,
+        Boolean.TRUE.equals(inserted),
+        mappingChanged || (existingSku == null && newSku != null),
+        newlyMapped);
   }
 
   public void markRemoved(UUID channelAccountId, String externalSkuId) {
@@ -312,8 +311,7 @@ public class ChannelListingRepository {
 
   public List<UUID> listActiveTenantIds() {
     return jdbc.query(
-        "SELECT id FROM list_active_tenant_ids()",
-        (rs, row) -> rs.getObject("id", UUID.class));
+        "SELECT id FROM list_active_tenant_ids()", (rs, row) -> rs.getObject("id", UUID.class));
   }
 
   private UUID tryAutoMapSku(UUID tenantId, String sellerSku) {
@@ -331,10 +329,8 @@ public class ChannelListingRepository {
   }
 
   private ListingRow map(ResultSet rs, int rowNum) throws SQLException {
-    java.time.OffsetDateTime removed =
-        rs.getObject("removed_at", java.time.OffsetDateTime.class);
-    java.time.OffsetDateTime mapped =
-        rs.getObject("mapped_at", java.time.OffsetDateTime.class);
+    java.time.OffsetDateTime removed = rs.getObject("removed_at", java.time.OffsetDateTime.class);
+    java.time.OffsetDateTime mapped = rs.getObject("mapped_at", java.time.OffsetDateTime.class);
     return new ListingRow(
         rs.getObject("id", UUID.class),
         rs.getObject("channel_account_id", UUID.class),

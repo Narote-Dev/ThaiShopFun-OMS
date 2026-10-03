@@ -72,8 +72,7 @@ public class OrderHoldRecheckService {
       ReevalSummary summary = resolverJob.resolveOrderRecheck(orderId, clientKey);
       return tx.write(
           () -> {
-            SalesOrder after =
-                orders.findById(orderId).orElseThrow(OrderApiException::notFound);
+            SalesOrder after = orders.findById(orderId).orElseThrow(OrderApiException::notFound);
             audit.write(
                 actor,
                 "ORDER_HOLD_RECHECKED",

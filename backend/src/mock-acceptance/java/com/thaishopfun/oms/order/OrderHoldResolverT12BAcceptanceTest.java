@@ -10,8 +10,8 @@ import com.thaishopfun.oms.auth.UuidV7;
 import com.thaishopfun.oms.inbox.InboxWorker;
 import com.thaishopfun.oms.listing.ChannelListingRepository;
 import com.thaishopfun.oms.order.hold.OrderHoldResolverJob;
-import com.thaishopfun.oms.stock.StockFixture;
 import com.thaishopfun.oms.stock.OrderIntakeFaultTestConfig;
+import com.thaishopfun.oms.stock.StockFixture;
 import com.thaishopfun.oms.stock.StockTestConfig.Fault;
 import com.thaishopfun.oms.stock.StockTestConfig.FaultHooks;
 import java.net.URI;
@@ -49,7 +49,10 @@ import tools.jackson.databind.node.ObjectNode;
       "spring.main.allow-bean-definition-overriding=true",
       "oms.order.hold-resolver.enabled=false"
     })
-@Import({OrderIntakeT12ScenariosAcceptanceTest.IntakeTestConfig.class, OrderIntakeFaultTestConfig.class})
+@Import({
+  OrderIntakeT12ScenariosAcceptanceTest.IntakeTestConfig.class,
+  OrderIntakeFaultTestConfig.class
+})
 class OrderHoldResolverT12BAcceptanceTest {
 
   private static final String INBOX_SECRET = "dev-inbox-hmac-secret";

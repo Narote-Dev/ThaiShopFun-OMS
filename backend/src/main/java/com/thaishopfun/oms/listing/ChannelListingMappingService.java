@@ -9,8 +9,7 @@ import org.springframework.stereotype.Service;
 @Service
 public class ChannelListingMappingService {
 
-  private record WriteResult(
-      ChannelListingRepository.ListingRow row, boolean mappingChanged) {}
+  private record WriteResult(ChannelListingRepository.ListingRow row, boolean mappingChanged) {}
 
   private final ChannelListingAccess access;
   private final ListingTransactions tx;
@@ -40,9 +39,7 @@ public class ChannelListingMappingService {
         tx.write(
             () -> {
               ChannelListingRepository.ListingRow row =
-                  listings
-                      .findByIdForUpdate(listingId)
-                      .orElseThrow(ListingApiException::notFound);
+                  listings.findByIdForUpdate(listingId).orElseThrow(ListingApiException::notFound);
               if (skuId.equals(row.skuId())) {
                 return new WriteResult(row, false);
               }

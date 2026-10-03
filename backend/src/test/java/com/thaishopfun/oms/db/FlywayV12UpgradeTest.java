@@ -22,6 +22,7 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 class FlywayV12UpgradeTest {
 
   private static final String APP_PASSWORD = "oms-app-test-only";
+
   @Container
   static PostgreSQLContainer postgres =
       new PostgreSQLContainer("postgres:16-alpine").withInitScript("db/test-oms-app-login.sql");
@@ -137,5 +138,4 @@ class FlywayV12UpgradeTest {
         postgres.getUsername(),
         postgres.getPassword());
   }
-
 }

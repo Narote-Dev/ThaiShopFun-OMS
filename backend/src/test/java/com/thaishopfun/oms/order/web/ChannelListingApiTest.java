@@ -5,7 +5,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.thaishopfun.oms.auth.AuthTestSupport;
 import com.thaishopfun.oms.auth.UuidV7;
 import com.thaishopfun.oms.catalog.CatalogHttp;
-import com.thaishopfun.oms.order.web.OrderIntegrationTest;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.util.UUID;
@@ -53,8 +52,7 @@ class ChannelListingApiTest extends OrderIntegrationTest {
   void listReturnsTenantListingsOverHttp() throws Exception {
     CatalogHttp.Result response =
         http.get(
-            "/api/v1/channel-listings?channel_account_id=" + accountId + "&limit=50",
-            shop.owner());
+            "/api/v1/channel-listings?channel_account_id=" + accountId + "&limit=50", shop.owner());
     assertThat(response.status()).isEqualTo(200);
     JsonNode body = response.body();
     assertThat(body.path("total").asInt()).isGreaterThanOrEqualTo(1);
