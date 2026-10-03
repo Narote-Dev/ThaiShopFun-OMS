@@ -73,9 +73,7 @@ public class TsfCatalog {
     detail.put("lines", List.of(line("L1", "L-demo", "SKU-DEMO", "Demo item", 1, 100)));
     detail.put("totals", totals(100, 0, 0, 100));
     detail.put("payment_method", "COD");
-    orders.add(
-        new Order(
-            "shop_active", orderId, updated, 1, detail, payment(orderId, "UNPAID")));
+    orders.add(new Order("shop_active", orderId, updated, 1, detail, payment(orderId, "UNPAID")));
   }
 
   public List<Map<String, Object>> listings() {

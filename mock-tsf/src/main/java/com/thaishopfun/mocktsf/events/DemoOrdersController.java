@@ -1,8 +1,8 @@
 package com.thaishopfun.mocktsf.events;
 
 import com.thaishopfun.mocktsf.SeedData;
-import com.thaishopfun.mocktsf.rest.TsfCatalog;
 import com.thaishopfun.mocktsf.contract.ContractValidator;
+import com.thaishopfun.mocktsf.rest.TsfCatalog;
 import java.io.IOException;
 import java.io.InputStream;
 import java.time.Instant;
