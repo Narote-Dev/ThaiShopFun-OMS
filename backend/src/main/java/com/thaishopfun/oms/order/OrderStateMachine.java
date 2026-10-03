@@ -135,6 +135,10 @@ public class OrderStateMachine {
     if ("CANCELLED".equals(order.orderStatus())) {
       throw new OrderStateException("cancelled order is immutable");
     }
+    // Change: COMPLETED is terminal for payment/fulfillment/hold (T13 matrix vs 01-process-map).
+    if ("COMPLETED".equals(order.orderStatus())) {
+      throw new OrderStateException("completed order is immutable");
+    }
   }
 
   private TransitionResult updateHoldNoteOnly(SalesOrder order, String holdNote) {
@@ -225,6 +229,9 @@ public class OrderStateMachine {
   }
 
   private static void guardReadyToPick(SalesOrder order, GuardContext guards) {
+    if (!"ACTIVE".equals(order.orderStatus())) {
+      throw new OrderStateException("READY_TO_PICK requires ACTIVE order");
+    }
     if (!Set.of("PAID", "COD_PENDING").contains(order.paymentStatus())) {
       throw new OrderStateException("READY_TO_PICK requires PAID or COD_PENDING payment");
     }

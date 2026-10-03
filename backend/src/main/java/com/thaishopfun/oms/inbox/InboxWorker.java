@@ -228,7 +228,11 @@ public class InboxWorker {
                   jdbc.queryForObject("SELECT now()", OffsetDateTime.class)
                       .toInstant()
                       .minus(properties.getMaxDefer()))) {
-            upsertOrderEventWithoutOrder(row);
+            // Change: append reconciliation only the first time this row crosses max-defer (T13
+            // B1).
+            if (!"ORDER_EVENT_WITHOUT_ORDER".equals(row.lastError())) {
+              upsertOrderEventWithoutOrder(row);
+            }
             recordFailure(
                 new Claimed(row.id(), row.tenantId(), claimed.leaseUntil()),
                 new RuntimeException("ORDER_EVENT_WITHOUT_ORDER"));
@@ -323,7 +327,8 @@ public class InboxWorker {
         """
         SELECT e.id, e.tenant_id, e.source, e.event_id, e.event_type, e.aggregate_id,
                e.aggregate_version, e.payload::text AS payload, e.status, e.attempts,
-               e.next_attempt_at, e.received_at, t.entitlement_status, t.entitlement_expires_at
+               e.next_attempt_at, e.received_at, e.last_error, t.entitlement_status,
+               t.entitlement_expires_at
         FROM inbox_event AS e
         JOIN tenant AS t ON t.id = e.tenant_id
         WHERE e.id = ?
@@ -348,6 +353,7 @@ public class InboxWorker {
               rs.getInt("attempts"),
               rs.getObject("next_attempt_at", OffsetDateTime.class),
               receivedAt == null ? null : receivedAt.toInstant(),
+              rs.getString("last_error"),
               rs.getString("entitlement_status"),
               expires == null ? null : expires.toInstant());
         },
@@ -549,6 +555,7 @@ public class InboxWorker {
       int attempts,
       OffsetDateTime nextAttemptAt,
       Instant receivedAt,
+      String lastError,
       String entitlementStatus,
       Instant expiresAt) {
 

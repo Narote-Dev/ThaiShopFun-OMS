@@ -30,6 +30,8 @@ import com.thaishopfun.oms.stock.ReservationEngine;
 import com.thaishopfun.oms.stock.ReserveDemandPlanner;
 import com.thaishopfun.oms.stock.ReserveItem;
 import com.thaishopfun.oms.stock.Shortfall;
+import com.thaishopfun.oms.stock.StockError;
+import com.thaishopfun.oms.stock.StockOperationException;
 import com.thaishopfun.oms.stock.StockOwner;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.math.BigDecimal;
@@ -185,24 +187,37 @@ public class OrderIntakeSupport {
                 .componentlessBundleSkus(reserveItems.stream().map(ReserveItem::skuId).toList())
                 .isEmpty();
     List<Shortfall> stockShortfalls = List.of();
+    boolean unknownSkuAtAdopt = false;
+    String unknownSkuNote = null;
     if (stockEnforced && !reserveItems.isEmpty() && !componentlessBundle) {
       UUID groupId = parseUuid(payload.reservationId());
       hooks.beforeEngineWrite();
-      AdoptResult adopt =
-          engine.adoptForOrder(
-              groupId,
-              StockOwner.order(orderId.toString()),
-              reserveItems,
-              holdExpires,
-              "order.adopt:" + message.eventId());
-      if (!adopt.adopted()) {
-        stockShortfalls = adopt.shortfalls();
+      try {
+        AdoptResult adopt =
+            engine.adoptForOrder(
+                groupId,
+                StockOwner.order(orderId.toString()),
+                reserveItems,
+                holdExpires,
+                "order.adopt:" + message.eventId());
+        if (!adopt.adopted()) {
+          stockShortfalls = adopt.shortfalls();
+        }
+      } catch (StockOperationException ex) {
+        if (ex.error() != StockError.UNKNOWN_SKU) {
+          throw ex;
+        }
+        unknownSkuAtAdopt = true;
+        unknownSkuNote = unknownSkuHoldNote(mapped);
       }
     }
 
     String holdReason = "NONE";
     String holdNote = null;
-    if (hasUnmapped) {
+    if (unknownSkuAtAdopt) {
+      holdReason = "SKU_NOT_MAPPED";
+      holdNote = unknownSkuNote;
+    } else if (hasUnmapped) {
       holdReason = "SKU_NOT_MAPPED";
       if (!stockShortfalls.isEmpty()) {
         holdNote = shortfallNote(stockShortfalls);
@@ -210,6 +225,10 @@ public class OrderIntakeSupport {
     } else if (componentlessBundle) {
       holdReason = "OUT_OF_STOCK";
       holdNote = BUNDLE_WITHOUT_COMPONENTS_NOTE;
+      if ("SHADOW".equals(account.mode())) {
+        shadowDiff.insertOrderDiff(
+            account.id(), payload.orderId(), componentlessBundleShadowJson(mapped), now);
+      }
     } else if (!stockShortfalls.isEmpty()) {
       holdReason = "OUT_OF_STOCK";
       recordOversell(account, mapped, stockShortfalls);
@@ -241,18 +260,34 @@ public class OrderIntakeSupport {
     Instant paidAt = eventOccurredAt(message);
     order = applyPayment(order, "PAID", paidAt, account);
     List<ReserveItem> items = mappedReserveItems(order.id());
-    if (stockEnforced(account) && !items.isEmpty()) {
+    boolean componentlessBundle =
+        stockEnforced(account)
+            && !items.isEmpty()
+            && !demandPlanner
+                .componentlessBundleSkus(items.stream().map(ReserveItem::skuId).toList())
+                .isEmpty();
+    if (stockEnforced(account) && !items.isEmpty() && !componentlessBundle) {
       hooks.beforeEngineWrite();
-      EnsureHoldResult held =
-          engine.ensureOrderHold(
-              StockOwner.order(order.id().toString()), items, "order.ensure:" + message.eventId());
-      if (held.held()) {
-        order = orders.findById(order.id()).orElseThrow();
-        if ("OUT_OF_STOCK".equals(order.holdReason())) {
-          order = applyHold(order, "NONE", null);
+      try {
+        EnsureHoldResult held =
+            engine.ensureOrderHold(
+                StockOwner.order(order.id().toString()),
+                items,
+                "order.ensure:" + message.eventId());
+        if (held.held()) {
+          order = orders.findById(order.id()).orElseThrow();
+          if ("OUT_OF_STOCK".equals(order.holdReason())
+              && !BUNDLE_WITHOUT_COMPONENTS_NOTE.equals(order.holdNote())) {
+            order = applyHold(order, "NONE", null);
+          }
+        } else {
+          order = applyHold(order, "OUT_OF_STOCK", shortfallNote(held.shortfalls()));
         }
-      } else {
-        order = applyHold(order, "OUT_OF_STOCK", shortfallNote(held.shortfalls()));
+      } catch (StockOperationException ex) {
+        if (ex.error() != StockError.UNKNOWN_SKU) {
+          throw ex;
+        }
+        order = applyHold(order, "SKU_NOT_MAPPED", unknownSkuHoldNoteFromLines(order.id()));
       }
     }
     maybeReadyToPick(orders.findById(order.id()).orElseThrow(), account, items, paidAt);
@@ -484,6 +519,46 @@ public class OrderIntakeSupport {
     } catch (IllegalArgumentException ex) {
       return null;
     }
+  }
+
+  private String unknownSkuHoldNote(List<LineMapping> mapped) {
+    StringBuilder note = new StringBuilder("mapped sku not found");
+    for (LineMapping line : mapped) {
+      if (line.mapped()) {
+        note.append(';').append(line.listingSkuId());
+      }
+    }
+    return note.toString();
+  }
+
+  private String unknownSkuHoldNoteFromLines(UUID orderId) {
+    List<LineMapping> mapped =
+        lines.findByOrderId(orderId).stream()
+            .map(
+                line ->
+                    new LineMapping(
+                        line.id(),
+                        line.externalLineId(),
+                        line.skuId(),
+                        line.qty(),
+                        line.externalSkuId(),
+                        false,
+                        line.skuId() != null))
+            .toList();
+    return unknownSkuHoldNote(mapped);
+  }
+
+  private String componentlessBundleShadowJson(List<LineMapping> mapped) {
+    ArrayNode bundles = json.createArrayNode();
+    for (LineMapping line : mapped) {
+      if (line.mapped() && line.skuId() != null) {
+        bundles.add(line.skuId().toString());
+      }
+    }
+    ObjectNode root = json.createObjectNode();
+    root.put("reason", "BUNDLE_WITHOUT_COMPONENTS");
+    root.set("bundle_skus", bundles);
+    return json.writeValueAsString(root);
   }
 
   private static String shortfallNote(List<Shortfall> shortfalls) {
