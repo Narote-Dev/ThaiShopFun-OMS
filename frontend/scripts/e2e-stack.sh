@@ -55,6 +55,9 @@ fi
 
 curl -fsS http://127.0.0.1:8090/actuator/health >/dev/null
 
+# Step: Idempotent demo orders for Active Shop (T17 local/e2e only).
+curl -fsS -X POST http://127.0.0.1:8090/control/demo/orders-seed >/dev/null || true
+
 cd "$ROOT/frontend"
 # Foreground so this process exits when Vite exits, and the runner can stop the whole group.
 exec npm run dev -- --host 127.0.0.1 --port 5173 --strictPort

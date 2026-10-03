@@ -48,6 +48,7 @@ The web app calls the IdP at `http://localhost:8090/tsf-idp` with `client_id=oms
 | `POST /control/events/shuffle` | `{"events":[envelope, envelope]}` — sent in a different order |
 | `POST /control/events/stale` | `{"skew_seconds":301,"event":{...}}` |
 | `POST /control/events/bad-signature` | `{"event":{...}}` — signed with the wrong secret |
+| `POST /control/demo/orders-seed` | Idempotent demo `order.*` events for `shop_active` (local/e2e only) |
 | `POST /control/events/after-reservation-expiry` | `order.created` only. `{"reservation_expires_at":"...","event":{...}}`. Refuses a future `occurred_at` |
 | `POST /control/checkout/reservations` | reservation request; OMS status and body are returned as-is |
 | `DELETE /control/checkout/reservations/{id}` | release |
