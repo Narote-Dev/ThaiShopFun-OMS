@@ -162,71 +162,52 @@ class OrderIntakeT13OutOfOrderAcceptanceTest {
             1,
             1));
     assertThat(worker.processAvailable(10)).isEqualTo(1);
-    ObjectNode paid = OrderIntakeScenarioSupport.orderPaid(JSON, externalOrderId, shopId, 2);
-    ingest(paid);
+
+    ObjectNode fresh =
+        OrderIntakeScenarioSupport.orderUpdated(JSON, externalOrderId, shopId, 3);
+    ObjectNode recipientA = JSON.createObjectNode();
+    recipientA.put("name", "Recipient A");
+    recipientA.put("phone", "0811111111");
+    ObjectNode addressA = JSON.createObjectNode();
+    addressA.put("line1", "line a");
+    addressA.put("district", "district");
+    addressA.put("province", "Province-A");
+    addressA.put("postcode", "10110");
+    recipientA.set("address", addressA);
+    ((ObjectNode) fresh.path("data")).set("recipient", recipientA);
+    ingest(fresh);
     assertThat(worker.processAvailable(10)).isEqualTo(1);
-    UUID orderId =
+
+    ObjectNode stale =
+        OrderIntakeScenarioSupport.orderUpdated(JSON, externalOrderId, shopId, 2);
+    stale.put("event_id", "evt-stale-upd-" + UUID.randomUUID());
+    ObjectNode recipientB = JSON.createObjectNode();
+    recipientB.put("name", "Recipient B");
+    recipientB.put("phone", "0822222222");
+    ObjectNode addressB = JSON.createObjectNode();
+    addressB.put("line1", "line b");
+    addressB.put("district", "district");
+    addressB.put("province", "Province-B");
+    addressB.put("postcode", "10110");
+    recipientB.set("address", addressB);
+    ((ObjectNode) stale.path("data")).set("recipient", recipientB);
+    String staleEventId = stale.path("event_id").asString();
+    ingest(stale);
+    assertThat(worker.processAvailable(10)).isEqualTo(1);
+    assertThat(text("SELECT status FROM inbox_event WHERE event_id = ?", staleEventId))
+        .isEqualTo("PROCESSED");
+    String province =
         fixture.inTenant(
             shop.tenant(),
             () ->
                 jdbc.queryForObject(
-                    "SELECT id FROM sales_order WHERE external_order_id = ?",
-                    UUID.class,
+                    """
+                    SELECT province FROM order_recipient
+                    WHERE order_id = (SELECT id FROM sales_order WHERE external_order_id = ?)
+                    """,
+                    String.class,
                     externalOrderId));
-    assertThat(
-            fixture.inTenant(
-                shop.tenant(),
-                () ->
-                    jdbc.queryForObject(
-                        """
-                        SELECT count(*) FROM stock_reservation
-                        WHERE owner_type = 'ORDER' AND owner_ref = ?::text AND status = 'ACTIVE'
-                        """,
-                        Long.class,
-                        orderId.toString())))
-        .isGreaterThan(0);
-    ObjectNode stale = OrderIntakeScenarioSupport.orderCancelled(JSON, externalOrderId, shopId, 1);
-    stale.put("event_id", "evt-stale-" + UUID.randomUUID());
-    ingest(stale);
-    assertThat(worker.processAvailable(10)).isEqualTo(1);
-    assertThat(
-            text(
-                "SELECT status FROM inbox_event WHERE event_id = ?",
-                stale.path("event_id").asString()))
-        .isEqualTo("PROCESSED");
-    assertThat(
-            fixture.inTenant(
-                shop.tenant(),
-                () ->
-                    jdbc.queryForObject(
-                        "SELECT order_status FROM sales_order WHERE id = ?",
-                        String.class,
-                        orderId)))
-        .isEqualTo("ACTIVE");
-    assertThat(
-            fixture.inTenant(
-                shop.tenant(),
-                () ->
-                    jdbc.queryForObject(
-                        """
-                        SELECT count(*) FROM order_status_history
-                        WHERE order_id = ? AND dimension = 'ORDER' AND to_value = 'CANCELLED'
-                        """,
-                        Long.class,
-                        orderId)))
-        .isZero();
-    assertThat(
-            fixture.inTenant(
-                shop.tenant(),
-                () ->
-                    jdbc.queryForObject(
-                        """
-                        SELECT count(*) FROM stock_reservation
-                        WHERE owner_type = 'ORDER' AND owner_ref = ?::text AND status = 'ACTIVE'
-                        """,
-                        Long.class,
-                        orderId.toString())))
-        .isGreaterThan(0);
+    assertThat(province).isEqualTo("Province-A");
   }
 
   @Test

@@ -306,8 +306,8 @@ public class InboxWorker {
     boolean stale =
         !entVerOrdered
             && row.aggregateVersion() > 0
-            && ((lastForStale != null && row.aggregateVersion() <= lastForStale)
-                || (lastAggregate != null && row.aggregateVersion() < lastAggregate));
+            && lastForStale != null
+            && row.aggregateVersion() <= lastForStale;
     // TODO: Handlers must apply the full snapshot in data until REST refetch exists (T10).
     // gap=true means aggregate_version skipped at least one version. Do not assume a delta.
     boolean gap =

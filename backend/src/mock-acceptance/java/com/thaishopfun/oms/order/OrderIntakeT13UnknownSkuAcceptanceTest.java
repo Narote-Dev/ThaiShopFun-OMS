@@ -1,11 +1,6 @@
 package com.thaishopfun.oms.order;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyList;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.Mockito.doAnswer;
-import static org.mockito.Mockito.doCallRealMethod;
 
 import com.thaishopfun.mocktsf.OmsEndpoint;
 import com.thaishopfun.mocktsf.idp.TokenIssuer;
@@ -14,10 +9,10 @@ import com.thaishopfun.oms.auth.UuidV7;
 import com.thaishopfun.oms.inbox.InboxWorker;
 import com.thaishopfun.oms.stock.ReservationEngine;
 import com.thaishopfun.oms.stock.ReserveItem;
-import com.thaishopfun.oms.stock.StockError;
 import com.thaishopfun.oms.stock.StockFixture;
-import com.thaishopfun.oms.stock.StockOperationException;
 import com.thaishopfun.oms.stock.StockOwner;
+import com.thaishopfun.oms.stock.StockRepositorySkuOmitTestConfiguration;
+import com.thaishopfun.oms.stock.StockSkuLookupTestSupport;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpResponse;
@@ -40,7 +35,6 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
-import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.transaction.PlatformTransactionManager;
 import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ObjectNode;
@@ -49,7 +43,10 @@ import tools.jackson.databind.node.ObjectNode;
 @SpringBootTest(
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
     properties = {"spring.main.allow-bean-definition-overriding=true"})
-@Import(OrderIntakeT12ScenariosAcceptanceTest.IntakeTestConfig.class)
+@Import({
+  OrderIntakeT12ScenariosAcceptanceTest.IntakeTestConfig.class,
+  StockRepositorySkuOmitTestConfiguration.class
+})
 class OrderIntakeT13UnknownSkuAcceptanceTest {
 
   private static final String INBOX_SECRET = "dev-inbox-hmac-secret";
@@ -76,22 +73,15 @@ class OrderIntakeT13UnknownSkuAcceptanceTest {
   @Autowired InboxWorker worker;
   @Autowired JdbcTemplate jdbc;
   @Autowired PlatformTransactionManager transactions;
-  @MockitoSpyBean ReservationEngine reservationEngine;
+  @Autowired ReservationEngine reservationEngine;
 
   StockFixture fixture;
-  UUID omitSkuFromCatalog;
 
   @BeforeEach
   void setup() throws Exception {
     OrderIntakeMockRuntime.mock().getBean(OmsEndpoint.class).setBaseUrl("http://127.0.0.1:" + port);
     fixture = new StockFixture(jdbc, transactions);
-    omitSkuFromCatalog = null;
-    doCallRealMethod()
-        .when(reservationEngine)
-        .adoptForOrder(any(), any(), anyList(), any(), anyString());
-    doCallRealMethod().when(reservationEngine).ensureOrderHold(any(), anyList(), anyString());
-    doCallRealMethod().when(reservationEngine).reserve(any(), anyList(), anyString());
-    stubUnknownSkuFromReserveItems();
+    StockSkuLookupTestSupport.clearOmitSku();
     try (Connection admin = AuthTestSupport.admin();
         var statement = admin.createStatement()) {
       statement.execute("SET session_replication_role = replica");
@@ -112,7 +102,7 @@ class OrderIntakeT13UnknownSkuAcceptanceTest {
     UUID badSku = fixture.sku(shop, 2);
     fixture.channelListing(shop, account, "L-good", goodSku, true);
     fixture.channelListing(shop, account, "L-bad", badSku, true);
-    omitSkuFromCatalog = badSku;
+    StockSkuLookupTestSupport.omitSkuFromCatalogLookup(badSku);
 
     String externalOrderId = "TSF-T13-UNK-2L-" + UUID.randomUUID();
     ObjectNode created =
@@ -147,8 +137,7 @@ class OrderIntakeT13UnknownSkuAcceptanceTest {
     assertThat(holdNote(shop, orderId)).isEqualTo(holdNote);
     assertThat(historyHoldCount(shop, orderId)).isEqualTo(1);
 
-    omitSkuFromCatalog = null;
-    stubUnknownSkuFromReserveItems();
+    StockSkuLookupTestSupport.clearOmitSku();
     fixture.inTenant(
         shop.tenant(),
         () ->
@@ -166,7 +155,7 @@ class OrderIntakeT13UnknownSkuAcceptanceTest {
     UUID account = fixture.tsfChannelAccount(shop, "ACTIVE", "CONNECTED");
     UUID sku = fixture.sku(shop, 5);
     fixture.channelListing(shop, account, "L-unk-p", sku, true);
-    omitSkuFromCatalog = sku;
+    StockSkuLookupTestSupport.omitSkuFromCatalogLookup(sku);
     String externalOrderId = "TSF-T13-UNK-P-" + UUID.randomUUID();
     ObjectNode created =
         OrderIntakeScenarioSupport.orderCreated(
@@ -191,39 +180,6 @@ class OrderIntakeT13UnknownSkuAcceptanceTest {
     assertThat(holdNote(shop, orderId)).contains("L-unk-p");
     assertThat(historyHoldCount(shop, orderId)).isEqualTo(1);
     assertThat(orderReservationCount(shop, orderId)).isZero();
-  }
-
-  private void stubUnknownSkuFromReserveItems() {
-    doAnswer(
-            inv -> {
-              List<ReserveItem> items = inv.getArgument(2);
-              if (omitSkuFromCatalog != null) {
-                for (ReserveItem item : items) {
-                  if (omitSkuFromCatalog.equals(item.skuId())) {
-                    throw new StockOperationException(
-                        StockError.UNKNOWN_SKU, "unknown sku " + omitSkuFromCatalog);
-                  }
-                }
-              }
-              return inv.callRealMethod();
-            })
-        .when(reservationEngine)
-        .adoptForOrder(any(), any(), anyList(), any(), anyString());
-    doAnswer(
-            inv -> {
-              List<ReserveItem> items = inv.getArgument(1);
-              if (omitSkuFromCatalog != null) {
-                for (ReserveItem item : items) {
-                  if (omitSkuFromCatalog.equals(item.skuId())) {
-                    throw new StockOperationException(
-                        StockError.UNKNOWN_SKU, "unknown sku " + omitSkuFromCatalog);
-                  }
-                }
-              }
-              return inv.callRealMethod();
-            })
-        .when(reservationEngine)
-        .ensureOrderHold(any(), anyList(), anyString());
   }
 
   private void drainWorkerUntilProcessed(String eventId) throws Exception {
