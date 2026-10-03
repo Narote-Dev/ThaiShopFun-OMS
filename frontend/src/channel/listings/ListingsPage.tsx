@@ -61,6 +61,7 @@ export default function ListingsPage({ me }: { me: Me }) {
       setChannelAccountId(parsed.channelAccountId)
       setMappedFilter(parsed.mapped)
       setQ(parsed.q)
+      setOffset(0)
     }
     window.addEventListener('hashchange', onHash)
     return () => window.removeEventListener('hashchange', onHash)
