@@ -86,13 +86,25 @@ test('owner browses orders, opens detail with masked phone, requests cancel', as
 test('owner maps unmapped listing and order becomes ready to pick', async ({ page, request }) => {
   test.setTimeout(240_000)
   const token = await ownerToken(request)
+  const me = await request.get('http://127.0.0.1:8080/api/v1/me', {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  expect(me.ok()).toBeTruthy()
   const catalog = await request.post('http://127.0.0.1:8080/control/demo/order-catalog')
   expect(catalog.ok()).toBeTruthy()
-  const catalogBody = await catalog.json()
-  const channelAccountId = catalogBody.channel_account_id as string
-  expect(channelAccountId.length).toBeGreaterThan(0)
   const seed = await request.post('http://127.0.0.1:8090/control/demo/orders-seed')
   expect(seed.ok()).toBeTruthy()
+
+  const ordersResponse = await request.get(
+    'http://127.0.0.1:8080/api/v1/orders?hold_reason=SKU_NOT_MAPPED&limit=10',
+    { headers: { Authorization: `Bearer ${token}` } },
+  )
+  expect(ordersResponse.ok()).toBeTruthy()
+  const heldOrder = (await ordersResponse.json()).items.find(
+    (row: { external_order_id: string }) => row.external_order_id === 'DEMO-UNMAPPED',
+  )
+  expect(heldOrder).toBeTruthy()
+  const channelAccountId = heldOrder.channel_account_id as string
 
   const skuResponse = await request.get(
     'http://127.0.0.1:8080/api/v1/skus?q=DEMO-SKU-READY&limit=10',
@@ -109,14 +121,23 @@ test('owner maps unmapped listing and order becomes ready to pick', async ({ pag
     data: {},
   })
 
-  const listingsResponse = await request.get(
-    `http://127.0.0.1:8080/api/v1/channel-listings?channel_account_id=${channelAccountId}&mapped=false&q=L-demo-missing&limit=25`,
-    { headers: { Authorization: `Bearer ${token}` } },
-  )
-  expect(listingsResponse.ok()).toBeTruthy()
-  const listing = (await listingsResponse.json()).items.find(
-    (row: { external_sku_id: string }) => row.external_sku_id === 'L-demo-missing',
-  )
+  let listing: { id: string; external_sku_id: string } | undefined
+  await expect
+    .poll(
+      async () => {
+        const listingsResponse = await request.get(
+          `http://127.0.0.1:8080/api/v1/channel-listings?channel_account_id=${channelAccountId}&q=L-demo-missing&limit=25`,
+          { headers: { Authorization: `Bearer ${token}` } },
+        )
+        if (!listingsResponse.ok()) return false
+        listing = (await listingsResponse.json()).items.find(
+          (row: { external_sku_id: string }) => row.external_sku_id === 'L-demo-missing',
+        )
+        return listing != null
+      },
+      { timeout: 120_000, intervals: [3000] },
+    )
+    .toBeTruthy()
   expect(listing).toBeTruthy()
 
   const mapResponse = await request.put(
