@@ -12,7 +12,6 @@ import com.thaishopfun.oms.auth.AuthTestSupport;
 import com.thaishopfun.oms.auth.UuidV7;
 import com.thaishopfun.oms.inbox.InboxWorker;
 import com.thaishopfun.oms.stock.ReservationEngine;
-import com.thaishopfun.oms.stock.ReserveDemandPlanner;
 import com.thaishopfun.oms.stock.ReserveItem;
 import com.thaishopfun.oms.stock.StockError;
 import com.thaishopfun.oms.stock.StockFixture;
@@ -76,8 +75,7 @@ class OrderIntakeT13UnknownSkuAcceptanceTest {
   @Autowired InboxWorker worker;
   @Autowired JdbcTemplate jdbc;
   @Autowired PlatformTransactionManager transactions;
-  @Autowired ReservationEngine reservationEngine;
-  @MockitoSpyBean ReserveDemandPlanner demandPlanner;
+  @MockitoSpyBean ReservationEngine reservationEngine;
 
   StockFixture fixture;
   UUID omitSkuFromCatalog;
@@ -87,22 +85,12 @@ class OrderIntakeT13UnknownSkuAcceptanceTest {
     OrderIntakeMockRuntime.mock().getBean(OmsEndpoint.class).setBaseUrl("http://127.0.0.1:" + port);
     fixture = new StockFixture(jdbc, transactions);
     omitSkuFromCatalog = null;
-    doAnswer(
-            inv -> {
-              List<ReserveItem> items = inv.getArgument(0);
-              if (omitSkuFromCatalog != null) {
-                for (ReserveItem item : items) {
-                  if (omitSkuFromCatalog.equals(item.skuId())) {
-                    throw new StockOperationException(
-                        StockError.UNKNOWN_SKU, "unknown sku " + omitSkuFromCatalog);
-                  }
-                }
-              }
-              return inv.callRealMethod();
-            })
-        .when(demandPlanner)
-        .componentDemandPlan(anyList());
-    doCallRealMethod().when(demandPlanner).componentlessBundleSkus(any());
+    doCallRealMethod()
+        .when(reservationEngine)
+        .adoptForOrder(any(), any(), anyList(), any(), anyString());
+    doCallRealMethod().when(reservationEngine).ensureOrderHold(any(), anyList(), anyString());
+    doCallRealMethod().when(reservationEngine).reserve(any(), anyList(), anyString());
+    stubUnknownSkuFromReserveItems();
     try (Connection admin = AuthTestSupport.admin();
         var statement = admin.createStatement()) {
       statement.execute("SET session_replication_role = replica");
@@ -159,6 +147,7 @@ class OrderIntakeT13UnknownSkuAcceptanceTest {
     assertThat(historyHoldCount(shop, orderId)).isEqualTo(1);
 
     omitSkuFromCatalog = null;
+    stubUnknownSkuFromReserveItems();
     fixture.inTenant(
         shop.tenant(),
         () ->
@@ -203,6 +192,39 @@ class OrderIntakeT13UnknownSkuAcceptanceTest {
     assertThat(orderReservationCount(shop, orderId)).isZero();
   }
 
+  private void stubUnknownSkuFromReserveItems() {
+    doAnswer(
+            inv -> {
+              List<ReserveItem> items = inv.getArgument(2);
+              if (omitSkuFromCatalog != null) {
+                for (ReserveItem item : items) {
+                  if (omitSkuFromCatalog.equals(item.skuId())) {
+                    throw new StockOperationException(
+                        StockError.UNKNOWN_SKU, "unknown sku " + omitSkuFromCatalog);
+                  }
+                }
+              }
+              return inv.callRealMethod();
+            })
+        .when(reservationEngine)
+        .adoptForOrder(any(), any(), anyList(), any(), anyString());
+    doAnswer(
+            inv -> {
+              List<ReserveItem> items = inv.getArgument(1);
+              if (omitSkuFromCatalog != null) {
+                for (ReserveItem item : items) {
+                  if (omitSkuFromCatalog.equals(item.skuId())) {
+                    throw new StockOperationException(
+                        StockError.UNKNOWN_SKU, "unknown sku " + omitSkuFromCatalog);
+                  }
+                }
+              }
+              return inv.callRealMethod();
+            })
+        .when(reservationEngine)
+        .ensureOrderHold(any(), anyList(), anyString());
+  }
+
   private void drainWorkerUntilProcessed(String eventId) throws Exception {
     for (int i = 0; i < 5; i++) {
       worker.processAvailable(10);
@@ -217,7 +239,9 @@ class OrderIntakeT13UnknownSkuAcceptanceTest {
     }
     throw new AssertionError(
         "inbox not processed: "
-            + text("SELECT status FROM inbox_event WHERE event_id = ?", eventId));
+            + text("SELECT status FROM inbox_event WHERE event_id = ?", eventId)
+            + " last_error="
+            + text("SELECT last_error FROM inbox_event WHERE event_id = ?", eventId));
   }
 
   private void assertInboxProcessedOnce(String eventId) throws Exception {
