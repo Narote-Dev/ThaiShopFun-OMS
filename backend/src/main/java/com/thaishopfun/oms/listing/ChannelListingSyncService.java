@@ -118,8 +118,7 @@ public class ChannelListingSyncService {
     int remainingCap = holdProperties.getReevalCap();
     for (String externalSkuId : written.mappedSkus()) {
       ReevalSummary summary =
-          resolverJob.reevalForListing(
-              channelAccountId, externalSkuId, Math.max(0, remainingCap));
+          resolverJob.reevalForListing(channelAccountId, externalSkuId, Math.max(0, remainingCap));
       int processed = summary.released() + summary.outOfStock() + summary.stillHeld();
       reevaluated += processed;
       remainingCap -= processed;

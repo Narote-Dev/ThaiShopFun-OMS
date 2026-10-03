@@ -286,7 +286,7 @@ class OrderHoldResolverT12BAcceptanceTest {
                     WHERE action = 'ORDER_HOLD_RECHECKED' AND entity_id = ?
                     """,
                     Long.class,
-                    orderId));
+                    orderId.toString()));
     assertThat(auditRows).isEqualTo(1);
   }
 
