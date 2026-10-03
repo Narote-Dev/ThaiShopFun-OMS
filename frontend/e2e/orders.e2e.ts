@@ -136,5 +136,8 @@ test('owner maps unmapped listing via listings UI and order becomes ready to pic
   await page.getByLabel('Search').fill('DEMO-UNMAPPED')
   await page.getByRole('button', { name: 'Apply' }).click()
   await page.getByRole('link', { name: 'DEMO-UNMAPPED' }).click()
-  await expect(page.getByText('READY_TO_PICK')).toBeVisible({ timeout: 90_000 })
+  await expect(page.getByRole('heading', { name: 'Order DEMO-UNMAPPED' })).toBeVisible()
+  await expect(page.locator('dt:has-text("Fulfillment") + dd')).toHaveText('READY_TO_PICK', {
+    timeout: 90_000,
+  })
 })
