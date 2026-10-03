@@ -56,6 +56,31 @@ export default function OrdersListPage() {
   const tab = applied.fulfillment_status
 
   useEffect(() => {
+    const syncFromHash = () => {
+      const next = filtersFromHash()
+      const nextCursor = cursorFromHash()
+      setFilters(next)
+      setApplied((prev) => {
+        const filtersChanged =
+          prev.fulfillment_status !== next.fulfillment_status ||
+          prev.order_status !== next.order_status ||
+          prev.payment_status !== next.payment_status ||
+          prev.hold_reason !== next.hold_reason ||
+          prev.q !== next.q ||
+          prev.ordered_from !== next.ordered_from ||
+          prev.ordered_to !== next.ordered_to
+        if (filtersChanged) {
+          setBackStack([])
+        }
+        return next
+      })
+      setCursor(nextCursor)
+    }
+    window.addEventListener('hashchange', syncFromHash)
+    return () => window.removeEventListener('hashchange', syncFromHash)
+  }, [])
+
+  useEffect(() => {
     let active = true
     ordersApi
       .list(applied, ORDER_PAGE_SIZE, cursor)

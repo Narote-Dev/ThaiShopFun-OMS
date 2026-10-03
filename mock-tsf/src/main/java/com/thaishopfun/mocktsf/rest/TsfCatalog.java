@@ -63,6 +63,21 @@ public class TsfCatalog {
     return Optional.empty();
   }
 
+  /** Lets section 4.7 cancel-requests accept local DEMO-* ids used by orders-seed. */
+  public synchronized void ensureDemoOrder(String orderId) {
+    if (order(orderId).isPresent()) {
+      return;
+    }
+    Instant updated = Instant.now();
+    Map<String, Object> detail = base(orderId, "res-" + orderId, updated, 1);
+    detail.put("lines", List.of(line("L1", "L-demo", "SKU-DEMO", "Demo item", 1, 100)));
+    detail.put("totals", totals(100, 0, 0, 100));
+    detail.put("payment_method", "COD");
+    orders.add(
+        new Order(
+            "shop_active", orderId, updated, 1, detail, payment(orderId, "UNPAID")));
+  }
+
   public List<Map<String, Object>> listings() {
     return listings;
   }

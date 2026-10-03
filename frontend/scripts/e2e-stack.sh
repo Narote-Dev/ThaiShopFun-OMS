@@ -55,6 +55,10 @@ fi
 
 curl -fsS http://127.0.0.1:8090/actuator/health >/dev/null
 
+# Demo catalog + orders need time for the inbox worker before Playwright runs.
+curl -fsS -X POST http://127.0.0.1:8080/control/demo/order-catalog >/dev/null || true
+curl -fsS -X POST http://127.0.0.1:8090/control/demo/orders-seed >/dev/null || true
+
 cd "$ROOT/frontend"
 # Foreground so this process exits when Vite exits, and the runner can stop the whole group.
 exec npm run dev -- --host 127.0.0.1 --port 5173 --strictPort

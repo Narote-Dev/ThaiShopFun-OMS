@@ -1,6 +1,7 @@
 package com.thaishopfun.mocktsf.events;
 
 import com.thaishopfun.mocktsf.SeedData;
+import com.thaishopfun.mocktsf.rest.TsfCatalog;
 import com.thaishopfun.mocktsf.contract.ContractValidator;
 import java.io.IOException;
 import java.io.InputStream;
@@ -34,11 +35,13 @@ public class DemoOrdersController {
   private final JsonMapper json;
   private final OmsCaller oms;
   private final SeedData shops;
+  private final TsfCatalog catalog;
 
-  public DemoOrdersController(JsonMapper json, OmsCaller oms, SeedData shops) {
+  public DemoOrdersController(JsonMapper json, OmsCaller oms, SeedData shops, TsfCatalog catalog) {
     this.json = json;
     this.oms = oms;
     this.shops = shops;
+    this.catalog = catalog;
   }
 
   @PostMapping("/orders-seed")
@@ -67,6 +70,10 @@ public class DemoOrdersController {
   }
 
   private Map<String, Object> send(ObjectNode event) throws IOException {
+    String orderId = event.path("data").path("order_id").asString(null);
+    if (orderId != null && orderId.startsWith("DEMO-")) {
+      catalog.ensureDemoOrder(orderId);
+    }
     byte[] raw = json.writeValueAsBytes(event);
     String eventId = event.path("event_id").asString();
     String signature = oms.signInbox(OmsCaller.now(), raw);

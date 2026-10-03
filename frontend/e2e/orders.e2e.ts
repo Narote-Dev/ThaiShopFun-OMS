@@ -14,10 +14,12 @@ test('owner browses orders, opens detail with masked phone, requests cancel', as
   await page.getByRole('link', { name: 'Orders', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Orders' })).toBeVisible()
 
+  const search = page.getByLabel('Search')
   await expect
     .poll(
       async () => {
-        await page.goto('/#/orders?q=DEMO-COD')
+        await search.fill('DEMO-COD')
+        await page.getByRole('button', { name: 'Apply' }).click()
         return await page.getByRole('link', { name: 'DEMO-COD' }).count()
       },
       { timeout: 120_000, intervals: [3000] },
@@ -33,5 +35,5 @@ test('owner browses orders, opens detail with masked phone, requests cancel', as
   page.once('dialog', (dialog) => void dialog.accept())
   await page.getByLabel('Reason').fill('E2E cancel')
   await cancel.click()
-  await expect(page.getByText('CHANNEL_CANCEL_PENDING')).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByRole('status')).toContainText('CHANNEL_CANCEL_PENDING', { timeout: 30_000 })
 })
