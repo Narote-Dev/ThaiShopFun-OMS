@@ -9,6 +9,12 @@ vi.mock('../orders/api', () => ({
   },
 }))
 
+vi.mock('../channel/listings/api', () => ({
+  listingsApi: {
+    listAccounts: vi.fn(async () => ({ items: [{ id: 'ca', channel: 'TSF', external_shop_id: 's', status: 'CONNECTED' }] })),
+  },
+}))
+
 const owner: Me = {
   tenant: {
     id: '11111111-1111-7111-8111-111111111111',
@@ -40,7 +46,7 @@ describe('AppShell navigation', () => {
 
   it('hides Dead outbox for STAFF but shows for OWNER', () => {
     render(
-      <AppShell me={staff} route="#/" onLogout={() => undefined}>
+      <AppShell me={staff} route="#/" userDisplayName={null} onLogout={() => undefined}>
         <p>page</p>
       </AppShell>,
     )

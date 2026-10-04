@@ -58,6 +58,8 @@ export default function AppShell({ me, route, userDisplayName, onLogout, childre
       : `${me.tenant.membership_tier} · ${me.entitlement.status}`
 
   useEffect(() => {
+    // Change: close mobile drawer after hash navigation (Codex P2).
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- sync drawer to hash route
     setSidebarOpen(false)
   }, [route])
 
@@ -130,6 +132,7 @@ export default function AppShell({ me, route, userDisplayName, onLogout, childre
         <div className="px-3 pt-3">
           <a
             href="#/"
+            onClick={() => setSidebarOpen(false)}
             className="flex w-full items-center gap-2.5 rounded-lg border border-stone-200 bg-stone-50 px-2.5 py-2 text-left hover:bg-stone-100"
             aria-label={`${me.tenant.name} shop home`}
           >
@@ -170,6 +173,7 @@ export default function AppShell({ me, route, userDisplayName, onLogout, childre
                   <a
                     key={item.href}
                     href={item.href}
+                    onClick={() => setSidebarOpen(false)}
                     aria-label={item.ariaLabel}
                     aria-current={active ? 'page' : undefined}
                     className={cn(
