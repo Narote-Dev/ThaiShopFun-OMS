@@ -101,7 +101,13 @@ export type HoldGroup = {
   hold_reason: string
   hold_detail: string | null
   count: number
-  samples: { id: string; external_order_id: string; ordered_at: string }[]
+  samples: {
+    id: string
+    external_order_id: string
+    channel_account_id: string
+    ordered_at: string
+  }[]
+  channel_account_counts?: { channel_account_id: string; count: number }[]
 }
 
 export const ORDER_PAGE_SIZE = 25
@@ -131,6 +137,19 @@ export const ordersApi = {
     return apiRequest(`/api/v1/orders/${id}/cancel-requests`, {
       method: 'POST',
       body: JSON.stringify({ reason }),
+    })
+  },
+  holdRecheck(id: string, idempotencyKey: string): Promise<{
+    id: string
+    hold_reason: string
+    released: number
+    out_of_stock: number
+    still_held: number
+  }> {
+    return apiRequest(`/api/v1/orders/${id}/hold-rechecks`, {
+      method: 'POST',
+      headers: { 'Idempotency-Key': idempotencyKey },
+      body: '{}',
     })
   },
 }

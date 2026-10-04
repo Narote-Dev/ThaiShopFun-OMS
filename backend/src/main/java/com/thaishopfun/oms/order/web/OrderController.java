@@ -7,6 +7,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -17,10 +18,13 @@ class OrderController {
 
   private final OrderQueryService queries;
   private final OrderCancelService cancel;
+  private final OrderHoldRecheckService holdRecheck;
 
-  OrderController(OrderQueryService queries, OrderCancelService cancel) {
+  OrderController(
+      OrderQueryService queries, OrderCancelService cancel, OrderHoldRecheckService holdRecheck) {
     this.queries = queries;
     this.cancel = cancel;
+    this.holdRecheck = holdRecheck;
   }
 
   @GetMapping
@@ -66,6 +70,13 @@ class OrderController {
       @PathVariable UUID id, @RequestBody(required = false) OrderViews.CancelRequestBody body) {
     OrderViews.CancelResponseView response = cancel.requestCancel(id, body);
     return ResponseEntity.accepted().cacheControl(CacheControl.noStore()).body(response);
+  }
+
+  @PostMapping("/{id}/hold-rechecks")
+  ResponseEntity<OrderViews.HoldRecheckResponse> holdRecheck(
+      @PathVariable UUID id,
+      @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey) {
+    return ok(holdRecheck.recheck(id, idempotencyKey));
   }
 
   private static <T> ResponseEntity<T> ok(T body) {

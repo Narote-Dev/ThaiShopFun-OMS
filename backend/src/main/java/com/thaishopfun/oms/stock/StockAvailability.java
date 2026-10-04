@@ -88,7 +88,7 @@ public class StockAvailability {
     for (UUID skuId : skuIds) {
       SkuInfo sku = skus.get(skuId);
       if (sku == null) {
-        throw new StockOperationException(StockError.UNKNOWN_SKU, "unknown sku " + skuId);
+        throw new StockOperationException(StockError.UNKNOWN_SKU, "unknown sku " + skuId, skuId);
       }
       if (sku.bundle()) {
         sku.components().forEach(component -> stockSkus.add(component.skuId()));

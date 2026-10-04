@@ -86,6 +86,34 @@ public class ControlController {
     return report(List.of(deliver(eventOf(readObject(request)), OmsCaller.now(), true)));
   }
 
+  @PostMapping("/listing-changed")
+  public ResponseEntity<String> listingChanged(HttpServletRequest request) throws IOException {
+    JsonNode body = readObject(request);
+    String shopId = text(body, "tsf_shop_id");
+    String listingSkuId = text(body, "listing_sku_id");
+    String action = text(body, "action");
+    long version = body.path("aggregate_version").asLong(1);
+    ObjectNode event = json.createObjectNode();
+    event.put("event_id", "evt-listing-" + java.util.UUID.randomUUID());
+    event.put("event_type", "listing.changed");
+    event.put("schema_version", 1);
+    event.put("occurred_at", Instant.now().toString());
+    event.put("tsf_shop_id", shopId);
+    event.put("aggregate_id", listingSkuId);
+    event.put("aggregate_version", version);
+    ObjectNode data = json.createObjectNode();
+    data.put("listing_sku_id", listingSkuId);
+    data.put("action", action);
+    if (body.has("seller_sku")) {
+      data.put("seller_sku", body.path("seller_sku").asString());
+    }
+    if (body.has("name")) {
+      data.put("name", body.path("name").asString());
+    }
+    event.set("data", data);
+    return report(List.of(deliver(event, OmsCaller.now(), true)));
+  }
+
   @PostMapping("/events/repeat")
   public ResponseEntity<String> repeat(HttpServletRequest request) throws IOException {
     // Step 1: One payload, N deliveries, same event_id. OMS must treat the rest as duplicates.

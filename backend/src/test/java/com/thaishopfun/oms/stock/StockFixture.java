@@ -287,13 +287,16 @@ public final class StockFixture {
         () ->
             jdbc.update(
                 "INSERT INTO channel_listing (id, tenant_id, channel_account_id, sku_id, "
-                    + "external_sku_id, stock_control) VALUES (?, ?, ?, ?, ?, ?)",
+                    + "external_sku_id, stock_control, mapping_source, mapped_at) "
+                    + "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 UuidV7.generate(),
                 shop.tenant(),
                 channelAccountId,
                 listingSku,
                 externalSkuId,
-                stockControl));
+                stockControl,
+                listingSku == null ? null : "MANUAL",
+                listingSku == null ? null : java.time.OffsetDateTime.now()));
   }
 
   UUID listing(Shop shop, UUID sku, int safetyBuffer) {
@@ -310,13 +313,16 @@ public final class StockFixture {
               "ext-" + account);
           jdbc.update(
               "INSERT INTO channel_listing (id, tenant_id, channel_account_id, sku_id, "
-                  + "external_sku_id, safety_buffer) VALUES (?, ?, ?, ?, ?, ?)",
+                  + "external_sku_id, safety_buffer, mapping_source, mapped_at) "
+                  + "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
               listing,
               shop.tenant(),
               account,
               sku,
               "ext-sku-" + listing,
-              safetyBuffer);
+              safetyBuffer,
+              sku == null ? null : "MANUAL",
+              sku == null ? null : java.time.OffsetDateTime.now());
         });
     return listing;
   }

@@ -258,6 +258,7 @@ public class OrderQueryService {
                       SELECT
                         o.id,
                         o.external_order_id,
+                        o.channel_account_id,
                         o.ordered_at,
                         o.hold_reason,
                         (
@@ -279,6 +280,7 @@ public class OrderQueryService {
                       SELECT
                         id,
                         external_order_id,
+                        channel_account_id,
                         ordered_at,
                         CASE
                           WHEN bundle_without_components THEN 'OUT_OF_STOCK'
@@ -290,11 +292,12 @@ public class OrderQueryService {
                         END AS hold_detail
                       FROM held
                     )
-                    SELECT id, external_order_id, ordered_at
+                    SELECT id, external_order_id, channel_account_id, ordered_at
                     FROM (
                       SELECT
                         c.id,
                         c.external_order_id,
+                        c.channel_account_id,
                         c.ordered_at,
                         ROW_NUMBER() OVER (ORDER BY c.ordered_at DESC) AS rn
                       FROM classified c
@@ -307,12 +310,28 @@ public class OrderQueryService {
                         new OrderViews.HoldSample(
                             rs.getObject("id", UUID.class),
                             rs.getString("external_order_id"),
+                            rs.getObject("channel_account_id", UUID.class),
                             rs.getObject("ordered_at", java.time.OffsetDateTime.class).toInstant()),
                     group.holdReason(),
                     group.holdDetail());
+            List<OrderViews.ChannelAccountHoldCount> channelCounts = List.of();
+            if ("SKU_NOT_MAPPED".equals(group.holdReason())) {
+              channelCounts =
+                  jdbc.query(
+                      """
+                      SELECT channel_account_id, COUNT(*) AS cnt
+                      FROM sales_order
+                      WHERE hold_reason = 'SKU_NOT_MAPPED'
+                      GROUP BY channel_account_id
+                      ORDER BY channel_account_id
+                      """,
+                      (rs, rowNum) ->
+                          new OrderViews.ChannelAccountHoldCount(
+                              rs.getObject("channel_account_id", UUID.class), rs.getLong("cnt")));
+            }
             result.add(
                 new OrderViews.HoldGroup(
-                    group.holdReason(), group.holdDetail(), group.count(), samples));
+                    group.holdReason(), group.holdDetail(), group.count(), samples, channelCounts));
           }
           return new OrderViews.HoldsView(result);
         });

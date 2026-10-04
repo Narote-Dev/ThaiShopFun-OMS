@@ -80,6 +80,10 @@ public final class CatalogHttp {
     return send(json(builder(path, token), "POST", body));
   }
 
+  public Result postWithIdempotencyKey(String path, String token, String idempotencyKey) {
+    return send(json(builder(path, token).header("Idempotency-Key", idempotencyKey), "POST", ""));
+  }
+
   public Result put(String path, String token, Object body) {
     return send(json(builder(path, token), "PUT", body));
   }

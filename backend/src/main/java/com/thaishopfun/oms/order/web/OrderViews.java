@@ -109,15 +109,25 @@ public final class OrderViews {
       RecipientView recipient,
       List<TimelineEntry> timeline) {}
 
+  public record ChannelAccountHoldCount(
+      @JsonProperty("channel_account_id") UUID channelAccountId, long count) {}
+
   public record HoldGroup(
       @JsonProperty("hold_reason") String holdReason,
       @JsonProperty("hold_detail") String holdDetail,
       long count,
-      List<HoldSample> samples) {}
+      List<HoldSample> samples,
+      @JsonProperty("channel_account_counts") List<ChannelAccountHoldCount> channelAccountCounts) {
+
+    public HoldGroup(String holdReason, String holdDetail, long count, List<HoldSample> samples) {
+      this(holdReason, holdDetail, count, samples, List.of());
+    }
+  }
 
   public record HoldSample(
       UUID id,
       @JsonProperty("external_order_id") String externalOrderId,
+      @JsonProperty("channel_account_id") UUID channelAccountId,
       @JsonProperty("ordered_at") Instant orderedAt) {}
 
   public record HoldsView(List<HoldGroup> groups) {}
@@ -128,4 +138,11 @@ public final class OrderViews {
       @JsonProperty("cancel_request_id") String cancelRequestId,
       @JsonProperty("order_id") String orderId,
       String status) {}
+
+  public record HoldRecheckResponse(
+      @JsonProperty("order_id") UUID orderId,
+      @JsonProperty("hold_reason") String holdReason,
+      int released,
+      @JsonProperty("out_of_stock") int outOfStock,
+      @JsonProperty("still_held") int stillHeld) {}
 }

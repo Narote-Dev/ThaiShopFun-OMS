@@ -70,7 +70,7 @@ erDiagram
 | `product` | id, tenant_id, name, status | |
 | `sku` | id, tenant_id, product_id, sku_code, name, barcode, weight_g, is_bundle, UNIQUE(tenant_id, sku_code) | |
 | `sku_bundle_component` | tenant_id, bundle_sku_id, component_sku_id, qty > 0, PK(bundle,component) | trigger: component ต้อง `is_bundle=false` และ bundle ≠ component (ห้าม nested/circular) |
-| `channel_listing` | id, tenant_id, channel_account_id, sku_id, external_item_id, external_sku_id, **stock_control** bool (allowlist ของ CONTROL), safety_buffer, last_exposed_qty, last_pushed_version, last_seen_channel_qty, UNIQUE(channel_account_id, external_sku_id) | ตัด `alloc_pct` ออก |
+| `channel_listing` | id, tenant_id, channel_account_id, sku_id, external_item_id, external_sku_id, **seller_sku**, **name**, **mapping_source** (`AUTO`/`MANUAL`), **mapped_at**, **removed_at**, **stock_control** bool (allowlist ของ CONTROL), safety_buffer, last_exposed_qty, last_pushed_version, last_seen_channel_qty, UNIQUE(channel_account_id, external_sku_id) | V12 mapping metadata; `sku_id` nullable until mapped |
 | `allocation_policy` *(Phase 5)* | tenant_id, sku_id NULL (= ค่า default ร้าน), strategy (`SHARED/HARD`), low_stock_threshold, priority_channel_account_id | |
 | `channel_allocation` *(Phase 5)* | tenant_id, channel_account_id, sku_id, allocated_qty | ใช้กับ `HARD`; ผลรวม ≤ `physical_available − safety_buffer` |
 

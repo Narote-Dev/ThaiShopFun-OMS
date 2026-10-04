@@ -1112,8 +1112,13 @@ public class ReservationEngine {
 
   private <T> Outcome<T> fail(
       UUID tenantId, String scope, String key, StockError error, String message) {
-    idempotency.fail(tenantId, scope, key, error, message);
-    return Outcome.failure(error, message);
+    return fail(tenantId, scope, key, error, message, null);
+  }
+
+  private <T> Outcome<T> fail(
+      UUID tenantId, String scope, String key, StockError error, String message, UUID skuId) {
+    idempotency.fail(tenantId, scope, key, error, message, skuId);
+    return Outcome.failure(error, message, skuId);
   }
 
   private void publishChanged(UUID tenantId, Collection<ReservedLine> lines) {
@@ -1168,7 +1173,7 @@ public class ReservationEngine {
       UUID tenantId, String scope, String key, Set<UUID> itemSkuIds, Map<UUID, SkuInfo> skus) {
     for (UUID skuId : itemSkuIds) {
       if (skus.get(skuId) == null) {
-        return fail(tenantId, scope, key, StockError.UNKNOWN_SKU, "unknown sku " + skuId);
+        return fail(tenantId, scope, key, StockError.UNKNOWN_SKU, "unknown sku " + skuId, skuId);
       }
     }
     return null;

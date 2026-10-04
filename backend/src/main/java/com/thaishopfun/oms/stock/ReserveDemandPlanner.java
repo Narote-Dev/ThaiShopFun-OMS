@@ -62,7 +62,8 @@ public class ReserveDemandPlanner {
       UUID warehouseId = item.warehouseId() == null ? defaultWarehouse : item.warehouseId();
       SkuInfo sku = skus.get(item.skuId());
       if (sku == null) {
-        throw new StockOperationException(StockError.UNKNOWN_SKU, "unknown sku " + item.skuId());
+        throw new StockOperationException(
+            StockError.UNKNOWN_SKU, "unknown sku " + item.skuId(), item.skuId());
       }
       List<Component> parts = sku.bundle() ? sku.components() : List.of(new Component(sku.id(), 1));
       for (Component part : parts) {

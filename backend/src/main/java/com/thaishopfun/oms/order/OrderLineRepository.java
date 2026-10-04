@@ -70,6 +70,24 @@ public class OrderLineRepository {
         orderId);
   }
 
+  /** Batch-update line sku_id from mapped channel_listing rows for this order. */
+  public void updateSkuIdsFromListings(UUID orderId, UUID channelAccountId) {
+    jdbc.update(
+        """
+        UPDATE order_line ol
+        SET sku_id = cl.sku_id
+        FROM channel_listing cl
+        WHERE ol.order_id = ?
+          AND cl.channel_account_id = ?
+          AND cl.external_sku_id = ol.external_sku_id
+          AND cl.removed_at IS NULL
+          AND cl.sku_id IS NOT NULL
+          AND ol.sku_id IS NULL
+        """,
+        orderId,
+        channelAccountId);
+  }
+
   private OrderLine map(ResultSet rs, int rowNum) throws SQLException {
     return new OrderLine(
         rs.getObject("id", UUID.class),

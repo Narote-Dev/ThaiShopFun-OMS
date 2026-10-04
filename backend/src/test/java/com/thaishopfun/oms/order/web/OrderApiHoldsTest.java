@@ -35,15 +35,40 @@ class OrderApiHoldsTest extends OrderIntegrationTest {
   void holdGroupsAndCounts() throws Exception {
     CatalogHttp.Shop httpShop = http.catalog().shop();
     OrderFixture.Shop shop = OrderFixture.shopFor(httpShop);
+    UUID secondAccount = UuidV7.generate();
+    fixture.inTenant(
+        shop.tenantId(),
+        () -> {
+          jdbc.update(
+              """
+              INSERT INTO channel_account (id, tenant_id, channel, external_shop_id, status, mode)
+              VALUES (?, ?, 'TSF', ?, 'CONNECTED', 'ACTIVE')
+              """,
+              secondAccount,
+              shop.tenantId(),
+              shop.tsfShopId() + "-alt");
+          return null;
+        });
     fixture.insert(shop, "H-NONE", "READY_TO_PICK", "NONE");
     fixture.insert(shop, "H-MAP", "UNFULFILLED", "SKU_NOT_MAPPED");
+    fixture.insert(
+        shop, "H-MAP-2", "ACTIVE", "PAID", "UNFULFILLED", "SKU_NOT_MAPPED", secondAccount);
     fixture.insert(shop, "H-OOS", "UNFULFILLED", "OUT_OF_STOCK");
     insertBundleWithoutComponents(shop, "H-BUNDLE");
     CatalogHttp.Result holds = http.get(OrderHttp.ordersPath("/holds"), httpShop.owner());
     assertThat(holds.status()).isEqualTo(200);
     JsonNode groups = holds.body().path("groups");
     assertThat(groups)
-        .anySatisfy(g -> assertThat(g.path("hold_reason").asString()).isEqualTo("SKU_NOT_MAPPED"));
+        .anySatisfy(
+            g -> {
+              assertThat(g.path("hold_reason").asString()).isEqualTo("SKU_NOT_MAPPED");
+              assertThat(g.path("channel_account_counts").size()).isEqualTo(2);
+              int mappedAccountTotal = 0;
+              for (JsonNode row : g.path("channel_account_counts")) {
+                mappedAccountTotal += row.path("count").asInt();
+              }
+              assertThat(mappedAccountTotal).isEqualTo(2);
+            });
     assertThat(groups)
         .anySatisfy(
             g -> {
@@ -61,7 +86,7 @@ class OrderApiHoldsTest extends OrderIntegrationTest {
     for (JsonNode group : groups) {
       total += group.path("count").asInt();
     }
-    assertThat(total).isEqualTo(3);
+    assertThat(total).isEqualTo(4);
   }
 
   private void insertBundleWithoutComponents(OrderFixture.Shop shop, String externalId) {

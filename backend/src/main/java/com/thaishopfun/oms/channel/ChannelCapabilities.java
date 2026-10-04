@@ -8,6 +8,7 @@ public record ChannelCapabilities(
     boolean supportsWebhooks,
     boolean supportsOrderPull,
     boolean supportsStockPush,
+    boolean supportsListingSync,
     boolean supportsCancelRequest,
     boolean supportsLabel,
     boolean supportsReturn,
