@@ -1,5 +1,12 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import BundleEditor from './BundleEditor'
+import { Button } from '../ui/Button'
+import { Card } from '../ui/Card'
+import { Input } from '../ui/Input'
+import { Label } from '../ui/Label'
+import { PageContent } from '../ui/PageContent'
+import { PageHeader } from '../ui/PageHeader'
+import { Select } from '../ui/Select'
 import { catalogApi, messageFor, type Product, type Sku, type SkuInput } from './api'
 
 const NEW_PRODUCT = '__new__'
@@ -124,103 +131,123 @@ export default function SkuFormPage({ id, canWrite }: { id: string | null; canWr
   }
 
   const readOnly = !canWrite
+  const heading = id ? (sku ? sku.sku_code : 'SKU') : 'New SKU'
   return (
-    <main>
-      <p>
-        <a href="#/catalog/skus">Back to SKUs</a>
+    <PageContent>
+      <p className="text-[13px]">
+        <a href="#/catalog/skus" className="font-medium text-brand-700 hover:underline">
+          Back to SKUs
+        </a>
       </p>
-      <h1>{id ? (sku ? sku.sku_code : 'SKU') : 'New SKU'}</h1>
-      {readOnly ? <p>You can view this SKU. Only an OWNER or ADMIN can change it.</p> : null}
-      <form onSubmit={submit}>
-        <label>
-          Product
-          <select
-            value={draft.productId}
-            disabled={readOnly}
-            onChange={(event) => set('productId', event.target.value)}
-          >
-            {products.map((product) => (
-              <option key={product.id} value={product.id}>
-                {product.name}
-                {product.status === 'INACTIVE' ? ' (archived)' : ''}
-              </option>
-            ))}
-            {!sku ? <option value={NEW_PRODUCT}>New product…</option> : null}
-          </select>
-        </label>
-        {draft.productId === NEW_PRODUCT ? (
-          <label>
-            New product name
-            <input
-              value={draft.productName}
+      <PageHeader className="mt-2" title={heading} />
+      {readOnly ? <p className="mt-2 text-[13px] text-stone-600">You can view this SKU. Only an OWNER or ADMIN can change it.</p> : null}
+      <Card className="mt-4">
+        <form className="grid gap-4 p-5 sm:grid-cols-2" onSubmit={submit}>
+          <div>
+            <Label htmlFor="sku-product">Product</Label>
+            <Select
+              id="sku-product"
+              value={draft.productId}
               disabled={readOnly}
-              onChange={(event) => set('productName', event.target.value)}
+              onChange={(event) => set('productId', event.target.value)}
+            >
+              {products.map((product) => (
+                <option key={product.id} value={product.id}>
+                  {product.name}
+                  {product.status === 'INACTIVE' ? ' (archived)' : ''}
+                </option>
+              ))}
+              {!sku ? <option value={NEW_PRODUCT}>New product…</option> : null}
+            </Select>
+          </div>
+          {draft.productId === NEW_PRODUCT ? (
+            <div>
+              <Label htmlFor="sku-new-product">New product name</Label>
+              <Input
+                id="sku-new-product"
+                value={draft.productName}
+                disabled={readOnly}
+                onChange={(event) => set('productName', event.target.value)}
+              />
+            </div>
+          ) : null}
+          <div>
+            <Label htmlFor="sku-code">SKU code</Label>
+            <Input id="sku-code" value={draft.code} disabled={readOnly} onChange={(event) => set('code', event.target.value)} />
+          </div>
+          <div>
+            <Label htmlFor="sku-name">Name</Label>
+            <Input id="sku-name" value={draft.name} disabled={readOnly} onChange={(event) => set('name', event.target.value)} />
+          </div>
+          <div>
+            <Label htmlFor="sku-barcode">Barcode</Label>
+            <Input
+              id="sku-barcode"
+              value={draft.barcode}
+              disabled={readOnly}
+              onChange={(event) => set('barcode', event.target.value)}
             />
-          </label>
-        ) : null}
-        <label>
-          SKU code
-          <input value={draft.code} disabled={readOnly} onChange={(event) => set('code', event.target.value)} />
-        </label>
-        <label>
-          Name
-          <input value={draft.name} disabled={readOnly} onChange={(event) => set('name', event.target.value)} />
-        </label>
-        <label>
-          Barcode
-          <input
-            value={draft.barcode}
-            disabled={readOnly}
-            onChange={(event) => set('barcode', event.target.value)}
-          />
-        </label>
-        <label>
-          Weight (g)
-          <input
-            inputMode="numeric"
-            value={draft.weight}
-            disabled={readOnly}
-            onChange={(event) => set('weight', event.target.value)}
-          />
-        </label>
-        <label className="check">
-          <input
-            type="checkbox"
-            checked={draft.bundle}
-            disabled={readOnly}
-            onChange={(event) => set('bundle', event.target.checked)}
-          />
-          Bundle (made of other SKUs)
-        </label>
-        {sku && !sku.is_bundle && sku.on_hand !== null ? (
-          <p>
-            On hand {sku.on_hand} · reserved {sku.reserved ?? 0}
-          </p>
-        ) : null}
-        {/* Change: T08A stock history link. */}
-        {sku && !sku.is_bundle ? (
-          <p>
-            <a href={`#/catalog/skus/${sku.id}/history`}>Stock history</a>
-          </p>
-        ) : null}
-        {error ? <p role="alert">{error}</p> : null}
-        {notice ? <p>{notice}</p> : null}
-        {canWrite ? (
-          <p>
-            <button type="submit" disabled={busy}>
-              {sku ? 'Save' : 'Create SKU'}
-            </button>
-            {sku ? (
-              <button type="button" disabled={busy} onClick={() => void remove()}>
-                Delete
-              </button>
-            ) : null}
-          </p>
-        ) : null}
-      </form>
+          </div>
+          <div>
+            <Label htmlFor="sku-weight">Weight (g)</Label>
+            <Input
+              id="sku-weight"
+              inputMode="numeric"
+              value={draft.weight}
+              disabled={readOnly}
+              onChange={(event) => set('weight', event.target.value)}
+            />
+          </div>
+          <div className="sm:col-span-2">
+            <Label className="flex cursor-pointer items-center gap-2 font-normal">
+              <input
+                type="checkbox"
+                className="h-4 w-4 rounded border-stone-300 text-brand-600 focus:ring-brand-200"
+                checked={draft.bundle}
+                disabled={readOnly}
+                onChange={(event) => set('bundle', event.target.checked)}
+              />
+              Bundle (made of other SKUs)
+            </Label>
+          </div>
+          {sku && !sku.is_bundle && sku.on_hand !== null ? (
+            <p className="sm:col-span-2 text-[13px] text-stone-600">
+              On hand {sku.on_hand} · reserved {sku.reserved ?? 0}
+            </p>
+          ) : null}
+          {/* Change: T08A stock history link. */}
+          {sku && !sku.is_bundle ? (
+            <p className="sm:col-span-2 text-[13px]">
+              <a href={`#/catalog/skus/${sku.id}/history`} className="font-medium text-brand-700 hover:underline">
+                Stock history
+              </a>
+            </p>
+          ) : null}
+          {error ? (
+            <p role="alert" className="sm:col-span-2 text-[13px] text-red-700">
+              {error}
+            </p>
+          ) : null}
+          {notice ? <p className="sm:col-span-2 text-[13px] text-stone-600">{notice}</p> : null}
+          {canWrite ? (
+            <div className="flex flex-wrap gap-2 sm:col-span-2">
+              <Button type="submit" variant="primary" disabled={busy}>
+                {sku ? 'Save' : 'Create SKU'}
+              </Button>
+              {sku ? (
+                <Button type="button" variant="danger" disabled={busy} onClick={() => void remove()}>
+                  Delete
+                </Button>
+              ) : null}
+            </div>
+          ) : null}
+        </form>
+      </Card>
       {sku && sku.is_bundle ? (
-        <BundleEditor key={sku.id} sku={sku} canWrite={canWrite} onSaved={setSku} />
+        <div className="mt-6">
+          <BundleEditor key={sku.id} sku={sku} canWrite={canWrite} onSaved={setSku} />
+        </div>
       ) : null}
-    </main>
+    </PageContent>
   )
 }

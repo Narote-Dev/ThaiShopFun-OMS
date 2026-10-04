@@ -1,4 +1,18 @@
 import { useEffect, useState, type FormEvent } from 'react'
+import { Button } from '../ui/Button'
+import { Card } from '../ui/Card'
+import {
+  DataTable,
+  DataTableCell,
+  DataTableHead,
+  DataTableRow,
+  DataTableTh,
+  TablePager,
+} from '../ui/DataTable'
+import { Input } from '../ui/Input'
+import { Label } from '../ui/Label'
+import { PageContent } from '../ui/PageContent'
+import { PageHeader } from '../ui/PageHeader'
 import { catalogApi, messageFor, type Page, type Sku } from './api'
 
 export const PAGE_SIZE = 25
@@ -44,72 +58,100 @@ export default function SkuListPage({ canWrite }: { canWrite: boolean }) {
   const total = page?.total ?? 0
   const last = Math.min(offset + PAGE_SIZE, total)
   return (
-    <main className="wide">
-      <h1>SKUs</h1>
-      <form className="toolbar" onSubmit={search}>
-        <label>
-          Search SKUs
-          <input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Code prefix, exact barcode, or name"
-          />
-        </label>
-        <button type="submit" disabled={busy}>
-          Search
-        </button>
-        {canWrite ? <a href="#/catalog/skus/new">New SKU</a> : null}
-      </form>
-      {error ? <p role="alert">{error}</p> : null}
-      {page && page.items.length === 0 ? <p>No SKUs found.</p> : null}
+    <PageContent wide>
+      <PageHeader
+        title={
+          <>
+            <span aria-hidden="true">SKUs</span>
+            <span className="sr-only">SKUs</span>
+          </>
+        }
+      />
+      <Card className="mt-4">
+        <form className="flex flex-wrap items-end gap-4 p-4" onSubmit={search}>
+          <div className="min-w-[240px] flex-1">
+            <Label htmlFor="sku-search">Search SKUs</Label>
+            <Input
+              id="sku-search"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Code prefix, exact barcode, or name"
+            />
+          </div>
+          <Button type="submit" variant="primary" disabled={busy}>
+            Search
+          </Button>
+          {canWrite ? (
+            <a href="#/catalog/skus/new" className="text-[13px] font-medium text-brand-700 hover:underline">
+              New SKU
+            </a>
+          ) : null}
+        </form>
+      </Card>
+      {error ? <p role="alert" className="mt-4 text-[13px] text-red-700">{error}</p> : null}
+      {page && page.items.length === 0 ? <p className="mt-4 text-[13px] text-stone-600">No SKUs found.</p> : null}
       {page && page.items.length > 0 ? (
-        <table>
-          <thead>
-            <tr>
-              <th>Code</th>
-              <th>Name</th>
-              <th>Product</th>
-              <th>Barcode</th>
-              <th>Type</th>
-              <th>On hand</th>
-              <th>Stock</th>
-            </tr>
-          </thead>
-          <tbody>
-            {page.items.map((sku) => (
-              <tr key={sku.id}>
-                <td>
-                  <a href={`#/catalog/skus/${sku.id}`}>{sku.sku_code}</a>
-                </td>
-                <td>{sku.name}</td>
-                <td>{sku.product_name}</td>
-                <td>{sku.barcode ?? ''}</td>
-                <td>{sku.is_bundle ? `Bundle (${sku.component_count})` : 'SKU'}</td>
-                <td>{sku.on_hand ?? '—'}</td>
-                <td>
-                  {/* Change: T08A stock history per SKU. Bundles have no stock of their own. */}
-                  {sku.is_bundle ? null : (
-                    <a href={`#/catalog/skus/${sku.id}/history`}>History</a>
-                  )}
-                </td>
+        <div className="mt-4">
+          <DataTable aria-label="SKUs">
+            <DataTableHead>
+              <tr>
+                <DataTableTh>Code</DataTableTh>
+                <DataTableTh>Name</DataTableTh>
+                <DataTableTh>Product</DataTableTh>
+                <DataTableTh>Barcode</DataTableTh>
+                <DataTableTh>Type</DataTableTh>
+                <DataTableTh>On hand</DataTableTh>
+                <DataTableTh>Stock</DataTableTh>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </DataTableHead>
+            <tbody>
+              {page.items.map((sku) => (
+                <DataTableRow key={sku.id}>
+                  <DataTableCell mono>
+                    <a href={`#/catalog/skus/${sku.id}`} className="font-medium text-brand-700 hover:underline">
+                      {sku.sku_code}
+                    </a>
+                  </DataTableCell>
+                  <DataTableCell>{sku.name}</DataTableCell>
+                  <DataTableCell>{sku.product_name}</DataTableCell>
+                  <DataTableCell>{sku.barcode ?? ''}</DataTableCell>
+                  <DataTableCell>{sku.is_bundle ? `Bundle (${sku.component_count})` : 'SKU'}</DataTableCell>
+                  <DataTableCell>{sku.on_hand ?? '—'}</DataTableCell>
+                  <DataTableCell>
+                    {/* Change: T08A stock history per SKU. Bundles have no stock of their own. */}
+                    {sku.is_bundle ? null : (
+                      <a href={`#/catalog/skus/${sku.id}/history`} className="font-medium text-brand-700 hover:underline">
+                        History
+                      </a>
+                    )}
+                  </DataTableCell>
+                </DataTableRow>
+              ))}
+            </tbody>
+          </DataTable>
+        </div>
       ) : null}
       {page && total > 0 ? (
-        <p className="pager">
-          <span>
-            {offset + 1}–{last} of {total}
-          </span>
-          <button type="button" disabled={busy || offset === 0} onClick={() => setOffset(Math.max(offset - PAGE_SIZE, 0))}>
+        <TablePager
+          summary={
+            <span>
+              {offset + 1}–{last} of {total}
+            </span>
+          }
+        >
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={busy || offset === 0}
+            onClick={() => setOffset(Math.max(offset - PAGE_SIZE, 0))}
+          >
             Previous
-          </button>
-          <button type="button" disabled={busy || last >= total} onClick={() => setOffset(offset + PAGE_SIZE)}>
+          </Button>
+          <Button type="button" variant="secondary" disabled={busy || last >= total} onClick={() => setOffset(offset + PAGE_SIZE)}>
             Next
-          </button>
-        </p>
+          </Button>
+        </TablePager>
       ) : null}
-    </main>
+    </PageContent>
   )
 }

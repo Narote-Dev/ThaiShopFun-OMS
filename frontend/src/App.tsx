@@ -24,6 +24,9 @@ import HoldQueuePage from './orders/HoldQueuePage'
 import OrderDetailPage from './orders/OrderDetailPage'
 import OrdersListPage from './orders/OrdersListPage'
 import ListingsPage from './channel/listings/ListingsPage'
+import { Button } from './ui/Button'
+import { PageContent } from './ui/PageContent'
+import { PageHeader } from './ui/PageHeader'
 import type { ReactNode } from 'react'
 
 const SKU_ROUTE = /^#\/catalog\/skus\/([0-9a-f-]{36}|new)$/
@@ -60,9 +63,9 @@ function page(route: string, me: Me): ReactNode {
     return <SkuFormPage key={sku[1]} id={id} canWrite={canWrite} />
   }
   return (
-    <main>
-      <h1>Not found</h1>
-    </main>
+    <PageContent>
+      <PageHeader title="Not found" />
+    </PageContent>
   )
 }
 
@@ -81,16 +84,20 @@ function Shell() {
   const route = useRoute()
   if (auth.status === 'booting') {
     return (
-      <main>
-        <p role="status">Signing in…</p>
-      </main>
+      <PageContent>
+        <p role="status" className="text-[13px] text-stone-600">
+          Signing in…
+        </p>
+      </PageContent>
     )
   }
   const signedIn = auth.status === 'signed-in'
   let body = (
-    <main>
-      <p role="status">Loading shop…</p>
-    </main>
+    <PageContent>
+      <p role="status" className="text-[13px] text-stone-600">
+        Loading shop…
+      </p>
+    </PageContent>
   )
   if (auth.gate === 'paywall') {
     body = <Paywall onLogout={auth.signOut} />
@@ -103,16 +110,24 @@ function Shell() {
     )
   } else if (auth.profileError) {
     body = (
-      <main>
-        <p role="alert">{auth.profileError}</p>
-        <button type="button" onClick={auth.signOut}>
+      <PageContent>
+        <p role="alert" className="text-[13px] text-red-700">
+          {auth.profileError}
+        </p>
+        <Button type="button" variant="secondary" className="mt-4" onClick={auth.signOut}>
           Log out
-        </button>
-      </main>
+        </Button>
+      </PageContent>
     )
   } else if (auth.me) {
     body = (
-      <AppLayout me={auth.me} readOnlyNotice={auth.readOnlyNotice} onLogout={auth.signOut}>
+      <AppLayout
+        me={auth.me}
+        route={route}
+        userDisplayName={auth.userDisplayName}
+        readOnlyNotice={auth.readOnlyNotice}
+        onLogout={auth.signOut}
+      >
         {page(route, auth.me)}
       </AppLayout>
     )

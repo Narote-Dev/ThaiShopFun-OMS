@@ -60,14 +60,14 @@ describe('paywall and grace', () => {
 
   it('shows the grace banner with the expiry date and keeps write actions off', () => {
     render(
-      <AppLayout me={me} readOnlyNotice={null} onLogout={() => undefined}>
+      <AppLayout me={me} route="#/" userDisplayName={null} readOnlyNotice={null} onLogout={() => undefined}>
         <button type="button" disabled>
           Retry
         </button>
       </AppLayout>,
     )
     expect(screen.getByRole('status')).toHaveTextContent('read-only until 2026-10-30')
-    expect(screen.getByText('Grace Shop')).toBeInTheDocument()
+    expect(screen.getAllByText('Grace Shop').length).toBeGreaterThan(0)
     expect(screen.getByText('OWNER')).toBeInTheDocument()
     expect(screen.getByText('PRO · GRACE')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Retry' })).toBeDisabled()
@@ -100,7 +100,13 @@ describe('login', () => {
 describe('catalog navigation and write access', () => {
   it('links the catalog and warehouse pages from the shell', () => {
     render(
-      <AppLayout me={me} readOnlyNotice={null} onLogout={() => undefined}>
+      <AppLayout
+        me={me}
+        route="#/catalog/skus"
+        userDisplayName={null}
+        readOnlyNotice={null}
+        onLogout={() => undefined}
+      >
         <p>page</p>
       </AppLayout>,
     )

@@ -1,48 +1,28 @@
 import type { ReactNode } from 'react'
 import type { Me } from '../auth/AuthContext'
+import AppShell from '../ui/AppShell'
 import GraceBanner from './GraceBanner'
 
 type Props = {
   me: Me
+  route: string
+  userDisplayName: string | null
   readOnlyNotice: string | null
   onLogout: () => void
   children: ReactNode
 }
 
-export default function AppLayout({ me, readOnlyNotice, onLogout, children }: Props) {
+export default function AppLayout({ me, route, userDisplayName, readOnlyNotice, onLogout, children }: Props) {
   const grace = me.entitlement.status === 'GRACE'
   return (
-    <>
-      <header className="shell">
-        <div>
-          <p className="eyebrow">ThaiShopFun OMS</p>
-          <strong>{me.tenant.name}</strong>
-        </div>
-        <div className="who">
-          <span>{me.role}</span>
-          <span className="badge">
-            {me.tenant.membership_tier} · {me.entitlement.status}
-          </span>
-          <button type="button" onClick={onLogout}>
-            Log out
-          </button>
-        </div>
-        <nav>
-          <a href="#/">Dashboard</a>
-          <a href="#/catalog/skus">SKUs</a>
-          <a href="#/catalog/products">Products</a>
-          <a href="#/catalog/import">Import</a>
-          <a href="#/warehouses">Warehouses</a>
-          {/* Change: T08A stock documents. */}
-          <a href="#/stock/documents">Stock documents</a>
-          <a href="#/orders">Orders</a>
-          <a href="#/channel/listings">Listings</a>
-          <a href="#/admin/outbox">Dead outbox</a>
-        </nav>
-      </header>
+    <AppShell me={me} route={route} userDisplayName={userDisplayName} onLogout={onLogout}>
       {grace ? <GraceBanner expiresAt={me.entitlement.expires_at} /> : null}
-      {readOnlyNotice ? <p role="alert">{readOnlyNotice}</p> : null}
+      {readOnlyNotice ? (
+        <p role="alert" className="border-b border-amber-200 bg-amber-50 px-6 py-2 text-[13px] text-amber-950">
+          {readOnlyNotice}
+        </p>
+      ) : null}
       {children}
-    </>
+    </AppShell>
   )
 }

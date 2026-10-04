@@ -1,157 +1,26 @@
-:root {
-  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
-  color: #1c1917;
-  background: #f6f3ee;
-  line-height: 1.5;
+@import 'tailwindcss';
+
+@theme {
+  --font-sans: 'IBM Plex Sans Thai', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+
+  --color-brand-50: #fff5f0;
+  --color-brand-100: #ffe7db;
+  --color-brand-200: #ffcab2;
+  --color-brand-300: #ffa47f;
+  --color-brand-400: #f9794a;
+  --color-brand-500: #f05a28;
+  --color-brand-600: #dc4516;
+  --color-brand-700: #b63512;
+  --color-brand-800: #9a3412;
+  --color-brand-900: #7a2c13;
+
+  --color-canvas: #f7f5f2;
+
+  --shadow-card: 0 1px 2px 0 rgb(28 25 23 / 0.05);
 }
 
 body {
   margin: 0;
-}
-
-main {
-  max-width: 40rem;
-  margin: 2rem auto 4rem;
-  padding: 0 1.5rem;
-}
-
-.eyebrow {
-  margin: 0;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: #9a3412;
-  font-size: 0.8rem;
-}
-
-h1 {
-  margin: 0.25rem 0 0.75rem;
-  font-size: 2.5rem;
-}
-
-label {
-  display: block;
-  margin: 1rem 0 0.5rem;
-}
-
-input {
-  display: block;
-  width: 100%;
-  margin-top: 0.25rem;
-  box-sizing: border-box;
-}
-
-button {
-  margin-right: 0.5rem;
-}
-
-li {
-  display: flex;
-  gap: 0.75rem;
-  align-items: center;
-  margin: 0.5rem 0;
-}
-
-header.shell {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.75rem 1.5rem;
-  align-items: center;
-  justify-content: space-between;
-  padding: 1rem 1.5rem;
-  background: #fff;
-  border-bottom: 1px solid #e7e5e4;
-}
-
-header.shell nav {
-  width: 100%;
-}
-
-header.shell nav a {
-  margin-right: 1rem;
-}
-
-.who {
-  display: flex;
-  gap: 0.75rem;
-  align-items: center;
-}
-
-.badge {
-  border: 1px solid #9a3412;
-  border-radius: 999px;
-  padding: 0.1rem 0.6rem;
-  font-size: 0.85rem;
-  color: #9a3412;
-}
-
-.banner {
-  margin: 0;
-  padding: 0.75rem 1.5rem;
-  background: #ffedd5;
-  color: #9a3412;
-}
-
-/* T07 catalog and warehouse pages */
-main.wide {
-  max-width: 64rem;
-}
-
-table {
-  width: 100%;
-  border-collapse: collapse;
-  margin: 1rem 0;
-  background: #fff;
-}
-
-th,
-td {
-  text-align: left;
-  padding: 0.4rem 0.6rem;
-  border-bottom: 1px solid #e7e5e4;
-  vertical-align: middle;
-}
-
-td input {
-  margin: 0;
-}
-
-.toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.75rem;
-  align-items: flex-end;
-}
-
-.toolbar label {
-  flex: 1 1 14rem;
-  margin: 0;
-}
-
-.pager {
-  display: flex;
-  gap: 0.75rem;
-  align-items: center;
-}
-
-label.check {
-  display: flex;
-  gap: 0.5rem;
-  align-items: center;
-}
-
-label.check input {
-  width: auto;
-  margin: 0;
-}
-
-select {
-  display: block;
-  width: 100%;
-  margin-top: 0.25rem;
-}
-
-pre {
-  background: #fff;
-  padding: 0.75rem;
-  overflow-x: auto;
+  font-feature-settings: 'tnum' 1;
 }

@@ -1,5 +1,20 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import type { Page } from '../catalog/api'
+import { Button } from '../ui/Button'
+import { Card } from '../ui/Card'
+import {
+  DataTable,
+  DataTableCell,
+  DataTableHead,
+  DataTableRow,
+  DataTableTh,
+  TablePager,
+} from '../ui/DataTable'
+import { Input } from '../ui/Input'
+import { Label } from '../ui/Label'
+import { PageContent } from '../ui/PageContent'
+import { PageHeader } from '../ui/PageHeader'
+import { Select } from '../ui/Select'
 import type { StockAccess } from './access'
 import {
   DOCUMENT_TYPES,
@@ -69,107 +84,162 @@ export default function StockDocumentsPage({ access }: { access: StockAccess }) 
   const total = page?.total ?? 0
   const last = Math.min(offset + DOCUMENT_PAGE_SIZE, total)
   return (
-    <main className="wide">
-      <h1>Stock documents</h1>
+    <PageContent wide>
+      <PageHeader
+        title={
+          <>
+            <span aria-hidden="true">เอกสารสต็อก</span>
+            <span className="sr-only">Stock documents</span>
+          </>
+        }
+      />
       {access.canEdit ? (
-        <form className="toolbar" onSubmit={create} aria-label="New stock document">
-          <label>
-            New document type
-            <select value={type} onChange={(event) => setType(event.target.value as DocumentType)}>
+        <Card className="mt-4">
+          <form
+            className="grid gap-4 p-4 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5"
+            onSubmit={create}
+            aria-label="New stock document"
+          >
+            <div>
+              <Label htmlFor="new-doc-type">New document type</Label>
+              <Select id="new-doc-type" value={type} onChange={(event) => setType(event.target.value as DocumentType)}>
+                {DOCUMENT_TYPES.map((value) => (
+                  <option key={value} value={value}>
+                    {TYPE_LABELS[value]}
+                  </option>
+                ))}
+              </Select>
+            </div>
+            <div>
+              <Label htmlFor="new-doc-ref">Reference no.</Label>
+              <Input id="new-doc-ref" value={reference} onChange={(event) => setReference(event.target.value)} />
+            </div>
+            <div>
+              <Label htmlFor="new-doc-note">Note</Label>
+              <Input id="new-doc-note" value={note} onChange={(event) => setNote(event.target.value)} />
+            </div>
+            <div className="flex items-end">
+              <Button type="submit" variant="primary" disabled={busy}>
+                Create document
+              </Button>
+            </div>
+          </form>
+        </Card>
+      ) : null}
+      <Card className="mt-4">
+        <form
+          className="grid gap-4 p-4 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5"
+          onSubmit={applyFilters}
+          aria-label="Filter stock documents"
+        >
+          <div>
+            <Label htmlFor="filter-doc-type">Type</Label>
+            <Select
+              id="filter-doc-type"
+              value={filters.type}
+              onChange={(event) => setFilters({ ...filters, type: event.target.value })}
+            >
+              <option value="">All types</option>
               {DOCUMENT_TYPES.map((value) => (
                 <option key={value} value={value}>
                   {TYPE_LABELS[value]}
                 </option>
               ))}
-            </select>
-          </label>
-          <label>
-            Reference no.
-            <input value={reference} onChange={(event) => setReference(event.target.value)} />
-          </label>
-          <label>
-            Note
-            <input value={note} onChange={(event) => setNote(event.target.value)} />
-          </label>
-          <button type="submit" disabled={busy}>
-            Create document
-          </button>
+            </Select>
+          </div>
+          <div>
+            <Label htmlFor="filter-doc-status">Status</Label>
+            <Select
+              id="filter-doc-status"
+              value={filters.status}
+              onChange={(event) => setFilters({ ...filters, status: event.target.value })}
+            >
+              <option value="">All statuses</option>
+              <option value="DRAFT">Draft</option>
+              <option value="POSTED">Posted</option>
+              <option value="VOID">Void</option>
+            </Select>
+          </div>
+          <div>
+            <Label htmlFor="filter-doc-from">From</Label>
+            <Input
+              id="filter-doc-from"
+              type="date"
+              value={filters.from}
+              onChange={(event) => setFilters({ ...filters, from: event.target.value })}
+            />
+          </div>
+          <div>
+            <Label htmlFor="filter-doc-to">To</Label>
+            <Input
+              id="filter-doc-to"
+              type="date"
+              value={filters.to}
+              onChange={(event) => setFilters({ ...filters, to: event.target.value })}
+            />
+          </div>
+          <div className="flex items-end">
+            <Button type="submit" variant="primary">
+              Filter
+            </Button>
+          </div>
         </form>
-      ) : null}
-      <form className="toolbar" onSubmit={applyFilters} aria-label="Filter stock documents">
-        <label>
-          Type
-          <select value={filters.type} onChange={(event) => setFilters({ ...filters, type: event.target.value })}>
-            <option value="">All types</option>
-            {DOCUMENT_TYPES.map((value) => (
-              <option key={value} value={value}>
-                {TYPE_LABELS[value]}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Status
-          <select value={filters.status} onChange={(event) => setFilters({ ...filters, status: event.target.value })}>
-            <option value="">All statuses</option>
-            <option value="DRAFT">Draft</option>
-            <option value="POSTED">Posted</option>
-            <option value="VOID">Void</option>
-          </select>
-        </label>
-        <label>
-          From
-          <input type="date" value={filters.from} onChange={(event) => setFilters({ ...filters, from: event.target.value })} />
-        </label>
-        <label>
-          To
-          <input type="date" value={filters.to} onChange={(event) => setFilters({ ...filters, to: event.target.value })} />
-        </label>
-        <button type="submit">Filter</button>
-      </form>
-      {error ? <p role="alert">{error}</p> : null}
-      {page && page.items.length === 0 ? <p>No stock documents.</p> : null}
+      </Card>
+      {error ? <p role="alert" className="mt-4 text-[13px] text-red-700">{error}</p> : null}
+      {page && page.items.length === 0 ? <p className="mt-4 text-[13px] text-stone-600">No stock documents.</p> : null}
       {page && page.items.length > 0 ? (
-        <table>
-          <thead>
-            <tr>
-              <th>Created</th>
-              <th>Type</th>
-              <th>Reference</th>
-              <th>Status</th>
-              <th>Lines</th>
-              <th>Posted</th>
-            </tr>
-          </thead>
-          <tbody>
-            {page.items.map((doc) => (
-              <tr key={doc.id}>
-                <td>
-                  <a href={`#/stock/documents/${doc.id}`}>{new Date(doc.created_at).toLocaleString()}</a>
-                </td>
-                <td>{TYPE_LABELS[doc.type]}</td>
-                <td>{doc.reference_no ?? ''}</td>
-                <td>{doc.status}</td>
-                <td>{doc.line_count}</td>
-                <td>{doc.posted_at ? new Date(doc.posted_at).toLocaleString() : ''}</td>
+        <div className="mt-4">
+          <DataTable aria-label="Stock documents">
+            <DataTableHead>
+              <tr>
+                <DataTableTh>Created</DataTableTh>
+                <DataTableTh>Type</DataTableTh>
+                <DataTableTh>Reference</DataTableTh>
+                <DataTableTh>Status</DataTableTh>
+                <DataTableTh>Lines</DataTableTh>
+                <DataTableTh>Posted</DataTableTh>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </DataTableHead>
+            <tbody>
+              {page.items.map((doc) => (
+                <DataTableRow key={doc.id}>
+                  <DataTableCell>
+                    <a href={`#/stock/documents/${doc.id}`} className="font-medium text-brand-700 hover:underline">
+                      {new Date(doc.created_at).toLocaleString()}
+                    </a>
+                  </DataTableCell>
+                  <DataTableCell>{TYPE_LABELS[doc.type]}</DataTableCell>
+                  <DataTableCell>{doc.reference_no ?? ''}</DataTableCell>
+                  <DataTableCell>{doc.status}</DataTableCell>
+                  <DataTableCell>{doc.line_count}</DataTableCell>
+                  <DataTableCell>{doc.posted_at ? new Date(doc.posted_at).toLocaleString() : ''}</DataTableCell>
+                </DataTableRow>
+              ))}
+            </tbody>
+          </DataTable>
+        </div>
       ) : null}
       {page && total > 0 ? (
-        <p className="pager">
-          <span>
-            {offset + 1}–{last} of {total}
-          </span>
-          <button type="button" disabled={offset === 0} onClick={() => setOffset(Math.max(offset - DOCUMENT_PAGE_SIZE, 0))}>
+        <TablePager
+          summary={
+            <span>
+              {offset + 1}–{last} of {total}
+            </span>
+          }
+        >
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={offset === 0}
+            onClick={() => setOffset(Math.max(offset - DOCUMENT_PAGE_SIZE, 0))}
+          >
             Previous
-          </button>
-          <button type="button" disabled={last >= total} onClick={() => setOffset(offset + DOCUMENT_PAGE_SIZE)}>
+          </Button>
+          <Button type="button" variant="secondary" disabled={last >= total} onClick={() => setOffset(offset + DOCUMENT_PAGE_SIZE)}>
             Next
-          </button>
-        </p>
+          </Button>
+        </TablePager>
       ) : null}
-    </main>
+    </PageContent>
   )
 }

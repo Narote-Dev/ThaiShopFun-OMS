@@ -1,4 +1,8 @@
 import { useState } from 'react'
+import { Button } from '../ui/Button'
+import { Card } from '../ui/Card'
+import { Input } from '../ui/Input'
+import { Label } from '../ui/Label'
 import { catalogApi, messageFor, type Sku } from './api'
 
 type Line = { key: number; code: string; qty: string }
@@ -53,51 +57,61 @@ export default function BundleEditor({
   }
 
   return (
-    <section aria-label="Bundle components">
-      <h2>Bundle components</h2>
-      <p>Components must be plain SKUs. Stock of a bundle is derived from its components.</p>
-      {lines.length === 0 ? <p>No components yet.</p> : null}
-      <ul>
-        {lines.map((line, index) => (
-          <li key={line.key}>
-            <label>
-              Component {index + 1} code
-              <input
-                value={line.code}
-                disabled={!canWrite}
-                onChange={(event) => change(line.key, { code: event.target.value })}
-              />
-            </label>
-            <label>
-              Qty
-              <input
-                type="number"
-                min={1}
-                value={line.qty}
-                disabled={!canWrite}
-                onChange={(event) => change(line.key, { qty: event.target.value })}
-              />
-            </label>
-            {canWrite ? (
-              <button type="button" onClick={() => setLines(lines.filter((l) => l.key !== line.key))}>
-                Remove
-              </button>
-            ) : null}
-          </li>
-        ))}
-      </ul>
-      {error ? <p role="alert">{error}</p> : null}
-      {notice ? <p>{notice}</p> : null}
-      {canWrite ? (
-        <p>
-          <button type="button" onClick={() => setLines([...lines, { key: nextKey++, code: '', qty: '1' }])}>
-            Add component
-          </button>
-          <button type="button" disabled={busy} onClick={() => void save()}>
-            Save components
-          </button>
-        </p>
-      ) : null}
-    </section>
+    <Card aria-label="Bundle components">
+      <div className="border-b border-stone-100 px-5 py-3.5">
+        <h2 className="text-[14.5px] font-semibold text-stone-900">Bundle components</h2>
+        <p className="mt-1 text-[12px] text-stone-500">Components must be plain SKUs. Stock of a bundle is derived from its components.</p>
+      </div>
+      <div className="space-y-4 p-5">
+        {lines.length === 0 ? <p className="text-[13px] text-stone-600">No components yet.</p> : null}
+        <ul className="space-y-4">
+          {lines.map((line, index) => (
+            <li key={line.key} className="flex flex-wrap items-end gap-4">
+              <div className="min-w-[160px] flex-1">
+                <Label htmlFor={`bundle-code-${line.key}`}>Component {index + 1} code</Label>
+                <Input
+                  id={`bundle-code-${line.key}`}
+                  value={line.code}
+                  disabled={!canWrite}
+                  onChange={(event) => change(line.key, { code: event.target.value })}
+                />
+              </div>
+              <div className="w-24">
+                <Label htmlFor={`bundle-qty-${line.key}`}>Qty</Label>
+                <Input
+                  id={`bundle-qty-${line.key}`}
+                  type="number"
+                  min={1}
+                  value={line.qty}
+                  disabled={!canWrite}
+                  onChange={(event) => change(line.key, { qty: event.target.value })}
+                />
+              </div>
+              {canWrite ? (
+                <Button type="button" variant="ghost" size="sm" onClick={() => setLines(lines.filter((l) => l.key !== line.key))}>
+                  Remove
+                </Button>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+        {error ? (
+          <p role="alert" className="text-[13px] text-red-700">
+            {error}
+          </p>
+        ) : null}
+        {notice ? <p className="text-[13px] text-stone-600">{notice}</p> : null}
+        {canWrite ? (
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" variant="secondary" onClick={() => setLines([...lines, { key: nextKey++, code: '', qty: '1' }])}>
+              Add component
+            </Button>
+            <Button type="button" variant="primary" disabled={busy} onClick={() => void save()}>
+              Save components
+            </Button>
+          </div>
+        ) : null}
+      </div>
+    </Card>
   )
 }

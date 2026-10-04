@@ -1,5 +1,19 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { catalogApi, type Sku, type Warehouse } from '../catalog/api'
+import { Button } from '../ui/Button'
+import { Card } from '../ui/Card'
+import {
+  DataTable,
+  DataTableCell,
+  DataTableHead,
+  DataTableRow,
+  DataTableTh,
+} from '../ui/DataTable'
+import { Input } from '../ui/Input'
+import { Label } from '../ui/Label'
+import { PageContent } from '../ui/PageContent'
+import { PageHeader } from '../ui/PageHeader'
+import { Select } from '../ui/Select'
 import type { StockAccess } from './access'
 import {
   ADJUSTMENT_REASONS,
@@ -172,12 +186,14 @@ export default function StockDocumentPage({ id, access }: { id: string; access: 
 
   if (!doc) {
     return (
-      <main>
-        <p>
-          <a href="#/stock/documents">Back to stock documents</a>
+      <PageContent>
+        <p className="text-[13px]">
+          <a href="#/stock/documents" className="font-medium text-brand-700 hover:underline">
+            Back to stock documents
+          </a>
         </p>
-        {error ? <p role="alert">{error}</p> : <p role="status">Loading…</p>}
-      </main>
+        {error ? <p role="alert" className="mt-4 text-[13px] text-red-700">{error}</p> : <p role="status" className="mt-4 text-[13px] text-stone-600">Loading…</p>}
+      </PageContent>
     )
   }
 
@@ -187,211 +203,249 @@ export default function StockDocumentPage({ id, access }: { id: string; access: 
   const reasons = doc.type === 'ADJUSTMENT' || doc.type === 'WRITE_OFF'
   const lines = doc.lines ?? []
   return (
-    <main className="wide">
-      <p>
-        <a href="#/stock/documents">Back to stock documents</a>
+    <PageContent wide>
+      <p className="text-[13px]">
+        <a href="#/stock/documents" className="font-medium text-brand-700 hover:underline">
+          Back to stock documents
+        </a>
       </p>
-      <h1>
-        {TYPE_LABELS[doc.type]} · {doc.status}
-      </h1>
-      {count && doc.count_started_at ? <p>Count started {new Date(doc.count_started_at).toLocaleString()}</p> : null}
-      {doc.posted_at ? <p>Posted {new Date(doc.posted_at).toLocaleString()}</p> : null}
-      {!access.canEdit ? <p>This shop is read-only.</p> : null}
-      <form
-        className="toolbar"
-        aria-label="Document header"
-        onSubmit={(event) => {
-          event.preventDefault()
-          void run(() => stockApi.updateDocument(id, reference.trim() || null, note.trim() || null), 'Could not save', 'Saved.')
-        }}
-      >
-        <label>
-          Reference no.
-          <input value={reference} disabled={!editable} onChange={(event) => setReference(event.target.value)} />
-        </label>
-        <label>
-          Note
-          <input value={note} disabled={!editable} onChange={(event) => setNote(event.target.value)} />
-        </label>
-        {editable ? (
-          <button type="submit" disabled={busy}>
-            Save header
-          </button>
-        ) : null}
-      </form>
-      {error ? <p role="alert">{error}</p> : null}
-      {notice ? <p role="status">{notice}</p> : null}
-      <table aria-label="Lines">
-        <thead>
-          <tr>
-            <th>SKU</th>
-            <th>Warehouse</th>
-            {count ? <th>System at start</th> : null}
-            {count ? <th>Counted</th> : <th>Qty</th>}
-            {reasons ? <th>Reason</th> : null}
-            <th>On hand / reserved</th>
-            <th>Problem</th>
-            {editable ? <th>Actions</th> : null}
-          </tr>
-        </thead>
-        <tbody>
-          {lines.map((line) => {
-            const edit = edits[line.id] ?? editOf(line)
-            const problem = problemFor(line)
-            return (
-              <tr key={line.id}>
-                <td>
-                  {line.sku_code} <small>{line.sku_name}</small>
-                </td>
-                <td>
-                  {editable ? (
-                    <select
-                      aria-label={`Warehouse for ${line.sku_code}`}
-                      value={edit.warehouse}
-                      onChange={(event) => setEdit(line.id, 'warehouse', event.target.value)}
-                    >
-                      {warehouses.map((w) => (
-                        <option key={w.id} value={w.id}>
-                          {w.code}
-                        </option>
-                      ))}
-                    </select>
-                  ) : (
-                    line.warehouse_code
-                  )}
-                </td>
-                {count ? <td>{line.system_qty_at_start ?? '—'}</td> : null}
-                <td>
-                  {editable ? (
-                    <input
-                      aria-label={`${count ? 'Counted' : 'Qty'} for ${line.sku_code}`}
-                      inputMode="numeric"
-                      value={count ? edit.counted : edit.qty}
-                      onChange={(event) => setEdit(line.id, count ? 'counted' : 'qty', event.target.value)}
-                    />
-                  ) : count ? (
-                    `${line.counted_qty ?? '—'}${doc.status !== 'DRAFT' ? ` (${line.qty >= 0 ? '+' : ''}${line.qty})` : ''}`
-                  ) : (
-                    line.qty
-                  )}
-                </td>
-                {reasons ? (
-                  <td>
+      <PageHeader
+        className="mt-2"
+        title={
+          <>
+            {TYPE_LABELS[doc.type]} · {doc.status}
+          </>
+        }
+      />
+      {count && doc.count_started_at ? (
+        <p className="mt-2 text-[13px] text-stone-600">Count started {new Date(doc.count_started_at).toLocaleString()}</p>
+      ) : null}
+      {doc.posted_at ? <p className="text-[13px] text-stone-600">Posted {new Date(doc.posted_at).toLocaleString()}</p> : null}
+      {!access.canEdit ? <p className="text-[13px] text-stone-600">This shop is read-only.</p> : null}
+      <Card className="mt-4">
+        <form
+          className="flex flex-wrap items-end gap-4 p-4"
+          aria-label="Document header"
+          onSubmit={(event) => {
+            event.preventDefault()
+            void run(() => stockApi.updateDocument(id, reference.trim() || null, note.trim() || null), 'Could not save', 'Saved.')
+          }}
+        >
+          <div className="min-w-[160px] flex-1">
+            <Label htmlFor="doc-ref">Reference no.</Label>
+            <Input id="doc-ref" value={reference} disabled={!editable} onChange={(event) => setReference(event.target.value)} />
+          </div>
+          <div className="min-w-[160px] flex-1">
+            <Label htmlFor="doc-note">Note</Label>
+            <Input id="doc-note" value={note} disabled={!editable} onChange={(event) => setNote(event.target.value)} />
+          </div>
+          {editable ? (
+            <Button type="submit" variant="primary" disabled={busy}>
+              Save header
+            </Button>
+          ) : null}
+        </form>
+      </Card>
+      {error ? <p role="alert" className="mt-4 text-[13px] text-red-700">{error}</p> : null}
+      {notice ? <p role="status" className="mt-2 text-[13px] text-stone-600">{notice}</p> : null}
+      <div className="mt-4">
+        <DataTable aria-label="Lines">
+          <DataTableHead>
+            <tr>
+              <DataTableTh>SKU</DataTableTh>
+              <DataTableTh>Warehouse</DataTableTh>
+              {count ? <DataTableTh>System at start</DataTableTh> : null}
+              {count ? <DataTableTh>Counted</DataTableTh> : <DataTableTh>Qty</DataTableTh>}
+              {reasons ? <DataTableTh>Reason</DataTableTh> : null}
+              <DataTableTh>On hand / reserved</DataTableTh>
+              <DataTableTh>Problem</DataTableTh>
+              {editable ? <DataTableTh>Actions</DataTableTh> : null}
+            </tr>
+          </DataTableHead>
+          <tbody>
+            {lines.map((line) => {
+              const edit = edits[line.id] ?? editOf(line)
+              const problem = problemFor(line)
+              return (
+                <DataTableRow key={line.id}>
+                  <DataTableCell>
+                    {line.sku_code} <small className="text-stone-500">{line.sku_name}</small>
+                  </DataTableCell>
+                  <DataTableCell>
                     {editable ? (
-                      <select
-                        aria-label={`Reason for ${line.sku_code}`}
-                        value={edit.reason}
-                        onChange={(event) => setEdit(line.id, 'reason', event.target.value)}
+                      <Select
+                        aria-label={`Warehouse for ${line.sku_code}`}
+                        value={edit.warehouse}
+                        className="mt-0"
+                        onChange={(event) => setEdit(line.id, 'warehouse', event.target.value)}
                       >
-                        <option value="">No reason</option>
-                        {ADJUSTMENT_REASONS.map((r) => (
-                          <option key={r} value={r}>
-                            {r}
+                        {warehouses.map((w) => (
+                          <option key={w.id} value={w.id}>
+                            {w.code}
                           </option>
                         ))}
-                      </select>
+                      </Select>
                     ) : (
-                      (line.reason_code ?? '')
+                      line.warehouse_code
                     )}
-                  </td>
-                ) : null}
-                <td>
-                  {line.on_hand ?? 0} / {line.reserved ?? 0}
-                </td>
-                <td>{problem ? <span role="alert">{`${problem.error}: ${problem.message}`}</span> : null}</td>
-                {editable ? (
-                  <td>
-                    <button type="button" disabled={busy} onClick={() => saveLine(line)}>
-                      Save
-                    </button>
-                    <button type="button" disabled={busy} onClick={() => void run(() => stockApi.deleteLine(id, line.id), 'Could not remove the line')}>
-                      Remove
-                    </button>
-                  </td>
-                ) : null}
-              </tr>
-            )
-          })}
-        </tbody>
-      </table>
-      {lines.length === 0 ? <p>No lines yet.</p> : null}
+                  </DataTableCell>
+                  {count ? <DataTableCell>{line.system_qty_at_start ?? '—'}</DataTableCell> : null}
+                  <DataTableCell>
+                    {editable ? (
+                      <Input
+                        aria-label={`${count ? 'Counted' : 'Qty'} for ${line.sku_code}`}
+                        inputMode="numeric"
+                        value={count ? edit.counted : edit.qty}
+                        className="mt-0"
+                        onChange={(event) => setEdit(line.id, count ? 'counted' : 'qty', event.target.value)}
+                      />
+                    ) : count ? (
+                      `${line.counted_qty ?? '—'}${doc.status !== 'DRAFT' ? ` (${line.qty >= 0 ? '+' : ''}${line.qty})` : ''}`
+                    ) : (
+                      line.qty
+                    )}
+                  </DataTableCell>
+                  {reasons ? (
+                    <DataTableCell>
+                      {editable ? (
+                        <Select
+                          aria-label={`Reason for ${line.sku_code}`}
+                          value={edit.reason}
+                          className="mt-0"
+                          onChange={(event) => setEdit(line.id, 'reason', event.target.value)}
+                        >
+                          <option value="">No reason</option>
+                          {ADJUSTMENT_REASONS.map((r) => (
+                            <option key={r} value={r}>
+                              {r}
+                            </option>
+                          ))}
+                        </Select>
+                      ) : (
+                        (line.reason_code ?? '')
+                      )}
+                    </DataTableCell>
+                  ) : null}
+                  <DataTableCell>
+                    {line.on_hand ?? 0} / {line.reserved ?? 0}
+                  </DataTableCell>
+                  <DataTableCell>{problem ? <span role="alert">{`${problem.error}: ${problem.message}`}</span> : null}</DataTableCell>
+                  {editable ? (
+                    <DataTableCell>
+                      <div className="flex flex-wrap gap-2">
+                        <Button type="button" size="sm" disabled={busy} onClick={() => saveLine(line)}>
+                          Save
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          disabled={busy}
+                          onClick={() => void run(() => stockApi.deleteLine(id, line.id), 'Could not remove the line')}
+                        >
+                          Remove
+                        </Button>
+                      </div>
+                    </DataTableCell>
+                  ) : null}
+                </DataTableRow>
+              )
+            })}
+          </tbody>
+        </DataTable>
+      </div>
+      {lines.length === 0 ? <p className="mt-4 text-[13px] text-stone-600">No lines yet.</p> : null}
       {editable ? (
-        <form className="toolbar" onSubmit={addLine} aria-label="Add line">
-          <label>
-            SKU code
-            <input list="stock-sku-options" value={skuCode} onChange={(event) => setSkuCode(event.target.value)} />
-          </label>
-          <datalist id="stock-sku-options">
-            {suggestions.map((sku) => (
-              <option key={sku.id} value={sku.sku_code}>
-                {sku.name}
-              </option>
-            ))}
-          </datalist>
-          <label>
-            Warehouse
-            <select value={newWarehouse} onChange={(event) => setNewWarehouse(event.target.value)}>
-              {warehouses.map((w) => (
-                <option key={w.id} value={w.id}>
-                  {w.code}
+        <Card className="mt-4">
+          <form className="grid gap-4 p-4 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5" onSubmit={addLine} aria-label="Add line">
+            <div>
+              <Label htmlFor="add-line-sku">SKU code</Label>
+              <Input id="add-line-sku" list="stock-sku-options" value={skuCode} onChange={(event) => setSkuCode(event.target.value)} />
+            </div>
+            <datalist id="stock-sku-options">
+              {suggestions.map((sku) => (
+                <option key={sku.id} value={sku.sku_code}>
+                  {sku.name}
                 </option>
               ))}
-            </select>
-          </label>
-          {count ? (
-            <label>
-              Counted qty
-              <input inputMode="numeric" value={newCounted} onChange={(event) => setNewCounted(event.target.value)} />
-            </label>
-          ) : (
-            <label>
-              Qty
-              <input inputMode="numeric" value={newQty} onChange={(event) => setNewQty(event.target.value)} />
-            </label>
-          )}
-          {reasons ? (
-            <label>
-              Reason
-              <select value={newReason} onChange={(event) => setNewReason(event.target.value)}>
-                <option value="">No reason</option>
-                {ADJUSTMENT_REASONS.map((r) => (
-                  <option key={r} value={r}>
-                    {r}
+            </datalist>
+            <div>
+              <Label htmlFor="add-line-wh">Warehouse</Label>
+              <Select id="add-line-wh" value={newWarehouse} onChange={(event) => setNewWarehouse(event.target.value)}>
+                {warehouses.map((w) => (
+                  <option key={w.id} value={w.id}>
+                    {w.code}
                   </option>
                 ))}
-              </select>
-            </label>
-          ) : null}
-          <button type="submit" disabled={busy || skuCode.trim() === ''}>
-            Add line
-          </button>
-        </form>
+              </Select>
+            </div>
+            {count ? (
+              <div>
+                <Label htmlFor="add-line-counted">Counted qty</Label>
+                <Input
+                  id="add-line-counted"
+                  inputMode="numeric"
+                  value={newCounted}
+                  onChange={(event) => setNewCounted(event.target.value)}
+                />
+              </div>
+            ) : (
+              <div>
+                <Label htmlFor="add-line-qty">Qty</Label>
+                <Input id="add-line-qty" inputMode="numeric" value={newQty} onChange={(event) => setNewQty(event.target.value)} />
+              </div>
+            )}
+            {reasons ? (
+              <div>
+                <Label htmlFor="add-line-reason">Reason</Label>
+                <Select id="add-line-reason" value={newReason} onChange={(event) => setNewReason(event.target.value)}>
+                  <option value="">No reason</option>
+                  {ADJUSTMENT_REASONS.map((r) => (
+                    <option key={r} value={r}>
+                      {r}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+            ) : null}
+            <div className="flex items-end">
+              <Button type="submit" variant="primary" disabled={busy || skuCode.trim() === ''}>
+                Add line
+              </Button>
+            </div>
+          </form>
+        </Card>
       ) : null}
-      <p className="toolbar">
+      <div className="mt-4 flex flex-wrap items-center gap-2">
         {editable && count && !doc.count_started_at ? (
-          <button type="button" disabled={busy} onClick={() => void run(() => stockApi.startCount(id), 'Could not start the count', 'Count started.')}>
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={busy}
+            onClick={() => void run(() => stockApi.startCount(id), 'Could not start the count', 'Count started.')}
+          >
             Start count
-          </button>
+          </Button>
         ) : null}
         {draft && access.canPost(doc.type) ? (
-          <button type="button" disabled={busy || lines.length === 0} onClick={post}>
+          <Button type="button" variant="primary" disabled={busy || lines.length === 0} onClick={post}>
             Post
-          </button>
+          </Button>
         ) : null}
         {draft && !access.canPost(doc.type) && access.canEdit ? (
-          <span>Only an OWNER or ADMIN can post this document.</span>
+          <span className="text-[13px] text-stone-600">Only an OWNER or ADMIN can post this document.</span>
         ) : null}
         {doc.status === 'POSTED' && access.canVoid ? (
-          <button type="button" disabled={busy} onClick={voidDocument}>
+          <Button type="button" variant="danger" disabled={busy} onClick={voidDocument}>
             Void
-          </button>
+          </Button>
         ) : null}
         {editable ? (
-          <button type="button" disabled={busy} onClick={() => void remove()}>
+          <Button type="button" variant="ghost" disabled={busy} onClick={() => void remove()}>
             Delete draft
-          </button>
+          </Button>
         ) : null}
-      </p>
-    </main>
+      </div>
+    </PageContent>
   )
 }

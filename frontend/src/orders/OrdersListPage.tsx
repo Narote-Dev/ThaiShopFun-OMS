@@ -1,4 +1,28 @@
+import { Download, Printer, RefreshCw } from 'lucide-react'
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { Button } from '../ui/Button'
+import { Card } from '../ui/Card'
+import { Checkbox } from '../ui/Checkbox'
+import { ComingSoonButton } from '../ui/ComingSoon'
+import {
+  DataTable,
+  DataTableCell,
+  DataTableHead,
+  DataTableRow,
+  DataTableTh,
+  TablePager,
+} from '../ui/DataTable'
+import { AlertBanner } from '../ui/Alert'
+import { HoldReasonBadge } from '../ui/HoldReasonBadge'
+import { Input } from '../ui/Input'
+import { Label } from '../ui/Label'
+import { OrderDisplayBadge } from '../ui/OrderDisplayBadge'
+import { PageContent } from '../ui/PageContent'
+import { PageHeader } from '../ui/PageHeader'
+import { Select } from '../ui/Select'
+import { StatusBadge } from '../ui/StatusBadge'
+import { TabBar } from '../ui/Tabs'
+import { formatBangkokDateTime, formatMoney } from '../ui/format'
 import {
   ORDER_PAGE_SIZE,
   ordersApi,
@@ -7,12 +31,23 @@ import {
   type OrderListItem,
   type OrdersPage,
 } from './api'
+import { fetchOrderTotal } from './listOrders'
+import {
+  FULFILLMENT_FILTER_VALUES,
+  ORDER_TAB_LABELS,
+  emptyOrderFilters,
+  filtersForTab,
+  noDateOrderFilters,
+  tabFromFilters,
+  type OrdersTabId,
+} from './orderViews'
 
-const TABS = ['', 'READY_TO_PICK', 'PICKING', 'PACKED', 'SHIPPED', 'DELIVERED', 'UNFULFILLED'] as const
+const TAB_IDS: OrdersTabId[] = ['all', 'ready', 'hold', 'cancelled']
 
 function filtersFromHash(): OrderFilters {
   const hash = window.location.hash
   const query = hash.includes('?') ? hash.slice(hash.indexOf('?') + 1) : ''
+  if (!query) return emptyOrderFilters()
   const params = new URLSearchParams(query)
   return {
     fulfillment_status: params.get('fulfillment_status') ?? '',
@@ -54,8 +89,13 @@ export default function OrdersListPage() {
   const [backStack, setBackStack] = useState<string[]>([])
   const [page, setPage] = useState<OrdersPage<OrderListItem> | null>(null)
   const [error, setError] = useState('')
+  const [tabCounts, setTabCounts] = useState<Partial<Record<OrdersTabId, number>>>({})
+  const [holdTotal, setHoldTotal] = useState(0)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
 
-  const tab = applied.fulfillment_status
+  const activeTab = tabFromFilters(applied)
+  const orderedFrom = applied.ordered_from
+  const orderedTo = applied.ordered_to
 
   useEffect(() => {
     const syncFromHash = () => {
@@ -74,6 +114,7 @@ export default function OrdersListPage() {
           prev.ordered_to !== next.ordered_to
         if (filtersChanged) {
           setBackStack([])
+          setSelected(new Set())
         }
         return next
       })
@@ -100,12 +141,67 @@ export default function OrdersListPage() {
     }
   }, [applied, cursor])
 
-  function selectTab(value: string) {
-    const next = { ...applied, fulfillment_status: value }
+  useEffect(() => {
+    let active = true
+    const dates = { ordered_from: orderedFrom, ordered_to: orderedTo }
+    void Promise.all(TAB_IDS.map(async (id) => [id, await fetchOrderTotal(filtersForTab(id, dates))] as const))
+      .then((results) => {
+        if (!active) return
+        const counts: Partial<Record<OrdersTabId, number>> = {}
+        for (const [id, total] of results) {
+          counts[id] = total
+        }
+        setTabCounts(counts)
+      })
+      .catch(() => {
+        if (active) setTabCounts({})
+      })
+    return () => {
+      active = false
+    }
+  }, [orderedFrom, orderedTo])
+
+  useEffect(() => {
+    let active = true
+    void fetchOrderTotal({ ...noDateOrderFilters(), hold_reason: 'ANY' })
+      .then((total) => {
+        if (active) setHoldTotal(total)
+      })
+      .catch(() => {
+        if (active) setHoldTotal(0)
+      })
+    return () => {
+      active = false
+    }
+  }, [])
+
+  const tabItems = useMemo(
+    () =>
+      TAB_IDS.map((id) => ({
+        id,
+        label: ORDER_TAB_LABELS[id],
+        count: tabCounts[id] ?? null,
+        countClassName: id === 'hold' && (tabCounts.hold ?? 0) > 0 ? 'bg-red-100 text-red-700' : undefined,
+      })),
+    [tabCounts],
+  )
+
+  function selectTab(tabId: OrdersTabId) {
+    const tabFilters = filtersForTab(tabId, {
+      ordered_from: filters.ordered_from,
+      ordered_to: filters.ordered_to,
+    })
+    const next: OrderFilters = {
+      ...tabFilters,
+      q: filters.q,
+      channel: filters.channel,
+      payment_status: filters.payment_status,
+    }
     setFilters(next)
     setApplied(next)
     setCursor(null)
     setBackStack([])
+    setSelected(new Set())
     writeHash(next, null)
   }
 
@@ -114,144 +210,277 @@ export default function OrdersListPage() {
     setApplied(filters)
     setCursor(null)
     setBackStack([])
+    setSelected(new Set())
     writeHash(filters, null)
   }
 
+  const rows = page?.items ?? []
+  const allSelected = rows.length > 0 && rows.every((row) => selected.has(row.id))
+
+  function toggleAll(checked: boolean) {
+    if (!checked) {
+      setSelected(new Set())
+      return
+    }
+    setSelected(new Set(rows.map((row) => row.id)))
+  }
+
   const total = page?.total ?? 0
-  const tabLabel = useMemo(
-    () => (value: string) => (value === '' ? 'All' : value.replaceAll('_', ' ')),
-    [],
-  )
 
   return (
-    <main className="wide">
-      <h1>Orders</h1>
-      <p>
-        <a href="#/orders/holds">Hold queue</a>
-      </p>
-      <nav aria-label="Fulfillment tabs" className="toolbar">
-        {TABS.map((value) => (
-          <button
-            key={value || 'all'}
-            type="button"
-            className={tab === value ? 'active' : ''}
-            onClick={() => selectTab(value)}
-          >
-            {tabLabel(value)}
-          </button>
-        ))}
-      </nav>
-      <form className="toolbar" onSubmit={apply} aria-label="Filter orders">
-        <label>
-          Search
-          <input value={filters.q} onChange={(e) => setFilters({ ...filters, q: e.target.value })} />
-        </label>
-        <label>
-          Hold
-          <select
-            aria-label="Hold filter"
-            value={filters.hold_reason}
-            onChange={(e) => setFilters({ ...filters, hold_reason: e.target.value })}
-          >
-            <option value="">Any</option>
-            <option value="NONE">None</option>
-            <option value="ANY">On hold</option>
-            <option value="SKU_NOT_MAPPED">SKU not mapped</option>
-            <option value="OUT_OF_STOCK">Out of stock</option>
-            <option value="ADDRESS_PROBLEM">Address problem</option>
-            <option value="PAYMENT_MISMATCH">Payment mismatch</option>
-            <option value="CHANNEL_CANCEL_PENDING">Channel cancel pending</option>
-            <option value="MANUAL">Manual</option>
-          </select>
-        </label>
-        <label>
-          Order status
-          <select
-            value={filters.order_status}
-            onChange={(e) => setFilters({ ...filters, order_status: e.target.value })}
-          >
-            <option value="">Any</option>
-            <option value="ACTIVE">Active</option>
-            <option value="CANCELLED">Cancelled</option>
-            <option value="COMPLETED">Completed</option>
-          </select>
-        </label>
-        <label>
-          Payment status
-          <select
-            value={filters.payment_status}
-            onChange={(e) => setFilters({ ...filters, payment_status: e.target.value })}
-          >
-            <option value="">Any</option>
-            <option value="PENDING">Pending</option>
-            <option value="PAID">Paid</option>
-            <option value="COD_PENDING">COD pending</option>
-            <option value="PARTIALLY_REFUNDED">Partially refunded</option>
-            <option value="REFUNDED">Refunded</option>
-          </select>
-        </label>
-        <label>
-          Channel
-          <select
-            value={filters.channel}
-            onChange={(e) => setFilters({ ...filters, channel: e.target.value })}
-          >
-            <option value="">Any</option>
-            <option value="TSF">TSF</option>
-            <option value="SHOPEE">Shopee</option>
-            <option value="LAZADA">Lazada</option>
-            <option value="TIKTOK">TikTok</option>
-          </select>
-        </label>
-        <label>
-          Ordered from
-          <input
-            type="date"
-            value={filters.ordered_from}
-            onChange={(e) => setFilters({ ...filters, ordered_from: e.target.value })}
-          />
-        </label>
-        <label>
-          Ordered to
-          <input
-            type="date"
-            value={filters.ordered_to}
-            onChange={(e) => setFilters({ ...filters, ordered_to: e.target.value })}
-          />
-        </label>
-        <button type="submit">Apply</button>
-      </form>
-      {error ? <p role="alert">{error}</p> : null}
-      <table aria-label="Orders">
-        <thead>
-          <tr>
-            <th>Order</th>
-            <th>Fulfillment</th>
-            <th>Payment</th>
-            <th>Hold</th>
-            <th>Phone</th>
-            <th>Total</th>
-          </tr>
-        </thead>
-        <tbody>
-          {(page?.items ?? []).map((row) => (
-            <tr key={row.id}>
-              <td>
-                <a href={`#/orders/${row.id}`}>{row.external_order_id}</a>
-              </td>
-              <td>{row.fulfillment_status}</td>
-              <td>{row.payment_status}</td>
-              <td>{row.hold_reason}</td>
-              <td>{row.phone_masked ?? '—'}</td>
-              <td>{row.grand_total}</td>
+    <PageContent wide>
+      <PageHeader
+        title={
+          <>
+            <span aria-hidden="true">ออเดอร์</span>
+            <span className="sr-only">Orders</span>
+          </>
+        }
+        subtitle="จัดการออเดอร์จากทุกช่องทาง"
+        actions={
+          <>
+            <ComingSoonButton>
+              <Download className="h-4 w-4" />
+              Export
+            </ComingSoonButton>
+            <ComingSoonButton>
+              <RefreshCw className="h-4 w-4" />
+              Sync
+            </ComingSoonButton>
+            <ComingSoonButton>
+              <Printer className="h-4 w-4" />
+              Print
+            </ComingSoonButton>
+          </>
+        }
+      />
+
+      {holdTotal > 0 ? (
+        <AlertBanner
+          variant="warning"
+          className="mt-5"
+          title="มีออเดอร์ค้างที่ต้องแก้ไข"
+          actions={
+            <Button type="button" variant="secondary" asChild>
+              <a href="#/orders/holds">ดูคิว Hold →</a>
+            </Button>
+          }
+        >
+          {holdTotal} ออเดอร์รอการดำเนินการ
+        </AlertBanner>
+      ) : null}
+
+      <Card className="mt-5 overflow-hidden">
+        <TabBar
+          aria-label="Fulfillment tabs"
+          items={tabItems}
+          activeId={activeTab}
+          onSelect={(id) => selectTab(id as OrdersTabId)}
+        />
+
+        <form
+          className="grid gap-4 border-b border-stone-100 p-4 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5"
+          onSubmit={apply}
+          aria-label="Filter orders"
+        >
+          <div>
+            <Label htmlFor="orders-search">Search</Label>
+            <Input
+              id="orders-search"
+              value={filters.q}
+              onChange={(e) => setFilters({ ...filters, q: e.target.value })}
+            />
+          </div>
+          <div>
+            <Label htmlFor="orders-hold">Hold</Label>
+            <Select
+              id="orders-hold"
+              aria-label="Hold filter"
+              value={filters.hold_reason}
+              onChange={(e) => setFilters({ ...filters, hold_reason: e.target.value })}
+            >
+              <option value="">Any</option>
+              <option value="NONE">None</option>
+              <option value="ANY">On hold</option>
+              <option value="SKU_NOT_MAPPED">SKU not mapped</option>
+              <option value="OUT_OF_STOCK">Out of stock</option>
+              <option value="ADDRESS_PROBLEM">Address problem</option>
+              <option value="PAYMENT_MISMATCH">Payment mismatch</option>
+              <option value="CHANNEL_CANCEL_PENDING">Channel cancel pending</option>
+              <option value="MANUAL">Manual</option>
+            </Select>
+          </div>
+          <div>
+            <Label htmlFor="orders-fulfillment">Fulfillment status</Label>
+            <Select
+              id="orders-fulfillment"
+              aria-label="Fulfillment status"
+              value={filters.fulfillment_status}
+              onChange={(e) => setFilters({ ...filters, fulfillment_status: e.target.value })}
+            >
+              <option value="">Any</option>
+              {FULFILLMENT_FILTER_VALUES.map((value) => (
+                <option key={value} value={value}>
+                  {value}
+                </option>
+              ))}
+            </Select>
+          </div>
+          <div>
+            <Label htmlFor="orders-order-status">Order status</Label>
+            <Select
+              id="orders-order-status"
+              value={filters.order_status}
+              onChange={(e) => setFilters({ ...filters, order_status: e.target.value })}
+            >
+              <option value="">Any</option>
+              <option value="ACTIVE">Active</option>
+              <option value="CANCELLED">Cancelled</option>
+              <option value="COMPLETED">Completed</option>
+            </Select>
+          </div>
+          <div>
+            <Label htmlFor="orders-payment-status">Payment status</Label>
+            <Select
+              id="orders-payment-status"
+              value={filters.payment_status}
+              onChange={(e) => setFilters({ ...filters, payment_status: e.target.value })}
+            >
+              <option value="">Any</option>
+              <option value="PENDING">Pending</option>
+              <option value="PAID">Paid</option>
+              <option value="COD_PENDING">COD pending</option>
+              <option value="PARTIALLY_REFUNDED">Partially refunded</option>
+              <option value="REFUNDED">Refunded</option>
+            </Select>
+          </div>
+          <div>
+            <Label htmlFor="orders-channel">Channel</Label>
+            <Select
+              id="orders-channel"
+              value={filters.channel}
+              onChange={(e) => setFilters({ ...filters, channel: e.target.value })}
+            >
+              <option value="">Any</option>
+              <option value="TSF">TSF</option>
+              <option value="SHOPEE">Shopee</option>
+              <option value="LAZADA">Lazada</option>
+              <option value="TIKTOK">TikTok</option>
+            </Select>
+          </div>
+          <div>
+            <Label htmlFor="orders-from">Ordered from</Label>
+            <Input
+              id="orders-from"
+              type="date"
+              value={filters.ordered_from}
+              onChange={(e) => setFilters({ ...filters, ordered_from: e.target.value })}
+            />
+          </div>
+          <div>
+            <Label htmlFor="orders-to">Ordered to</Label>
+            <Input
+              id="orders-to"
+              type="date"
+              value={filters.ordered_to}
+              onChange={(e) => setFilters({ ...filters, ordered_to: e.target.value })}
+            />
+          </div>
+          <div className="flex items-end">
+            <Button type="submit" variant="primary">
+              Apply
+            </Button>
+          </div>
+        </form>
+
+        <DataTable aria-label="Orders" className="rounded-none border-0 shadow-none">
+          <DataTableHead>
+            <tr>
+              <DataTableTh className="w-10">
+                <Checkbox
+                  aria-label="Select all orders"
+                  checked={allSelected}
+                  onCheckedChange={toggleAll}
+                />
+              </DataTableTh>
+              <DataTableTh>ออเดอร์</DataTableTh>
+              <DataTableTh>ช่องทาง</DataTableTh>
+              <DataTableTh>ลูกค้า</DataTableTh>
+              <DataTableTh>สินค้า</DataTableTh>
+              <DataTableTh className="text-right">ยอดรวม</DataTableTh>
+              <DataTableTh>ชำระเงิน</DataTableTh>
+              <DataTableTh>สถานะ</DataTableTh>
+              <DataTableTh>Hold</DataTableTh>
             </tr>
-          ))}
-        </tbody>
-      </table>
-      <p>{total === 0 ? 'No orders' : `${page?.items.length ?? 0} on this page · ${total} matching`}</p>
-      <div className="toolbar">
-        <button
+          </DataTableHead>
+          <tbody>
+            {rows.map((row) => (
+              <DataTableRow key={row.id}>
+                <DataTableCell>
+                  <Checkbox
+                    aria-label={`Select order ${row.external_order_id}`}
+                    checked={selected.has(row.id)}
+                    onCheckedChange={(checked) => {
+                      const next = new Set(selected)
+                      if (checked) next.add(row.id)
+                      else next.delete(row.id)
+                      setSelected(next)
+                    }}
+                  />
+                </DataTableCell>
+                <DataTableCell>
+                  <a
+                    href={`#/orders/${row.id}`}
+                    className="font-mono text-[12.5px] font-medium text-brand-700 hover:underline"
+                  >
+                    {row.external_order_id}
+                  </a>
+                  <div className="mt-0.5 text-[11.5px] text-stone-500 tabular-nums">
+                    {formatBangkokDateTime(row.ordered_at)}
+                  </div>
+                </DataTableCell>
+                <DataTableCell>
+                  <StatusBadge value={row.channel} kind="channel" />
+                </DataTableCell>
+                <DataTableCell>{row.phone_masked ?? '—'}</DataTableCell>
+                <DataTableCell className="text-stone-400">—</DataTableCell>
+                <DataTableCell mono className="text-right">
+                  {formatMoney(row.grand_total)}
+                </DataTableCell>
+                <DataTableCell>
+                  <div className="flex flex-wrap gap-1">
+                    <StatusBadge value={row.payment_method} kind="payment_method" />
+                    <StatusBadge value={row.payment_status} kind="payment" />
+                  </div>
+                </DataTableCell>
+                <DataTableCell>
+                  <OrderDisplayBadge
+                    order_status={row.order_status}
+                    fulfillment_status={row.fulfillment_status}
+                    hold_reason={row.hold_reason}
+                  />
+                </DataTableCell>
+                <DataTableCell>
+                  <HoldReasonBadge reason={row.hold_reason} />
+                </DataTableCell>
+              </DataTableRow>
+            ))}
+          </tbody>
+        </DataTable>
+      </Card>
+
+      {error ? (
+        <p role="alert" className="mt-4 text-[13px] text-red-700">
+          {error}
+        </p>
+      ) : null}
+
+      <TablePager
+        summary={total === 0 ? 'No orders' : `${page?.items.length ?? 0} on this page · ${total} matching`}
+      >
+        <Button
           type="button"
+          variant="secondary"
           disabled={backStack.length === 0}
           onClick={() => {
             const stack = [...backStack]
@@ -262,9 +491,10 @@ export default function OrdersListPage() {
           }}
         >
           Previous
-        </button>
-        <button
+        </Button>
+        <Button
           type="button"
+          variant="secondary"
           disabled={!page?.next_cursor}
           onClick={() => {
             if (!page?.next_cursor) return
@@ -274,8 +504,8 @@ export default function OrdersListPage() {
           }}
         >
           Next
-        </button>
-      </div>
-    </main>
+        </Button>
+      </TablePager>
+    </PageContent>
   )
 }
