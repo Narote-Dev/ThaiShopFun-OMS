@@ -51,7 +51,14 @@ export default function ImportPage({ canWrite }: { canWrite: boolean }) {
 
   return (
     <PageContent wide>
-      <PageHeader title="Import catalog" />
+      <PageHeader
+        title={
+          <>
+            <span aria-hidden="true">นำเข้าข้อมูล (Import)</span>
+            <span className="sr-only">Import catalog</span>
+          </>
+        }
+      />
       <p className="mt-4 text-[13px] leading-relaxed text-stone-600">
         UTF-8 CSV with a header row. Columns: <code className="rounded bg-stone-100 px-1">product_name, sku_code, sku_name, barcode, weight_g,
         is_bundle, components</code>. <code className="rounded bg-stone-100 px-1">components</code> is <code className="rounded bg-stone-100 px-1">CODE:qty|CODE:qty</code> and may name SKUs

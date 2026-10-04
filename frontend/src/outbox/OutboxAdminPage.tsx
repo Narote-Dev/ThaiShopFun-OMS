@@ -51,7 +51,14 @@ export default function OutboxAdminPage({ readOnly = false }: { readOnly?: boole
 
   return (
     <PageContent>
-      <PageHeader title="Dead outbox" />
+      <PageHeader
+        title={
+          <>
+            <span aria-hidden="true">Dead outbox</span>
+            <span className="sr-only">Dead outbox</span>
+          </>
+        }
+      />
       <p className="mt-4 text-[13px] text-stone-600">OWNER or ADMIN can send a DEAD event again. The session token stays in memory.</p>
       <Button type="button" variant="primary" className="mt-4" onClick={() => void load()} disabled={busy}>
         Load

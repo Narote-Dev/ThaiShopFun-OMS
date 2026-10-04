@@ -22,7 +22,7 @@ import { PageHeader } from '../ui/PageHeader'
 import { Select } from '../ui/Select'
 import { StatusBadge } from '../ui/StatusBadge'
 import { TabBar } from '../ui/Tabs'
-import { bangkokTodayIso, formatBangkokDateTime, formatMoney } from '../ui/format'
+import { formatBangkokDateTime, formatMoney } from '../ui/format'
 import {
   ORDER_PAGE_SIZE,
   ordersApi,
@@ -33,14 +33,16 @@ import {
 } from './api'
 import { fetchOrderTotal } from './listOrders'
 import {
+  FULFILLMENT_FILTER_VALUES,
   ORDER_TAB_LABELS,
   emptyOrderFilters,
   filtersForTab,
+  noDateOrderFilters,
   tabFromFilters,
   type OrdersTabId,
 } from './orderViews'
 
-const TAB_IDS: OrdersTabId[] = ['all', 'ready', 'hold', 'unshipped', 'shipped', 'cancelled']
+const TAB_IDS: OrdersTabId[] = ['all', 'ready', 'hold', 'cancelled']
 
 function filtersFromHash(): OrderFilters {
   const hash = window.location.hash
@@ -92,7 +94,8 @@ export default function OrdersListPage() {
   const [selected, setSelected] = useState<Set<string>>(new Set())
 
   const activeTab = tabFromFilters(applied)
-  const today = bangkokTodayIso()
+  const orderedFrom = applied.ordered_from
+  const orderedTo = applied.ordered_to
 
   useEffect(() => {
     const syncFromHash = () => {
@@ -140,29 +143,37 @@ export default function OrdersListPage() {
 
   useEffect(() => {
     let active = true
-    void Promise.all([
-      ...TAB_IDS.map(async (id) => [id, await fetchOrderTotal(filtersForTab(id, today))] as const),
-      fetchOrderTotal({ ...emptyOrderFilters(today), hold_reason: 'ANY' }),
-    ])
+    const dates = { ordered_from: orderedFrom, ordered_to: orderedTo }
+    void Promise.all(TAB_IDS.map(async (id) => [id, await fetchOrderTotal(filtersForTab(id, dates))] as const))
       .then((results) => {
         if (!active) return
         const counts: Partial<Record<OrdersTabId, number>> = {}
-        for (const [id, total] of results.slice(0, TAB_IDS.length) as [OrdersTabId, number][]) {
+        for (const [id, total] of results) {
           counts[id] = total
         }
         setTabCounts(counts)
-        setHoldTotal(results[results.length - 1] as number)
       })
       .catch(() => {
-        if (active) {
-          setTabCounts({})
-          setHoldTotal(0)
-        }
+        if (active) setTabCounts({})
       })
     return () => {
       active = false
     }
-  }, [today])
+  }, [orderedFrom, orderedTo])
+
+  useEffect(() => {
+    let active = true
+    void fetchOrderTotal({ ...noDateOrderFilters(), hold_reason: 'ANY' })
+      .then((total) => {
+        if (active) setHoldTotal(total)
+      })
+      .catch(() => {
+        if (active) setHoldTotal(0)
+      })
+    return () => {
+      active = false
+    }
+  }, [])
 
   const tabItems = useMemo(
     () =>
@@ -176,7 +187,10 @@ export default function OrdersListPage() {
   )
 
   function selectTab(tabId: OrdersTabId) {
-    const tabFilters = filtersForTab(tabId, today)
+    const tabFilters = filtersForTab(tabId, {
+      ordered_from: filters.ordered_from,
+      ordered_to: filters.ordered_to,
+    })
     const next: OrderFilters = {
       ...tabFilters,
       q: filters.q,
@@ -294,6 +308,22 @@ export default function OrdersListPage() {
               <option value="PAYMENT_MISMATCH">Payment mismatch</option>
               <option value="CHANNEL_CANCEL_PENDING">Channel cancel pending</option>
               <option value="MANUAL">Manual</option>
+            </Select>
+          </div>
+          <div>
+            <Label htmlFor="orders-fulfillment">Fulfillment status</Label>
+            <Select
+              id="orders-fulfillment"
+              aria-label="Fulfillment status"
+              value={filters.fulfillment_status}
+              onChange={(e) => setFilters({ ...filters, fulfillment_status: e.target.value })}
+            >
+              <option value="">Any</option>
+              {FULFILLMENT_FILTER_VALUES.map((value) => (
+                <option key={value} value={value}>
+                  {value}
+                </option>
+              ))}
             </Select>
           </div>
           <div>

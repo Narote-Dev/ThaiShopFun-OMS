@@ -89,7 +89,15 @@ export default function HoldQueuePage() {
           ← Orders
         </a>
       </p>
-      <PageHeader className="mt-2" title="Hold queue" />
+      <PageHeader
+        className="mt-2"
+        title={
+          <>
+            <span aria-hidden="true">คิวออเดอร์ค้าง</span>
+            <span className="sr-only">Hold queue</span>
+          </>
+        }
+      />
       {error ? (
         <p role="alert" className="mt-4 text-[13px] text-red-700">
           {error}

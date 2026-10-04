@@ -6,7 +6,7 @@ import {
   type User,
 } from 'oidc-client-ts'
 import { oidcConfig } from './config'
-import { assertIdToken, displayNameFromIdToken } from './idToken'
+import { assertIdToken, userLabelFromIdToken } from './idToken'
 import { safeReturn, stripAuthQuery } from '../routing/hash'
 import { singleFlight } from './singleFlight'
 import { sweepBrowserStorage } from './storage'
@@ -60,7 +60,7 @@ export function getAccessToken(): string | null {
 
 export async function getSessionDisplayName(): Promise<string | null> {
   const user = await userManager.getUser()
-  return displayNameFromIdToken(user?.id_token)
+  return userLabelFromIdToken(user?.id_token)
 }
 
 export function bootSession(): Promise<BootResult> {

@@ -19,6 +19,7 @@ import {
 import { Input } from '../ui/Input'
 import { Label } from '../ui/Label'
 import { PageContent } from '../ui/PageContent'
+import { OrderDisplayBadge } from '../ui/OrderDisplayBadge'
 import { StatusBadge } from '../ui/StatusBadge'
 import { Timeline, type TimelineItem } from '../ui/Timeline'
 import { formatBangkokDateTime, formatMoney } from '../ui/format'
@@ -169,6 +170,13 @@ export default function OrderDetailPage({ id, me }: { id: string; me: Me }) {
             <StatusBadge value={order.channel_account.channel} kind="channel" />
             <StatusBadge value={order.order_status} kind="order" />
             <StatusBadge value={order.fulfillment_status} kind="fulfillment" />
+            {onHold ? (
+              <OrderDisplayBadge
+                order_status={order.order_status}
+                fulfillment_status={order.fulfillment_status}
+                hold_reason={order.hold_reason}
+              />
+            ) : null}
             <StatusBadge value={order.payment_status} kind="payment" />
             <StatusBadge value={order.payment_method} kind="payment_method" />
           </div>

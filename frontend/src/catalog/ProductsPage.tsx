@@ -62,7 +62,14 @@ export default function ProductsPage({ canWrite }: { canWrite: boolean }) {
 
   return (
     <PageContent wide>
-      <PageHeader title="Products" />
+      <PageHeader
+        title={
+          <>
+            <span aria-hidden="true">สินค้า (Products)</span>
+            <span className="sr-only">Products</span>
+          </>
+        }
+      />
       {canWrite ? (
         <Card className="mt-4">
           <form className="flex flex-wrap items-end gap-4 p-4" onSubmit={create}>

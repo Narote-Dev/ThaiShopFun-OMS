@@ -68,7 +68,14 @@ export default function WarehousesPage({ canWrite }: { canWrite: boolean }) {
 
   return (
     <PageContent wide>
-      <PageHeader title="Warehouses" />
+      <PageHeader
+        title={
+          <>
+            <span aria-hidden="true">คลัง (Warehouses)</span>
+            <span className="sr-only">Warehouses</span>
+          </>
+        }
+      />
       {error ? <p role="alert" className="mt-4 text-[13px] text-red-700">{error}</p> : null}
       <div className="mt-4">
         <DataTable aria-label="Warehouses">

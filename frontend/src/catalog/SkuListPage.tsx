@@ -59,7 +59,14 @@ export default function SkuListPage({ canWrite }: { canWrite: boolean }) {
   const last = Math.min(offset + PAGE_SIZE, total)
   return (
     <PageContent wide>
-      <PageHeader title="SKUs" />
+      <PageHeader
+        title={
+          <>
+            <span aria-hidden="true">SKUs</span>
+            <span className="sr-only">SKUs</span>
+          </>
+        }
+      />
       <Card className="mt-4">
         <form className="flex flex-wrap items-end gap-4 p-4" onSubmit={search}>
           <div className="min-w-[240px] flex-1">

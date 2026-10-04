@@ -51,7 +51,7 @@ export default function AppShell({ me, route, userDisplayName, onLogout, childre
 
   const sections = useMemo(() => buildNavSections(me), [me])
   const crumbs = breadcrumbParts(route.split('?')[0])
-  const footerName = userDisplayName ?? me.tenant.name
+  const footerName = userDisplayName ?? 'User'
   const tierBadge =
     me.entitlement.status === 'ACTIVE'
       ? `${me.role} · ${me.tenant.membership_tier}`

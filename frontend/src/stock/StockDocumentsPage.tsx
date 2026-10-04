@@ -85,7 +85,14 @@ export default function StockDocumentsPage({ access }: { access: StockAccess }) 
   const last = Math.min(offset + DOCUMENT_PAGE_SIZE, total)
   return (
     <PageContent wide>
-      <PageHeader title="Stock documents" />
+      <PageHeader
+        title={
+          <>
+            <span aria-hidden="true">เอกสารสต็อก</span>
+            <span className="sr-only">Stock documents</span>
+          </>
+        }
+      />
       {access.canEdit ? (
         <Card className="mt-4">
           <form

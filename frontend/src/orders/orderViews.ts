@@ -1,16 +1,25 @@
 import type { OrderFilters } from './api'
 import { bangkokTodayIso } from '../ui/format'
 
-export type OrdersTabId = 'all' | 'ready' | 'hold' | 'unshipped' | 'shipped' | 'cancelled'
+export type OrdersTabId = 'all' | 'ready' | 'hold' | 'cancelled'
 
 export const ORDER_TAB_LABELS: Record<OrdersTabId, string> = {
   all: 'ทั้งหมด',
   ready: 'รอหยิบ',
   hold: 'ค้าง (Hold)',
-  unshipped: 'ยังไม่จัดส่ง',
-  shipped: 'จัดส่งแล้ว',
   cancelled: 'ยกเลิก',
 }
+
+export const FULFILLMENT_FILTER_VALUES = [
+  'UNFULFILLED',
+  'READY_TO_PICK',
+  'PICKING',
+  'PACKED',
+  'SHIPPED',
+  'DELIVERED',
+] as const
+
+export type DateScope = { ordered_from: string; ordered_to: string }
 
 export function emptyOrderFilters(today = bangkokTodayIso()): OrderFilters {
   return {
@@ -25,31 +34,58 @@ export function emptyOrderFilters(today = bangkokTodayIso()): OrderFilters {
   }
 }
 
-export function filtersForTab(tab: OrdersTabId, today = bangkokTodayIso()): OrderFilters {
-  const base = emptyOrderFilters(today)
+export function noDateOrderFilters(): OrderFilters {
+  return {
+    fulfillment_status: '',
+    order_status: '',
+    payment_status: '',
+    hold_reason: '',
+    channel: '',
+    q: '',
+    ordered_from: '',
+    ordered_to: '',
+  }
+}
+
+export function filtersForTab(tab: OrdersTabId, dates: DateScope): OrderFilters {
+  const base: OrderFilters = {
+    fulfillment_status: '',
+    order_status: '',
+    payment_status: '',
+    hold_reason: '',
+    channel: '',
+    q: '',
+    ordered_from: dates.ordered_from,
+    ordered_to: dates.ordered_to,
+  }
   switch (tab) {
     case 'all':
       return base
     case 'ready':
-      return { ...base, fulfillment_status: 'READY_TO_PICK', order_status: 'ACTIVE' }
+      return { ...base, fulfillment_status: 'READY_TO_PICK' }
     case 'hold':
       return { ...base, hold_reason: 'ANY' }
     case 'cancelled':
       return { ...base, order_status: 'CANCELLED' }
-    case 'unshipped':
-      return { ...base, fulfillment_status: 'UNFULFILLED' }
-    case 'shipped':
-      return { ...base, fulfillment_status: 'SHIPPED' }
     default:
       return base
   }
 }
 
+/** Maps applied filters to a tab when they match a tab preset exactly (plus date/q/channel extras). */
 export function tabFromFilters(filters: OrderFilters): OrdersTabId {
-  if (filters.order_status === 'CANCELLED') return 'cancelled'
-  if (filters.hold_reason === 'ANY') return 'hold'
-  if (filters.fulfillment_status === 'READY_TO_PICK') return 'ready'
-  if (filters.fulfillment_status === 'SHIPPED' || filters.fulfillment_status === 'DELIVERED') return 'shipped'
-  if (filters.fulfillment_status === 'UNFULFILLED') return 'unshipped'
+  if (filters.order_status === 'CANCELLED') {
+    return 'cancelled'
+  }
+  if (filters.hold_reason === 'ANY' && !filters.fulfillment_status && filters.order_status !== 'CANCELLED') {
+    return 'hold'
+  }
+  if (
+    filters.fulfillment_status === 'READY_TO_PICK' &&
+    !filters.order_status &&
+    filters.hold_reason !== 'ANY'
+  ) {
+    return 'ready'
+  }
   return 'all'
 }
