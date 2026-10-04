@@ -2,6 +2,19 @@ type IdClaims = {
   iss?: string
   aud?: string | string[]
   nonce?: string
+  name?: string
+  preferred_username?: string
+}
+
+export function displayNameFromIdToken(idToken: string | undefined | null): string | null {
+  if (!idToken) return null
+  try {
+    const claims = decodeIdClaims(idToken) as IdClaims
+    const name = claims.name?.trim() || claims.preferred_username?.trim()
+    return name || null
+  } catch {
+    return null
+  }
 }
 
 export function decodeIdClaims(idToken: string): IdClaims {

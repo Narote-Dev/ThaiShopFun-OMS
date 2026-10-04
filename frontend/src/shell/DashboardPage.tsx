@@ -1,57 +1,68 @@
 import { PackageCheck, PauseCircle, Plus, RefreshCw, ShoppingBag, TriangleAlert, Upload } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
-import { catalogApi, type Sku } from '../catalog/api'
+import { fetchAllSkus } from '../catalog/listSkus'
 import { ordersApi, ordersMessage, type HoldGroup, type OrderListItem } from '../orders/api'
+import { fetchAllOrders } from '../orders/listOrders'
+import { emptyOrderFilters } from '../orders/orderViews'
 import { Button } from '../ui/Button'
+import { ComingSoonButton } from '../ui/ComingSoon'
 import { Card, CardHeader, KpiCard } from '../ui/Card'
 import { DataTable, DataTableCell, DataTableHead, DataTableRow, DataTableTh } from '../ui/DataTable'
+import { OrderDisplayBadge } from '../ui/OrderDisplayBadge'
 import { PageContent } from '../ui/PageContent'
 import { PageHeader } from '../ui/PageHeader'
 import { StatusBadge } from '../ui/StatusBadge'
+import { bangkokTodayIso, formatMoney } from '../ui/format'
 
 export const LOW_STOCK_THRESHOLD = 25
-
-function todayIso() {
-  const d = new Date()
-  return d.toISOString().slice(0, 10)
-}
-
-function formatMoney(total: number) {
-  return `฿${total.toLocaleString('th-TH', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
-}
 
 export default function DashboardPage({ name }: { name: string }) {
   const [orders, setOrders] = useState<OrderListItem[]>([])
   const [orderTotal, setOrderTotal] = useState(0)
   const [holds, setHolds] = useState<HoldGroup[]>([])
-  const [skus, setSkus] = useState<Sku[]>([])
+  const [lowStockCount, setLowStockCount] = useState(0)
+  const [lowStockPreview, setLowStockPreview] = useState<
+    { id: string; sku_code: string; name: string; available: number }[]
+  >([])
   const [error, setError] = useState('')
 
-  const today = todayIso()
+  const today = bangkokTodayIso()
+
+  const dateLabel = useMemo(() => {
+    try {
+      return new Intl.DateTimeFormat('th-TH', {
+        timeZone: 'Asia/Bangkok',
+        weekday: 'long',
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric',
+      }).format(new Date())
+    } catch {
+      return today
+    }
+  }, [today])
 
   useEffect(() => {
     let active = true
-    const emptyFilters = {
-      fulfillment_status: '',
-      order_status: '',
-      payment_status: '',
-      hold_reason: '',
-      channel: '',
-      q: '',
-      ordered_from: today,
-      ordered_to: today,
-    }
-    void Promise.all([
-      ordersApi.list(emptyFilters, 50, null),
-      ordersApi.holds(),
-      catalogApi.listSkus('', 200, 0),
-    ])
-      .then(([orderPage, holdBody, skuPage]) => {
+    const filters = emptyOrderFilters(today)
+    void Promise.all([fetchAllOrders(filters), ordersApi.holds(), fetchAllSkus()])
+      .then(([orderResult, holdBody, skus]) => {
         if (!active) return
-        setOrders(orderPage.items)
-        setOrderTotal(orderPage.total)
+        setOrders(orderResult.items)
+        setOrderTotal(orderResult.total)
         setHolds(holdBody.groups)
-        setSkus(skuPage.items)
+        const low = skus
+          .filter((s) => !s.is_bundle)
+          .map((s) => ({
+            id: s.id,
+            sku_code: s.sku_code,
+            name: s.name,
+            available: (s.on_hand ?? 0) - (s.reserved ?? 0),
+          }))
+          .filter((s) => s.available <= LOW_STOCK_THRESHOLD)
+          .sort((a, b) => a.available - b.available)
+        setLowStockCount(low.length)
+        setLowStockPreview(low.slice(0, 8))
         setError('')
       })
       .catch((err: unknown) => {
@@ -62,9 +73,13 @@ export default function DashboardPage({ name }: { name: string }) {
     }
   }, [today])
 
-  const readyCount = useMemo(
-    () => orders.filter((o) => o.fulfillment_status === 'READY_TO_PICK').length,
+  const activeOrders = useMemo(
+    () => orders.filter((o) => o.order_status !== 'CANCELLED'),
     [orders],
+  )
+  const readyCount = useMemo(
+    () => activeOrders.filter((o) => o.fulfillment_status === 'READY_TO_PICK').length,
+    [activeOrders],
   )
   const holdCount = useMemo(() => holds.reduce((sum, g) => sum + g.count, 0), [holds])
   const oosHolds = useMemo(
@@ -76,30 +91,10 @@ export default function DashboardPage({ name }: { name: string }) {
     [holds],
   )
   const salesTotal = useMemo(
-    () => orders.reduce((sum, o) => sum + Number.parseFloat(o.grand_total || '0'), 0),
-    [orders],
+    () => activeOrders.reduce((sum, o) => sum + Number.parseFloat(o.grand_total || '0'), 0),
+    [activeOrders],
   )
   const cancelled = useMemo(() => orders.filter((o) => o.order_status === 'CANCELLED').length, [orders])
-
-  const lowStock = useMemo(() => {
-    return skus
-      .filter((s) => !s.is_bundle && s.on_hand != null && s.on_hand <= LOW_STOCK_THRESHOLD)
-      .sort((a, b) => (a.on_hand ?? 0) - (b.on_hand ?? 0))
-      .slice(0, 8)
-  }, [skus])
-
-  const dateLabel = useMemo(() => {
-    try {
-      return new Intl.DateTimeFormat('th-TH', {
-        weekday: 'long',
-        day: 'numeric',
-        month: 'short',
-        year: 'numeric',
-      }).format(new Date())
-    } catch {
-      return today
-    }
-  }, [today])
 
   const holdBar =
     holdCount > 0
@@ -120,10 +115,10 @@ export default function DashboardPage({ name }: { name: string }) {
         }
         actions={
           <>
-            <Button type="button" variant="secondary">
+            <ComingSoonButton>
               <RefreshCw className="h-4 w-4" />
               ซิงก์ออเดอร์
-            </Button>
+            </ComingSoonButton>
             <Button type="button" variant="secondary" asChild>
               <a href="#/catalog/import">
                 <Upload className="h-4 w-4" />
@@ -145,11 +140,11 @@ export default function DashboardPage({ name }: { name: string }) {
       <div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <KpiCard
           label="ออเดอร์วันนี้"
-          value={orderTotal || orders.length}
+          value={orderTotal}
           hint={
             <>
-              ยอดขาย <span className="font-medium text-stone-700">{formatMoney(salesTotal)}</span> · ยกเลิก{' '}
-              {cancelled}
+              ยอดขาย <span className="font-medium text-stone-700">{formatMoney(salesTotal, { decimals: 0 })}</span> ·
+              ยกเลิก {cancelled}
             </>
           }
           icon={<ShoppingBag className="h-4 w-4" />}
@@ -192,7 +187,7 @@ export default function DashboardPage({ name }: { name: string }) {
         />
         <KpiCard
           label="สต็อกใกล้หมด"
-          value={lowStock.length}
+          value={lowStockCount}
           hint={`SKU คงเหลือพร้อมขาย ≤ ${LOW_STOCK_THRESHOLD} ชิ้น`}
           icon={<TriangleAlert className="h-4 w-4" />}
           iconClassName="bg-amber-50 text-amber-600"
@@ -231,7 +226,7 @@ export default function DashboardPage({ name }: { name: string }) {
                     </span>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 text-[13px] font-medium">
-                        <StatusBadge value={group.hold_reason} kind="hold" />
+                        <StatusBadge value={group.hold_reason} kind="hold_reason" />
                         <span className="rounded-full bg-stone-100 px-1.5 text-[11px] font-medium text-stone-600 tabular-nums">
                           {group.count}
                         </span>
@@ -248,7 +243,7 @@ export default function DashboardPage({ name }: { name: string }) {
                     </div>
                     <a
                       href={`#/orders/${sample.id}`}
-                      className="text-[12.5px] font-medium text-brand-700 hover:bg-brand-50 rounded-md px-2 py-1"
+                      className="rounded-md px-2 py-1 text-[12.5px] font-medium text-brand-700 hover:bg-brand-50"
                     >
                       เปิดออเดอร์
                     </a>
@@ -272,12 +267,11 @@ export default function DashboardPage({ name }: { name: string }) {
             }
           />
           <ul className="divide-y divide-stone-100">
-            {lowStock.length === 0 ? (
+            {lowStockPreview.length === 0 ? (
               <li className="px-5 py-6 text-[13px] text-stone-500">ไม่มี SKU ใกล้หมด</li>
             ) : (
-              lowStock.map((sku) => {
-                const onHand = sku.on_hand ?? 0
-                const pct = Math.min(100, Math.round((onHand / LOW_STOCK_THRESHOLD) * 100))
+              lowStockPreview.map((sku) => {
+                const pct = Math.min(100, Math.round((Math.max(0, sku.available) / LOW_STOCK_THRESHOLD) * 100))
                 return (
                   <li key={sku.id} className="px-5 py-3">
                     <div className="flex items-center justify-between gap-2">
@@ -287,19 +281,19 @@ export default function DashboardPage({ name }: { name: string }) {
                       </div>
                       <span
                         className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
-                          onHand <= 0 ? 'bg-red-50 text-red-700' : 'bg-amber-50 text-amber-800'
+                          sku.available <= 0 ? 'bg-red-50 text-red-700' : 'bg-amber-50 text-amber-800'
                         }`}
                       >
-                        {onHand <= 0 ? 'หมด' : 'ใกล้หมด'}
+                        {sku.available <= 0 ? 'หมด' : 'ใกล้หมด'}
                       </span>
                     </div>
                     <div className="mt-2 flex h-1.5 overflow-hidden rounded-full bg-stone-100">
                       <div
-                        className={onHand <= 0 ? 'bg-red-500' : 'bg-amber-400'}
+                        className={sku.available <= 0 ? 'bg-red-500' : 'bg-amber-400'}
                         style={{ width: `${pct}%` }}
                       />
                     </div>
-                    <div className="mt-1 text-[11.5px] text-stone-500 tabular-nums">คงเหลือ {onHand}</div>
+                    <div className="mt-1 text-[11.5px] text-stone-500 tabular-nums">คงเหลือ {sku.available}</div>
                   </li>
                 )
               })
@@ -341,9 +335,15 @@ export default function DashboardPage({ name }: { name: string }) {
                 <DataTableCell>
                   <StatusBadge value={row.payment_method} kind="payment_method" />
                 </DataTableCell>
-                <DataTableCell mono>{row.grand_total}</DataTableCell>
+                <DataTableCell mono className="text-right">
+                  {formatMoney(row.grand_total)}
+                </DataTableCell>
                 <DataTableCell>
-                  <StatusBadge value={row.fulfillment_status} kind="fulfillment" />
+                  <OrderDisplayBadge
+                    order_status={row.order_status}
+                    fulfillment_status={row.fulfillment_status}
+                    hold_reason={row.hold_reason}
+                  />
                 </DataTableCell>
               </DataTableRow>
             ))}

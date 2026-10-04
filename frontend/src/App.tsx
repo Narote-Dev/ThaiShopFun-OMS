@@ -121,7 +121,13 @@ function Shell() {
     )
   } else if (auth.me) {
     body = (
-      <AppLayout me={auth.me} route={route} readOnlyNotice={auth.readOnlyNotice} onLogout={auth.signOut}>
+      <AppLayout
+        me={auth.me}
+        route={route}
+        userDisplayName={auth.userDisplayName}
+        readOnlyNotice={auth.readOnlyNotice}
+        onLogout={auth.signOut}
+      >
         {page(route, auth.me)}
       </AppLayout>
     )

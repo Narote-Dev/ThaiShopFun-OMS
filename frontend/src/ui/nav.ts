@@ -119,16 +119,24 @@ export function buildNavSections(me: Me): NavSection[] {
   return sections.filter((section) => section.items.length > 0)
 }
 
-export function breadcrumbForRoute(route: string): string {
-  if (route === '#/' || route === '') return 'แดชบอร์ด'
-  if (route.startsWith('#/orders/holds')) return 'คิวออเดอร์ค้าง'
-  if (route.startsWith('#/orders')) return 'ออเดอร์'
-  if (route.startsWith('#/channel/listings')) return 'Listings'
-  if (route.startsWith('#/catalog/products')) return 'สินค้า'
-  if (route.startsWith('#/catalog/skus')) return 'SKUs'
-  if (route.startsWith('#/catalog/import')) return 'นำเข้าข้อมูล'
-  if (route.startsWith('#/warehouses')) return 'คลัง'
-  if (route.startsWith('#/stock/documents')) return 'เอกสารสต็อก'
-  if (route.startsWith('#/admin/outbox')) return 'Dead outbox'
-  return 'OMS'
+export function breadcrumbParts(route: string): string[] {
+  const base = route.split('?')[0]
+  if (base === '#/' || base === '') return ['แดชบอร์ด']
+  if (base.startsWith('#/orders/holds')) return ['คิวออเดอร์ค้าง']
+  if (/^#\/orders\/[0-9a-f-]{36}$/.test(base)) return ['ออเดอร์', 'รายละเอียด']
+  if (base.startsWith('#/orders')) return ['ออเดอร์']
+  if (base.startsWith('#/channel/listings')) return ['Listings']
+  if (base.startsWith('#/catalog/products')) return ['สินค้า']
+  if (base.startsWith('#/catalog/skus')) return ['SKUs']
+  if (base.startsWith('#/catalog/import')) return ['นำเข้าข้อมูล']
+  if (base.startsWith('#/warehouses')) return ['คลัง']
+  if (base.startsWith('#/stock/documents')) return ['เอกสารสต็อก']
+  if (base.startsWith('#/admin/outbox')) return ['Dead outbox']
+  return ['OMS']
 }
+
+export function breadcrumbForRoute(route: string): string {
+  const parts = breadcrumbParts(route)
+  return parts[parts.length - 1] ?? 'OMS'
+}
+

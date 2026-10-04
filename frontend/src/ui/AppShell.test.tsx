@@ -30,7 +30,7 @@ afterEach(() => cleanup())
 describe('AppShell navigation', () => {
   it('shows main catalog links for any signed-in role', () => {
     render(
-      <AppShell me={staff} route="#/catalog/skus" onLogout={() => undefined}>
+      <AppShell me={staff} route="#/catalog/skus" userDisplayName={null} onLogout={() => undefined}>
         <p>page</p>
       </AppShell>,
     )
@@ -48,7 +48,7 @@ describe('AppShell navigation', () => {
 
     cleanup()
     render(
-      <AppShell me={owner} route="#/" onLogout={() => undefined}>
+      <AppShell me={owner} route="#/" userDisplayName={null} onLogout={() => undefined}>
         <p>page</p>
       </AppShell>,
     )

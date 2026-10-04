@@ -1,20 +1,24 @@
 import {
   Bell,
   Boxes,
+  ChevronRight,
   CircleHelp,
   ChevronsUpDown,
   LogOut,
   Search,
 } from 'lucide-react'
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { listingsApi } from '../channel/listings/api'
 import type { Me } from '../auth/AuthContext'
 import { ordersApi } from '../orders/api'
+import { ComingSoonButton } from './ComingSoon'
 import { cn } from './cn'
-import { breadcrumbForRoute, buildNavSections } from './nav'
+import { breadcrumbParts, buildNavSections } from './nav'
 
 type Props = {
   me: Me
   route: string
+  userDisplayName: string | null
   onLogout: () => void
   children: ReactNode
 }
@@ -26,72 +30,75 @@ function initials(name: string) {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
 }
 
-function displayName(me: Me) {
-  const fromEmail = me.tenant.name
-  return fromEmail
+const emptyFilters = {
+  fulfillment_status: '',
+  order_status: '',
+  payment_status: '',
+  hold_reason: '',
+  channel: '',
+  q: '',
+  ordered_from: '',
+  ordered_to: '',
 }
 
-export default function AppShell({ me, route, onLogout, children }: Props) {
+export default function AppShell({ me, route, userDisplayName, onLogout, children }: Props) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [counts, setCounts] = useState<{ orders: number | null; holds: number | null }>({
     orders: null,
     holds: null,
   })
+  const [tsfConnected, setTsfConnected] = useState<boolean | null>(null)
 
   const sections = useMemo(() => buildNavSections(me), [me])
-  const crumb = breadcrumbForRoute(route.split('?')[0])
-  const tierBadge = `${me.tenant.membership_tier} · ${me.entitlement.status}`
+  const crumbs = breadcrumbParts(route.split('?')[0])
+  const footerName = userDisplayName ?? me.tenant.name
+  const tierBadge =
+    me.entitlement.status === 'ACTIVE'
+      ? `${me.role} · ${me.tenant.membership_tier}`
+      : `${me.tenant.membership_tier} · ${me.entitlement.status}`
+
+  useEffect(() => {
+    setSidebarOpen(false)
+  }, [route])
 
   useEffect(() => {
     let active = true
     void Promise.all([
-      ordersApi.list(
-        {
-          fulfillment_status: '',
-          order_status: '',
-          payment_status: '',
-          hold_reason: '',
-          channel: '',
-          q: '',
-          ordered_from: '',
-          ordered_to: '',
-        },
-        1,
-        null,
-      ),
-      ordersApi.list(
-        {
-          fulfillment_status: '',
-          order_status: '',
-          payment_status: '',
-          hold_reason: 'ANY',
-          channel: '',
-          q: '',
-          ordered_from: '',
-          ordered_to: '',
-        },
-        1,
-        null,
-      ),
+      ordersApi.list(emptyFilters, 1, null),
+      ordersApi.list({ ...emptyFilters, hold_reason: 'ANY' }, 1, null),
+      listingsApi.listAccounts().catch(() => ({ items: [] })),
     ])
-      .then(([all, held]) => {
+      .then(([all, held, accounts]) => {
         if (!active) return
         setCounts({ orders: all.total, holds: held.total })
+        const tsf = accounts.items.filter((a) => a.channel === 'TSF')
+        setTsfConnected(tsf.length > 0 && tsf.some((a) => a.status === 'CONNECTED'))
       })
       .catch(() => {
-        if (active) setCounts({ orders: null, holds: null })
+        if (active) {
+          setCounts({ orders: null, holds: null })
+          setTsfConnected(null)
+        }
       })
     return () => {
       active = false
     }
-  }, [])
+  }, [route])
 
   function isActive(href: string) {
     const base = route.split('?')[0]
     if (href === '#/') return base === '#/'
-    if (href === '#/orders') return base === '#/orders' || (base.startsWith('#/orders/') && !base.startsWith('#/orders/holds'))
+    if (href === '#/orders')
+      return base === '#/orders' || (base.startsWith('#/orders/') && !base.startsWith('#/orders/holds'))
     return base === href || base.startsWith(`${href}/`)
   }
+
+  const tsfLabel =
+    tsfConnected === null
+      ? 'TSF…'
+      : tsfConnected
+        ? 'TSF เชื่อมต่อแล้ว'
+        : 'TSF ยังไม่เชื่อมต่อ'
 
   return (
     <div className="flex min-h-screen bg-canvas font-sans text-stone-900 antialiased">
@@ -132,8 +139,13 @@ export default function AppShell({ me, route, onLogout, children }: Props) {
             <div className="min-w-0 flex-1 leading-tight">
               <div className="truncate text-[13px] font-medium">{me.tenant.name}</div>
               <div className="flex items-center gap-1 text-[11px] text-stone-500">
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                TSF เชื่อมต่อแล้ว
+                <span
+                  className={cn(
+                    'h-1.5 w-1.5 rounded-full',
+                    tsfConnected ? 'bg-emerald-500' : tsfConnected === false ? 'bg-red-500' : 'bg-stone-300',
+                  )}
+                />
+                {tsfLabel}
               </div>
             </div>
             <ChevronsUpDown className="h-4 w-4 text-stone-400" />
@@ -188,10 +200,10 @@ export default function AppShell({ me, route, onLogout, children }: Props) {
         <div className="border-t border-stone-200 p-3">
           <div className="flex items-center gap-2.5 rounded-lg px-1.5 py-1.5">
             <div className="grid h-8 w-8 place-items-center rounded-full bg-stone-800 text-[12px] font-semibold text-white">
-              {initials(displayName(me))}
+              {initials(footerName)}
             </div>
             <div className="min-w-0 flex-1 leading-tight">
-              <div className="truncate text-[13px] font-medium">Signed in</div>
+              <div className="truncate text-[13px] font-medium">{footerName}</div>
               <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[10.5px]">
                 <span className="font-semibold text-stone-700">{me.role}</span>
                 <span className="inline-flex items-center rounded-full border border-brand-200 bg-brand-50 px-1.5 py-px font-semibold tracking-wide text-brand-800">
@@ -220,12 +232,22 @@ export default function AppShell({ me, route, onLogout, children }: Props) {
           >
             Menu
           </button>
-          <div className="min-w-0 truncate text-[13px] font-medium text-stone-900">{crumb}</div>
+          <div className="flex min-w-0 items-center gap-1.5 text-[13px]">
+            <span className="truncate text-stone-500">{me.tenant.name}</span>
+            {crumbs.map((part) => (
+              <span key={part} className="flex min-w-0 items-center gap-1.5">
+                <ChevronRight className="h-3.5 w-3.5 shrink-0 text-stone-300" />
+                <span className="truncate font-medium text-stone-900">{part}</span>
+              </span>
+            ))}
+          </div>
           <div className="ml-auto flex items-center gap-2">
             <div className="relative hidden sm:block">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400" />
               <input
-                className="h-9 w-56 rounded-lg border border-stone-200 bg-stone-50 pl-8 pr-14 text-[13px] placeholder:text-stone-400 focus:border-brand-300 focus:bg-white focus:outline-none focus:ring-4 focus:ring-brand-100 lg:w-80"
+                disabled
+                title="เร็วๆ นี้"
+                className="h-9 w-56 cursor-not-allowed rounded-lg border border-stone-200 bg-stone-50 pl-8 pr-14 text-[13px] opacity-70 placeholder:text-stone-400 lg:w-80"
                 placeholder="ค้นหาออเดอร์, SKU, สินค้า…"
                 aria-label="ค้นหาทั่วระบบ"
               />
@@ -233,21 +255,12 @@ export default function AppShell({ me, route, onLogout, children }: Props) {
                 ⌘K
               </kbd>
             </div>
-            <button
-              type="button"
-              className="relative grid h-9 w-9 place-items-center rounded-lg border border-stone-200 bg-white text-stone-600 hover:bg-stone-50"
-              aria-label="Notifications"
-            >
+            <ComingSoonButton variant="secondary" className="h-9 w-9 p-0" aria-label="Notifications">
               <Bell className="h-4 w-4" />
-              <span className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-brand-500" />
-            </button>
-            <button
-              type="button"
-              className="grid h-9 w-9 place-items-center rounded-lg border border-stone-200 bg-white text-stone-600 hover:bg-stone-50"
-              aria-label="Help"
-            >
+            </ComingSoonButton>
+            <ComingSoonButton variant="secondary" className="h-9 w-9 p-0" aria-label="Help">
               <CircleHelp className="h-4 w-4" />
-            </button>
+            </ComingSoonButton>
           </div>
         </header>
         {children}

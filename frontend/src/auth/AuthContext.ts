@@ -26,6 +26,7 @@ export type AuthContextValue = {
   readOnlyNotice: string | null
   signInError: string | null
   profileError: string | null
+  userDisplayName: string | null
   signIn: () => void
   signOut: () => void
   retrySetup: () => void

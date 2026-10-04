@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { apiRequest, ApiError, configureApi } from '../api/client'
 import { safeReturn } from '../routing/hash'
 import { AuthContext, type Gate, type Me } from './AuthContext'
-import { bootSession, logout, resumeLogin, setSessionListener, startLogin } from './session'
+import { bootSession, getSessionDisplayName, logout, resumeLogin, setSessionListener, startLogin } from './session'
 
 const READ_ONLY = 'This shop is read-only until membership is renewed.'
 const SETUP_RETRYING = 'Your shop is being set up. Retrying…'
@@ -16,6 +16,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
   const [readOnlyNotice, setReadOnlyNotice] = useState<string | null>(null)
   const [signInError, setSignInError] = useState<string | null>(null)
   const [profileError, setProfileError] = useState<string | null>(null)
+  const [userDisplayName, setUserDisplayName] = useState<string | null>(null)
 
   useEffect(() => {
     setSessionListener({
@@ -74,6 +75,8 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
       const profile = await apiRequest<Me>('/api/v1/me')
       if (isCancelled()) return
       setMe(profile)
+      const name = await getSessionDisplayName()
+      setUserDisplayName(name)
       setGate('ready')
       setSetupFailed(false)
       setSetupMessage(null)
@@ -114,6 +117,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
       setGate('loading')
       setReadOnlyNotice(null)
       setProfileError(null)
+      setUserDisplayName(null)
       setSetupMessage(null)
       setSetupFailed(false)
       setSignInError(null)
@@ -142,6 +146,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
         readOnlyNotice,
         signInError,
         profileError,
+        userDisplayName,
         signIn,
         signOut,
         retrySetup,
