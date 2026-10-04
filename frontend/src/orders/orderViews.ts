@@ -62,7 +62,7 @@ export function filtersForTab(tab: OrdersTabId, dates: DateScope): OrderFilters 
     case 'all':
       return base
     case 'ready':
-      return { ...base, fulfillment_status: 'READY_TO_PICK' }
+      return { ...base, fulfillment_status: 'READY_TO_PICK', order_status: 'ACTIVE' }
     case 'hold':
       return { ...base, hold_reason: 'ANY' }
     case 'cancelled':
@@ -80,10 +80,11 @@ export function tabFromFilters(filters: OrderFilters): OrdersTabId {
   if (filters.hold_reason === 'ANY' && !filters.fulfillment_status && filters.order_status !== 'CANCELLED') {
     return 'hold'
   }
+  const noHoldFilter = !filters.hold_reason || filters.hold_reason === 'NONE'
   if (
     filters.fulfillment_status === 'READY_TO_PICK' &&
-    !filters.order_status &&
-    filters.hold_reason !== 'ANY'
+    (filters.order_status === 'ACTIVE' || filters.order_status === '') &&
+    noHoldFilter
   ) {
     return 'ready'
   }

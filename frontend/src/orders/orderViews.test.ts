@@ -7,6 +7,7 @@ describe('orderViews tabs', () => {
   it('filtersForTab preserves date scope', () => {
     expect(filtersForTab('ready', dates).ordered_from).toBe('2026-03-01')
     expect(filtersForTab('ready', dates).fulfillment_status).toBe('READY_TO_PICK')
+    expect(filtersForTab('ready', dates).order_status).toBe('ACTIVE')
     expect(filtersForTab('hold', dates).hold_reason).toBe('ANY')
     expect(filtersForTab('cancelled', dates).order_status).toBe('CANCELLED')
   })
