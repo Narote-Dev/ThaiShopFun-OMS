@@ -262,7 +262,11 @@ export default function DashboardPage({ name }: { name: string }) {
           <CardHeader
             title="สต็อกใกล้หมด"
             action={
-              <a href="#/catalog/skus" className="text-[12.5px] font-medium text-stone-600 hover:text-brand-700">
+              <a
+                href="#/catalog/skus"
+                aria-label="Open SKU list"
+                className="text-[12.5px] font-medium text-stone-600 hover:text-brand-700"
+              >
                 SKUs
               </a>
             }

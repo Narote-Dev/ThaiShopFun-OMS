@@ -191,7 +191,7 @@ export default function AppShell({ me, route, onLogout, children }: Props) {
               {initials(displayName(me))}
             </div>
             <div className="min-w-0 flex-1 leading-tight">
-              <div className="truncate text-[13px] font-medium">{me.role} account</div>
+              <div className="truncate text-[13px] font-medium">Signed in</div>
               <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[10.5px]">
                 <span className="font-semibold text-stone-700">{me.role}</span>
                 <span className="inline-flex items-center rounded-full border border-brand-200 bg-brand-50 px-1.5 py-px font-semibold tracking-wide text-brand-800">
@@ -227,7 +227,7 @@ export default function AppShell({ me, route, onLogout, children }: Props) {
               <input
                 className="h-9 w-56 rounded-lg border border-stone-200 bg-stone-50 pl-8 pr-14 text-[13px] placeholder:text-stone-400 focus:border-brand-300 focus:bg-white focus:outline-none focus:ring-4 focus:ring-brand-100 lg:w-80"
                 placeholder="ค้นหาออเดอร์, SKU, สินค้า…"
-                aria-label="Global search"
+                aria-label="ค้นหาทั่วระบบ"
               />
               <kbd className="absolute right-2 top-1/2 hidden -translate-y-1/2 rounded border border-stone-200 bg-white px-1.5 font-mono text-[10.5px] text-stone-500 lg:inline">
                 ⌘K
