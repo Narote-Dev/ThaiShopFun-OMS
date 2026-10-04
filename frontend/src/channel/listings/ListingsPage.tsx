@@ -410,7 +410,12 @@ export default function ListingsPage({ me }: { me: Me }) {
         <div className="space-y-4">
           <div>
             <Label htmlFor="picker-sku-search">SKU search</Label>
-            <Input id="picker-sku-search" value={skuQuery} onChange={(e) => setSkuQuery(e.target.value)} />
+            <Input
+              id="picker-sku-search"
+              aria-label="SKU search"
+              value={skuQuery}
+              onChange={(e) => setSkuQuery(e.target.value)}
+            />
           </div>
           <ul className="space-y-1">
             {visibleSkuHits.map((sku) => (

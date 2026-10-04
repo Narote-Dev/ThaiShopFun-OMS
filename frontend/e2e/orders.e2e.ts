@@ -132,7 +132,7 @@ test('owner maps unmapped listing via listings UI and order becomes ready to pic
   await page.getByRole('button', { name: 'Save mapping' }).click()
   await expect(page.getByText(/released 1/)).toBeVisible({ timeout: 90_000 })
 
-  await page.getByRole('link', { name: '← Orders' }).click()
+  await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Orders' }).click()
   await page.getByLabel('Search').fill('DEMO-UNMAPPED')
   await page.getByRole('button', { name: 'Apply' }).click()
   await page.getByRole('link', { name: 'DEMO-UNMAPPED' }).click()

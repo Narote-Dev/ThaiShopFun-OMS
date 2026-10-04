@@ -56,6 +56,7 @@ export default function AppShell({ me, route, userDisplayName, onLogout, childre
     me.entitlement.status === 'ACTIVE'
       ? `${me.role} · ${me.tenant.membership_tier}`
       : `${me.tenant.membership_tier} · ${me.entitlement.status}`
+  const showRoleSeparate = me.entitlement.status !== 'ACTIVE'
 
   useEffect(() => {
     // Change: close mobile drawer after hash navigation (Codex P2).
@@ -209,7 +210,9 @@ export default function AppShell({ me, route, userDisplayName, onLogout, childre
             <div className="min-w-0 flex-1 leading-tight">
               <div className="truncate text-[13px] font-medium">{footerName}</div>
               <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[10.5px]">
-                <span className="font-semibold text-stone-700">{me.role}</span>
+                {showRoleSeparate ? (
+                  <span className="font-semibold text-stone-700">{me.role}</span>
+                ) : null}
                 <span className="inline-flex items-center rounded-full border border-brand-200 bg-brand-50 px-1.5 py-px font-semibold tracking-wide text-brand-800">
                   {tierBadge}
                 </span>
