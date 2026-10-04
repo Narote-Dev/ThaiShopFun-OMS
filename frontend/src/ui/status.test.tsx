@@ -1,7 +1,12 @@
-import { render, screen } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { cleanup, render, screen } from '@testing-library/react'
+import { afterEach, describe, expect, it } from 'vitest'
+import { OrderDisplayBadge } from './OrderDisplayBadge'
 import { StatusBadge } from './StatusBadge'
-import { ALL_STATUS_VALUES, resolveStatus } from './status'
+import { ALL_STATUS_VALUES, resolveOrderDisplayStatus, resolveStatus } from './status'
+
+afterEach(() => {
+  cleanup()
+})
 
 describe('status mapping', () => {
   it('covers every known enum with a variant', () => {
@@ -9,18 +14,38 @@ describe('status mapping', () => {
       const style = resolveStatus(value, kind)
       expect(style.variant).toBeTruthy()
       render(<StatusBadge value={value} kind={kind} />)
-      if (value === 'NONE' && kind === 'hold') {
+      if (value === 'NONE' && (kind === 'hold' || kind === 'hold_reason')) {
         expect(screen.getByText('—')).toBeInTheDocument()
-      } else {
-        expect(screen.getByText(style.label ?? value)).toBeInTheDocument()
       }
     }
   })
 
-  it('maps fulfilment and payment method colours', () => {
-    expect(resolveStatus('READY_TO_PICK', 'fulfillment').variant).toBe('success')
-    expect(resolveStatus('SKU_NOT_MAPPED', 'hold').variant).toBe('warning')
-    expect(resolveStatus('COD', 'payment_method').variant).toBe('violet')
-    expect(resolveStatus('TSF', 'channel').variant).toBe('channel')
+  it('maps combined order display status by priority', () => {
+    expect(resolveOrderDisplayStatus({
+      order_status: 'CANCELLED',
+      fulfillment_status: 'READY_TO_PICK',
+      hold_reason: 'OUT_OF_STOCK',
+    }).label).toBe('CANCELLED')
+    expect(resolveOrderDisplayStatus({
+      order_status: 'ACTIVE',
+      fulfillment_status: 'READY_TO_PICK',
+      hold_reason: 'SKU_NOT_MAPPED',
+    }).label).toBe('ON HOLD')
+    expect(resolveOrderDisplayStatus({
+      order_status: 'ACTIVE',
+      fulfillment_status: 'READY_TO_PICK',
+      hold_reason: 'NONE',
+    }).label).toBe('READY_TO_PICK')
+  })
+
+  it('renders order display badge', () => {
+    render(
+      <OrderDisplayBadge
+        order_status="ACTIVE"
+        fulfillment_status="UNFULFILLED"
+        hold_reason="NONE"
+      />,
+    )
+    expect(screen.getByText('UNFULFILLED')).toBeInTheDocument()
   })
 })

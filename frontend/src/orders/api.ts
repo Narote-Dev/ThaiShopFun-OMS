@@ -51,6 +51,9 @@ export type OrderDetail = {
   hold_note: string | null
   payment_method: string
   currency: string
+  subtotal?: string
+  shipping_fee?: string
+  discount?: string
   grand_total: string
   ordered_at: string
   paid_at: string | null

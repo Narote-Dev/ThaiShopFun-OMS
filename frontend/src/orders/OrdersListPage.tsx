@@ -1,6 +1,9 @@
+import { Download, Printer, RefreshCw } from 'lucide-react'
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Button } from '../ui/Button'
 import { Card } from '../ui/Card'
+import { Checkbox } from '../ui/Checkbox'
+import { ComingSoonButton } from '../ui/ComingSoon'
 import {
   DataTable,
   DataTableCell,
@@ -9,13 +12,17 @@ import {
   DataTableTh,
   TablePager,
 } from '../ui/DataTable'
+import { AlertBanner } from '../ui/Alert'
+import { HoldReasonBadge } from '../ui/HoldReasonBadge'
 import { Input } from '../ui/Input'
 import { Label } from '../ui/Label'
+import { OrderDisplayBadge } from '../ui/OrderDisplayBadge'
 import { PageContent } from '../ui/PageContent'
 import { PageHeader } from '../ui/PageHeader'
 import { Select } from '../ui/Select'
 import { StatusBadge } from '../ui/StatusBadge'
-import { cn } from '../ui/cn'
+import { TabBar } from '../ui/Tabs'
+import { bangkokTodayIso, formatBangkokDateTime, formatMoney } from '../ui/format'
 import {
   ORDER_PAGE_SIZE,
   ordersApi,
@@ -24,12 +31,21 @@ import {
   type OrderListItem,
   type OrdersPage,
 } from './api'
+import { fetchOrderTotal } from './listOrders'
+import {
+  ORDER_TAB_LABELS,
+  emptyOrderFilters,
+  filtersForTab,
+  tabFromFilters,
+  type OrdersTabId,
+} from './orderViews'
 
-const TABS = ['', 'READY_TO_PICK', 'PICKING', 'PACKED', 'SHIPPED', 'DELIVERED', 'UNFULFILLED'] as const
+const TAB_IDS: OrdersTabId[] = ['all', 'ready', 'hold', 'unshipped', 'shipped', 'cancelled']
 
 function filtersFromHash(): OrderFilters {
   const hash = window.location.hash
   const query = hash.includes('?') ? hash.slice(hash.indexOf('?') + 1) : ''
+  if (!query) return emptyOrderFilters()
   const params = new URLSearchParams(query)
   return {
     fulfillment_status: params.get('fulfillment_status') ?? '',
@@ -71,8 +87,12 @@ export default function OrdersListPage() {
   const [backStack, setBackStack] = useState<string[]>([])
   const [page, setPage] = useState<OrdersPage<OrderListItem> | null>(null)
   const [error, setError] = useState('')
+  const [tabCounts, setTabCounts] = useState<Partial<Record<OrdersTabId, number>>>({})
+  const [holdTotal, setHoldTotal] = useState(0)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
 
-  const tab = applied.fulfillment_status
+  const activeTab = tabFromFilters(applied)
+  const today = bangkokTodayIso()
 
   useEffect(() => {
     const syncFromHash = () => {
@@ -91,6 +111,7 @@ export default function OrdersListPage() {
           prev.ordered_to !== next.ordered_to
         if (filtersChanged) {
           setBackStack([])
+          setSelected(new Set())
         }
         return next
       })
@@ -117,12 +138,56 @@ export default function OrdersListPage() {
     }
   }, [applied, cursor])
 
-  function selectTab(value: string) {
-    const next = { ...applied, fulfillment_status: value }
+  useEffect(() => {
+    let active = true
+    void Promise.all([
+      ...TAB_IDS.map(async (id) => [id, await fetchOrderTotal(filtersForTab(id, today))] as const),
+      fetchOrderTotal({ ...emptyOrderFilters(today), hold_reason: 'ANY' }),
+    ])
+      .then((results) => {
+        if (!active) return
+        const counts: Partial<Record<OrdersTabId, number>> = {}
+        for (const [id, total] of results.slice(0, TAB_IDS.length) as [OrdersTabId, number][]) {
+          counts[id] = total
+        }
+        setTabCounts(counts)
+        setHoldTotal(results[results.length - 1] as number)
+      })
+      .catch(() => {
+        if (active) {
+          setTabCounts({})
+          setHoldTotal(0)
+        }
+      })
+    return () => {
+      active = false
+    }
+  }, [today])
+
+  const tabItems = useMemo(
+    () =>
+      TAB_IDS.map((id) => ({
+        id,
+        label: ORDER_TAB_LABELS[id],
+        count: tabCounts[id] ?? null,
+        countClassName: id === 'hold' && (tabCounts.hold ?? 0) > 0 ? 'bg-red-100 text-red-700' : undefined,
+      })),
+    [tabCounts],
+  )
+
+  function selectTab(tabId: OrdersTabId) {
+    const tabFilters = filtersForTab(tabId, today)
+    const next: OrderFilters = {
+      ...tabFilters,
+      q: filters.q,
+      channel: filters.channel,
+      payment_status: filters.payment_status,
+    }
     setFilters(next)
     setApplied(next)
     setCursor(null)
     setBackStack([])
+    setSelected(new Set())
     writeHash(next, null)
   }
 
@@ -131,48 +196,76 @@ export default function OrdersListPage() {
     setApplied(filters)
     setCursor(null)
     setBackStack([])
+    setSelected(new Set())
     writeHash(filters, null)
   }
 
+  const rows = page?.items ?? []
+  const allSelected = rows.length > 0 && rows.every((row) => selected.has(row.id))
+
+  function toggleAll(checked: boolean) {
+    if (!checked) {
+      setSelected(new Set())
+      return
+    }
+    setSelected(new Set(rows.map((row) => row.id)))
+  }
+
   const total = page?.total ?? 0
-  const tabLabel = useMemo(
-    () => (value: string) => (value === '' ? 'All' : value.replaceAll('_', ' ')),
-    [],
-  )
 
   return (
     <PageContent wide>
       <PageHeader
-        title="Orders"
+        title={
+          <>
+            <span aria-hidden="true">ออเดอร์</span>
+            <span className="sr-only">Orders</span>
+          </>
+        }
         subtitle="จัดการออเดอร์จากทุกช่องทาง"
         actions={
-          <a href="#/orders/holds" className="text-[13px] font-medium text-brand-700 hover:underline">
-            Hold queue
-          </a>
+          <>
+            <ComingSoonButton>
+              <Download className="h-4 w-4" />
+              Export
+            </ComingSoonButton>
+            <ComingSoonButton>
+              <RefreshCw className="h-4 w-4" />
+              Sync
+            </ComingSoonButton>
+            <ComingSoonButton>
+              <Printer className="h-4 w-4" />
+              Print
+            </ComingSoonButton>
+          </>
         }
       />
 
-      <nav aria-label="Fulfillment tabs" className="mt-6 flex flex-wrap gap-1 border-b border-stone-200 pb-1">
-        {TABS.map((value) => (
-          <button
-            key={value || 'all'}
-            type="button"
-            className={cn(
-              'rounded-t-lg px-3 py-2 text-[13px] font-medium',
-              tab === value
-                ? 'border border-b-white border-stone-200 bg-white text-brand-800'
-                : 'text-stone-600 hover:bg-stone-100',
-            )}
-            onClick={() => selectTab(value)}
-          >
-            {tabLabel(value)}
-          </button>
-        ))}
-      </nav>
+      {holdTotal > 0 ? (
+        <AlertBanner
+          variant="warning"
+          className="mt-5"
+          title="มีออเดอร์ค้างที่ต้องแก้ไข"
+          actions={
+            <Button type="button" variant="secondary" asChild>
+              <a href="#/orders/holds">ดูคิว Hold →</a>
+            </Button>
+          }
+        >
+          {holdTotal} ออเดอร์รอการดำเนินการ
+        </AlertBanner>
+      ) : null}
 
-      <Card className="mt-4">
+      <Card className="mt-5 overflow-hidden">
+        <TabBar
+          aria-label="Fulfillment tabs"
+          items={tabItems}
+          activeId={activeTab}
+          onSelect={(id) => selectTab(id as OrdersTabId)}
+        />
+
         <form
-          className="grid gap-4 p-4 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5"
+          className="grid gap-4 border-b border-stone-100 p-4 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5"
           onSubmit={apply}
           aria-label="Filter orders"
         >
@@ -264,51 +357,97 @@ export default function OrdersListPage() {
             />
           </div>
           <div className="flex items-end">
-            <Button type="submit" variant="primary">Apply</Button>
+            <Button type="submit" variant="primary">
+              Apply
+            </Button>
           </div>
         </form>
-      </Card>
 
-      {error ? <p role="alert" className="mt-4 text-[13px] text-red-700">{error}</p> : null}
-
-      <div className="mt-4">
-        <DataTable aria-label="Orders">
+        <DataTable aria-label="Orders" className="rounded-none border-0 shadow-none">
           <DataTableHead>
             <tr>
-              <DataTableTh>Order</DataTableTh>
-              <DataTableTh>Fulfillment</DataTableTh>
-              <DataTableTh>Payment</DataTableTh>
+              <DataTableTh className="w-10">
+                <Checkbox
+                  aria-label="Select all orders"
+                  checked={allSelected}
+                  onCheckedChange={toggleAll}
+                />
+              </DataTableTh>
+              <DataTableTh>ออเดอร์</DataTableTh>
+              <DataTableTh>ช่องทาง</DataTableTh>
+              <DataTableTh>ลูกค้า</DataTableTh>
+              <DataTableTh>สินค้า</DataTableTh>
+              <DataTableTh className="text-right">ยอดรวม</DataTableTh>
+              <DataTableTh>ชำระเงิน</DataTableTh>
+              <DataTableTh>สถานะ</DataTableTh>
               <DataTableTh>Hold</DataTableTh>
-              <DataTableTh>Phone</DataTableTh>
-              <DataTableTh>Total</DataTableTh>
             </tr>
           </DataTableHead>
           <tbody>
-            {(page?.items ?? []).map((row) => (
+            {rows.map((row) => (
               <DataTableRow key={row.id}>
-                <DataTableCell mono>
-                  <a href={`#/orders/${row.id}`} className="font-medium text-brand-700 hover:underline">
+                <DataTableCell>
+                  <Checkbox
+                    aria-label={`Select order ${row.external_order_id}`}
+                    checked={selected.has(row.id)}
+                    onCheckedChange={(checked) => {
+                      const next = new Set(selected)
+                      if (checked) next.add(row.id)
+                      else next.delete(row.id)
+                      setSelected(next)
+                    }}
+                  />
+                </DataTableCell>
+                <DataTableCell>
+                  <a
+                    href={`#/orders/${row.id}`}
+                    className="font-mono text-[12.5px] font-medium text-brand-700 hover:underline"
+                  >
                     {row.external_order_id}
                   </a>
+                  <div className="mt-0.5 text-[11.5px] text-stone-500 tabular-nums">
+                    {formatBangkokDateTime(row.ordered_at)}
+                  </div>
                 </DataTableCell>
                 <DataTableCell>
-                  <StatusBadge value={row.fulfillment_status} kind="fulfillment" />
-                </DataTableCell>
-                <DataTableCell>
-                  <StatusBadge value={row.payment_status} kind="payment" />
-                </DataTableCell>
-                <DataTableCell>
-                  <StatusBadge value={row.hold_reason} kind="hold" />
+                  <StatusBadge value={row.channel} kind="channel" />
                 </DataTableCell>
                 <DataTableCell>{row.phone_masked ?? '—'}</DataTableCell>
-                <DataTableCell mono>{row.grand_total}</DataTableCell>
+                <DataTableCell className="text-stone-400">—</DataTableCell>
+                <DataTableCell mono className="text-right">
+                  {formatMoney(row.grand_total)}
+                </DataTableCell>
+                <DataTableCell>
+                  <div className="flex flex-wrap gap-1">
+                    <StatusBadge value={row.payment_method} kind="payment_method" />
+                    <StatusBadge value={row.payment_status} kind="payment" />
+                  </div>
+                </DataTableCell>
+                <DataTableCell>
+                  <OrderDisplayBadge
+                    order_status={row.order_status}
+                    fulfillment_status={row.fulfillment_status}
+                    hold_reason={row.hold_reason}
+                  />
+                </DataTableCell>
+                <DataTableCell>
+                  <HoldReasonBadge reason={row.hold_reason} />
+                </DataTableCell>
               </DataTableRow>
             ))}
           </tbody>
         </DataTable>
-      </div>
+      </Card>
 
-      <TablePager summary={total === 0 ? 'No orders' : `${page?.items.length ?? 0} on this page · ${total} matching`}>
+      {error ? (
+        <p role="alert" className="mt-4 text-[13px] text-red-700">
+          {error}
+        </p>
+      ) : null}
+
+      <TablePager
+        summary={total === 0 ? 'No orders' : `${page?.items.length ?? 0} on this page · ${total} matching`}
+      >
         <Button
           type="button"
           variant="secondary"

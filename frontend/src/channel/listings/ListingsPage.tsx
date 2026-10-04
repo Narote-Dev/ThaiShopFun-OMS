@@ -4,6 +4,7 @@ import { catalogApi, type Sku } from '../../catalog/api'
 import { Badge } from '../../ui/Badge'
 import { Button } from '../../ui/Button'
 import { Card } from '../../ui/Card'
+import { Dialog } from '../../ui/Dialog'
 import {
   DataTable,
   DataTableCell,
@@ -254,12 +255,7 @@ export default function ListingsPage({ me }: { me: Me }) {
 
   return (
     <PageContent wide>
-      <p className="text-[13px]">
-        <a href="#/orders" className="font-medium text-brand-700 hover:underline">
-          ← Orders
-        </a>
-      </p>
-      <PageHeader className="mt-2" title="Channel listings" />
+      <PageHeader title="Channel listings" />
       <Card className="mt-4">
         <div className="grid gap-4 p-4 sm:grid-cols-2 lg:grid-cols-4">
           <div>
@@ -404,41 +400,42 @@ export default function ListingsPage({ me }: { me: Me }) {
           Next
         </Button>
       </div>
-      {activeListing ? (
-        <Card className="mt-6" aria-label="SKU picker">
-          <div className="border-b border-stone-100 px-5 py-3.5">
-            <h2 className="text-[14.5px] font-semibold text-stone-900">Map {activeListing.external_sku_id}</h2>
+      <Dialog
+        open={activeListing != null}
+        onOpenChange={(open) => {
+          if (!open) closeMapPicker()
+        }}
+        title={activeListing ? `Map ${activeListing.external_sku_id}` : 'Map listing'}
+      >
+        <div className="space-y-4">
+          <div>
+            <Label htmlFor="picker-sku-search">SKU search</Label>
+            <Input id="picker-sku-search" value={skuQuery} onChange={(e) => setSkuQuery(e.target.value)} />
           </div>
-          <div className="space-y-4 p-5">
-            <div>
-              <Label htmlFor="picker-sku-search">SKU search</Label>
-              <Input id="picker-sku-search" value={skuQuery} onChange={(e) => setSkuQuery(e.target.value)} />
-            </div>
-            <ul className="space-y-1">
-              {visibleSkuHits.map((sku) => (
-                <li key={sku.id}>
-                  <button
-                    type="button"
-                    className="text-left text-[13px] font-medium text-brand-700 hover:underline"
-                    onClick={() => setPickerSku(sku)}
-                  >
-                    {sku.sku_code} — {sku.name}
-                  </button>
-                </li>
-              ))}
-            </ul>
-            {pickerSku ? <p className="text-[13px] text-stone-600">Selected: {pickerSku.sku_code}</p> : null}
-            <div className="flex flex-wrap gap-2">
-              <Button type="button" variant="primary" disabled={busy || !pickerSku} onClick={() => void saveMapping()}>
-                Save mapping
-              </Button>
-              <Button type="button" variant="secondary" onClick={() => closeMapPicker()}>
-                Cancel
-              </Button>
-            </div>
+          <ul className="space-y-1">
+            {visibleSkuHits.map((sku) => (
+              <li key={sku.id}>
+                <button
+                  type="button"
+                  className="text-left text-[13px] font-medium text-brand-700 hover:underline"
+                  onClick={() => setPickerSku(sku)}
+                >
+                  {sku.sku_code} — {sku.name}
+                </button>
+              </li>
+            ))}
+          </ul>
+          {pickerSku ? <p className="text-[13px] text-stone-600">Selected: {pickerSku.sku_code}</p> : null}
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" variant="primary" disabled={busy || !pickerSku} onClick={() => void saveMapping()}>
+              Save mapping
+            </Button>
+            <Button type="button" variant="secondary" onClick={() => closeMapPicker()}>
+              Cancel
+            </Button>
           </div>
-        </Card>
-      ) : null}
+        </div>
+      </Dialog>
     </PageContent>
   )
 }
