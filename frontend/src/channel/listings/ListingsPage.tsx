@@ -255,7 +255,14 @@ export default function ListingsPage({ me }: { me: Me }) {
 
   return (
     <PageContent wide>
-      <PageHeader title={<span aria-hidden="true">Listings</span>} titleAriaLabel="Channel listings" />
+      <PageHeader
+        title={
+          <>
+            <span className="sr-only">Channel listings</span>
+            <span aria-hidden="true">Listings</span>
+          </>
+        }
+      />
       <Card className="mt-4">
         <div className="grid gap-4 p-4 sm:grid-cols-2 lg:grid-cols-4">
           <div>
