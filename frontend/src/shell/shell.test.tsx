@@ -60,7 +60,7 @@ describe('paywall and grace', () => {
 
   it('shows the grace banner with the expiry date and keeps write actions off', () => {
     render(
-      <AppLayout me={me} readOnlyNotice={null} onLogout={() => undefined}>
+      <AppLayout me={me} route="#/" readOnlyNotice={null} onLogout={() => undefined}>
         <button type="button" disabled>
           Retry
         </button>
@@ -100,7 +100,7 @@ describe('login', () => {
 describe('catalog navigation and write access', () => {
   it('links the catalog and warehouse pages from the shell', () => {
     render(
-      <AppLayout me={me} readOnlyNotice={null} onLogout={() => undefined}>
+      <AppLayout me={me} route="#/catalog/skus" readOnlyNotice={null} onLogout={() => undefined}>
         <p>page</p>
       </AppLayout>,
     )
