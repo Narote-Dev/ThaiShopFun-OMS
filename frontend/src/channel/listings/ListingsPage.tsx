@@ -1,6 +1,21 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Me } from '../../auth/AuthContext'
 import { catalogApi, type Sku } from '../../catalog/api'
+import { Badge } from '../../ui/Badge'
+import { Button } from '../../ui/Button'
+import { Card } from '../../ui/Card'
+import {
+  DataTable,
+  DataTableCell,
+  DataTableHead,
+  DataTableRow,
+  DataTableTh,
+} from '../../ui/DataTable'
+import { Input } from '../../ui/Input'
+import { Label } from '../../ui/Label'
+import { PageContent } from '../../ui/PageContent'
+import { PageHeader } from '../../ui/PageHeader'
+import { Select } from '../../ui/Select'
 import { listingsAccess } from './access'
 import { listingsApi, listingsMessage, type ChannelListing, type ReevalSummary } from './api'
 
@@ -238,150 +253,192 @@ export default function ListingsPage({ me }: { me: Me }) {
   const visibleSkuHits = skuQuery.trim() ? skuHits : []
 
   return (
-    <main className="wide">
-      <p><a href="#/orders">← Orders</a></p>
-      <h1>Channel listings</h1>
-      <label>
-        Channel account
-        <select
-          aria-label="Channel account"
-          value={channelAccountId}
-          onChange={(e) => setChannelAccountId(e.target.value)}
-        >
-          <option value="">Select account…</option>
-          {accounts.map((row) => (
-            <option key={row.id} value={row.id}>
-              {row.external_shop_id} ({row.id.slice(0, 8)}…)
-            </option>
-          ))}
-        </select>
-      </label>
-      <label>
-        Mapped
-        <select
-          aria-label="Mapped filter"
-          value={mappedFilter}
-          onChange={(e) => setMappedFilter(e.target.value as 'unmapped' | 'mapped' | 'all')}
-        >
-          <option value="unmapped">Unmapped first</option>
-          <option value="mapped">Mapped</option>
-          <option value="all">All</option>
-        </select>
-      </label>
-      <label>
-        Search
-        <input
-          value={searchDraft}
-          onChange={(e) => setSearchDraft(e.target.value)}
-          aria-label="Search listings"
-        />
-      </label>
-      <button type="button" onClick={() => void applyFilters()}>Apply</button>
-      {access.canWrite ? (
-        <button type="button" disabled={busy || !channelAccountId} onClick={() => void syncListings()}>
-          Sync listings
-        </button>
-      ) : (
-        <p role="status">Read-only{access.grace ? ' (GRACE)' : ''}</p>
-      )}
-      {syncResult ? <p role="status">{syncResult}</p> : null}
+    <PageContent wide>
+      <p className="text-[13px]">
+        <a href="#/orders" className="font-medium text-brand-700 hover:underline">
+          ← Orders
+        </a>
+      </p>
+      <PageHeader className="mt-2" title="Channel listings" />
+      <Card className="mt-4">
+        <div className="grid gap-4 p-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div>
+            <Label htmlFor="listings-account">Channel account</Label>
+            <Select
+              id="listings-account"
+              aria-label="Channel account"
+              value={channelAccountId}
+              onChange={(e) => setChannelAccountId(e.target.value)}
+            >
+              <option value="">Select account…</option>
+              {accounts.map((row) => (
+                <option key={row.id} value={row.id}>
+                  {row.external_shop_id} ({row.id.slice(0, 8)}…)
+                </option>
+              ))}
+            </Select>
+          </div>
+          <div>
+            <Label htmlFor="listings-mapped">Mapped</Label>
+            <Select
+              id="listings-mapped"
+              aria-label="Mapped filter"
+              value={mappedFilter}
+              onChange={(e) => setMappedFilter(e.target.value as 'unmapped' | 'mapped' | 'all')}
+            >
+              <option value="unmapped">Unmapped first</option>
+              <option value="mapped">Mapped</option>
+              <option value="all">All</option>
+            </Select>
+          </div>
+          <div>
+            <Label htmlFor="listings-search">Search</Label>
+            <Input
+              id="listings-search"
+              value={searchDraft}
+              onChange={(e) => setSearchDraft(e.target.value)}
+              aria-label="Search listings"
+            />
+          </div>
+          <div className="flex flex-wrap items-end gap-2">
+            <Button type="button" variant="primary" onClick={() => void applyFilters()}>
+              Apply
+            </Button>
+            {access.canWrite ? (
+              <Button type="button" variant="secondary" disabled={busy || !channelAccountId} onClick={() => void syncListings()}>
+                Sync listings
+              </Button>
+            ) : (
+              <p role="status" className="text-[13px] text-stone-600">
+                Read-only{access.grace ? ' (GRACE)' : ''}
+              </p>
+            )}
+          </div>
+        </div>
+      </Card>
+      {syncResult ? <p role="status" className="mt-4 text-[13px] text-stone-600">{syncResult}</p> : null}
       {summary ? (
-        <p role="status">
+        <p role="status" className="mt-2 text-[13px] text-stone-600">
           Re-evaluated: released {summary.released}, out of stock {summary.out_of_stock}, still held{' '}
           {summary.still_held}, deferred {summary.deferred}
         </p>
       ) : null}
-      {error ? <p role="alert">{error}</p> : null}
-      <table aria-label="Channel listings">
-        <thead>
-          <tr>
-            <th>External SKU</th>
-            <th>Seller SKU</th>
-            <th>Name</th>
-            <th>Mapped</th>
-            <th>Source</th>
-            <th>Held orders</th>
-            <th />
-          </tr>
-        </thead>
-        <tbody>
-          {items.map((row) => (
-            <tr key={row.id}>
-              <td>
-                {row.external_sku_id}
-                {row.removed_at ? (
-                  <span className="badge removed" title="Removed on channel"> removed</span>
-                ) : null}
-              </td>
-              <td>{row.seller_sku ?? '—'}</td>
-              <td>{row.name ?? '—'}</td>
-              <td>
-                {row.sku_id
-                  ? `${row.sku_code ?? row.sku_id}${row.sku_name ? ` — ${row.sku_name}` : ''}`
-                  : 'Not mapped'}
-              </td>
-              <td>{row.mapping_source ?? '—'}</td>
-              <td>{row.held_orders}</td>
-              <td>
-                {access.canWrite ? (
-                  <>
-                    <button type="button" onClick={() => openMapPicker(row)}>Map</button>
-                    {row.sku_id ? (
-                      <button type="button" onClick={() => void unmap(row)}>Unmap</button>
-                    ) : null}
-                  </>
-                ) : null}
-              </td>
+      {error ? <p role="alert" className="mt-4 text-[13px] text-red-700">{error}</p> : null}
+      <div className="mt-4">
+        <DataTable aria-label="Channel listings">
+          <DataTableHead>
+            <tr>
+              <DataTableTh>External SKU</DataTableTh>
+              <DataTableTh>Seller SKU</DataTableTh>
+              <DataTableTh>Name</DataTableTh>
+              <DataTableTh>Mapped</DataTableTh>
+              <DataTableTh>Source</DataTableTh>
+              <DataTableTh>Held orders</DataTableTh>
+              <DataTableTh />
             </tr>
-          ))}
-        </tbody>
-      </table>
-      <p>{total} listings</p>
-      <button
-        type="button"
-        disabled={offset === 0}
-        onClick={() => {
-          const next = Math.max(0, offset - PAGE_SIZE)
-          setOffset(next)
-          writeHash(channelAccountId, mappedFilter, searchDraft, next)
-        }}
-      >
-        Previous
-      </button>
-      <button
-        type="button"
-        disabled={offset + PAGE_SIZE >= total}
-        onClick={() => {
-          const next = offset + PAGE_SIZE
-          setOffset(next)
-          writeHash(channelAccountId, mappedFilter, searchDraft, next)
-        }}
-      >
-        Next
-      </button>
-      {activeListing ? (
-        <section aria-label="SKU picker">
-          <h2>Map {activeListing.external_sku_id}</h2>
-          <label>
-            SKU search
-            <input value={skuQuery} onChange={(e) => setSkuQuery(e.target.value)} />
-          </label>
-          <ul>
-            {visibleSkuHits.map((sku) => (
-              <li key={sku.id}>
-                <button type="button" onClick={() => setPickerSku(sku)}>
-                  {sku.sku_code} — {sku.name}
-                </button>
-              </li>
+          </DataTableHead>
+          <tbody>
+            {items.map((row) => (
+              <DataTableRow key={row.id}>
+                <DataTableCell>
+                  {row.external_sku_id}
+                  {row.removed_at ? (
+                    <Badge variant="muted" className="ml-1 normal-case" title="Removed on channel">
+                      {' '}
+                      removed
+                    </Badge>
+                  ) : null}
+                </DataTableCell>
+                <DataTableCell>{row.seller_sku ?? '—'}</DataTableCell>
+                <DataTableCell>{row.name ?? '—'}</DataTableCell>
+                <DataTableCell>
+                  {row.sku_id
+                    ? `${row.sku_code ?? row.sku_id}${row.sku_name ? ` — ${row.sku_name}` : ''}`
+                    : 'Not mapped'}
+                </DataTableCell>
+                <DataTableCell>{row.mapping_source ?? '—'}</DataTableCell>
+                <DataTableCell>{row.held_orders}</DataTableCell>
+                <DataTableCell>
+                  {access.canWrite ? (
+                    <div className="flex flex-wrap gap-2">
+                      <Button type="button" size="sm" onClick={() => openMapPicker(row)}>
+                        Map
+                      </Button>
+                      {row.sku_id ? (
+                        <Button type="button" size="sm" variant="ghost" onClick={() => void unmap(row)}>
+                          Unmap
+                        </Button>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </DataTableCell>
+              </DataTableRow>
             ))}
-          </ul>
-          {pickerSku ? <p>Selected: {pickerSku.sku_code}</p> : null}
-          <button type="button" disabled={busy || !pickerSku} onClick={() => void saveMapping()}>
-            Save mapping
-          </button>
-          <button type="button" onClick={() => closeMapPicker()}>Cancel</button>
-        </section>
+          </tbody>
+        </DataTable>
+      </div>
+      <p className="mt-4 text-[13px] text-stone-600">{total} listings</p>
+      <div className="mt-2 flex flex-wrap gap-2">
+        <Button
+          type="button"
+          variant="secondary"
+          disabled={offset === 0}
+          onClick={() => {
+            const next = Math.max(0, offset - PAGE_SIZE)
+            setOffset(next)
+            writeHash(channelAccountId, mappedFilter, searchDraft, next)
+          }}
+        >
+          Previous
+        </Button>
+        <Button
+          type="button"
+          variant="secondary"
+          disabled={offset + PAGE_SIZE >= total}
+          onClick={() => {
+            const next = offset + PAGE_SIZE
+            setOffset(next)
+            writeHash(channelAccountId, mappedFilter, searchDraft, next)
+          }}
+        >
+          Next
+        </Button>
+      </div>
+      {activeListing ? (
+        <Card className="mt-6" aria-label="SKU picker">
+          <div className="border-b border-stone-100 px-5 py-3.5">
+            <h2 className="text-[14.5px] font-semibold text-stone-900">Map {activeListing.external_sku_id}</h2>
+          </div>
+          <div className="space-y-4 p-5">
+            <div>
+              <Label htmlFor="picker-sku-search">SKU search</Label>
+              <Input id="picker-sku-search" value={skuQuery} onChange={(e) => setSkuQuery(e.target.value)} />
+            </div>
+            <ul className="space-y-1">
+              {visibleSkuHits.map((sku) => (
+                <li key={sku.id}>
+                  <button
+                    type="button"
+                    className="text-left text-[13px] font-medium text-brand-700 hover:underline"
+                    onClick={() => setPickerSku(sku)}
+                  >
+                    {sku.sku_code} — {sku.name}
+                  </button>
+                </li>
+              ))}
+            </ul>
+            {pickerSku ? <p className="text-[13px] text-stone-600">Selected: {pickerSku.sku_code}</p> : null}
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" variant="primary" disabled={busy || !pickerSku} onClick={() => void saveMapping()}>
+                Save mapping
+              </Button>
+              <Button type="button" variant="secondary" onClick={() => closeMapPicker()}>
+                Cancel
+              </Button>
+            </div>
+          </div>
+        </Card>
       ) : null}
-    </main>
+    </PageContent>
   )
 }

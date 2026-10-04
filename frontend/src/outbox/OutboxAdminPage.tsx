@@ -1,5 +1,8 @@
 import { useState } from 'react'
 import { apiRequest, ApiError } from '../api/client'
+import { Button } from '../ui/Button'
+import { PageContent } from '../ui/PageContent'
+import { PageHeader } from '../ui/PageHeader'
 
 type DeadEvent = {
   id: string
@@ -47,27 +50,27 @@ export default function OutboxAdminPage({ readOnly = false }: { readOnly?: boole
   }
 
   return (
-    <main>
-      <h1>Dead outbox</h1>
-      <p>OWNER or ADMIN can send a DEAD event again. The session token stays in memory.</p>
-      <button type="button" onClick={() => void load()} disabled={busy}>
+    <PageContent>
+      <PageHeader title="Dead outbox" />
+      <p className="mt-4 text-[13px] text-stone-600">OWNER or ADMIN can send a DEAD event again. The session token stays in memory.</p>
+      <Button type="button" variant="primary" className="mt-4" onClick={() => void load()} disabled={busy}>
         Load
-      </button>
-      {error ? <p role="alert">{error}</p> : null}
-      <ul>
+      </Button>
+      {error ? <p role="alert" className="mt-4 text-[13px] text-red-700">{error}</p> : null}
+      <ul className="mt-4 space-y-3">
         {events.map((event) => (
-          <li key={event.id}>
+          <li key={event.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-stone-200 bg-white px-4 py-3 text-[13px]">
             <span>
               {event.event_type} · {event.aggregate_id} · {event.attempts} attempts
             </span>
-            <button type="button" onClick={() => void retry(event.id)} disabled={busy || readOnly}>
+            <Button type="button" size="sm" variant="secondary" onClick={() => void retry(event.id)} disabled={busy || readOnly}>
               Retry
-            </button>
+            </Button>
           </li>
         ))}
       </ul>
-      {loaded && events.length === 0 && !error ? <p>No DEAD events.</p> : null}
-    </main>
+      {loaded && events.length === 0 && !error ? <p className="mt-4 text-[13px] text-stone-600">No DEAD events.</p> : null}
+    </PageContent>
   )
 }
 

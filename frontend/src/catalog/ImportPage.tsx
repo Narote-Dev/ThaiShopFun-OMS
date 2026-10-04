@@ -1,4 +1,17 @@
 import { useState, type FormEvent } from 'react'
+import { Button } from '../ui/Button'
+import { Card } from '../ui/Card'
+import {
+  DataTable,
+  DataTableCell,
+  DataTableHead,
+  DataTableRow,
+  DataTableTh,
+} from '../ui/DataTable'
+import { Input } from '../ui/Input'
+import { Label } from '../ui/Label'
+import { PageContent } from '../ui/PageContent'
+import { PageHeader } from '../ui/PageHeader'
 import { catalogApi, ImportInvalidError, messageFor, type ImportResult, type ImportRowError } from './api'
 
 const SAMPLE =
@@ -37,64 +50,70 @@ export default function ImportPage({ canWrite }: { canWrite: boolean }) {
   }
 
   return (
-    <main className="wide">
-      <h1>Import catalog</h1>
-      <p>
-        UTF-8 CSV with a header row. Columns: <code>product_name, sku_code, sku_name, barcode, weight_g,
-        is_bundle, components</code>. <code>components</code> is <code>CODE:qty|CODE:qty</code> and may name SKUs
-        anywhere in the file. An existing <code>sku_code</code> is updated, so the same file can be imported
+    <PageContent wide>
+      <PageHeader title="Import catalog" />
+      <p className="mt-4 text-[13px] leading-relaxed text-stone-600">
+        UTF-8 CSV with a header row. Columns: <code className="rounded bg-stone-100 px-1">product_name, sku_code, sku_name, barcode, weight_g,
+        is_bundle, components</code>. <code className="rounded bg-stone-100 px-1">components</code> is <code className="rounded bg-stone-100 px-1">CODE:qty|CODE:qty</code> and may name SKUs
+        anywhere in the file. An existing <code className="rounded bg-stone-100 px-1">sku_code</code> is updated, so the same file can be imported
         again. For an existing SKU, an optional column left out of the header keeps the stored value; an empty
-        cell clears it. Products are matched by <code>product_name</code>. If any row is wrong, nothing is imported.
+        cell clears it. Products are matched by <code className="rounded bg-stone-100 px-1">product_name</code>. If any row is wrong, nothing is imported.
       </p>
-      <details>
-        <summary>Example</summary>
-        <pre>{SAMPLE}</pre>
+      <details className="mt-4 text-[13px]">
+        <summary className="cursor-pointer font-medium text-stone-800">Example</summary>
+        <pre className="mt-2 overflow-x-auto rounded-lg border border-stone-200 bg-stone-50 p-3 text-[12px]">{SAMPLE}</pre>
       </details>
       {canWrite ? (
-        <form className="toolbar" onSubmit={upload}>
-          <label>
-            CSV file
-            <input
-              type="file"
-              accept=".csv,text/csv"
-              onChange={(event) => setFile(event.target.files?.[0] ?? null)}
-            />
-          </label>
-          <button type="submit" disabled={busy || !file}>
-            {busy ? 'Importing…' : 'Import'}
-          </button>
-        </form>
+        <Card className="mt-4">
+          <form className="flex flex-wrap items-end gap-4 p-4" onSubmit={upload}>
+            <div>
+              <Label htmlFor="import-csv">CSV file</Label>
+              <Input
+                id="import-csv"
+                type="file"
+                accept=".csv,text/csv"
+                className="py-1.5 file:mr-3 file:rounded-md file:border-0 file:bg-stone-100 file:px-3 file:text-[13px] file:font-medium"
+                onChange={(event) => setFile(event.target.files?.[0] ?? null)}
+              />
+            </div>
+            <Button type="submit" variant="primary" disabled={busy || !file}>
+              {busy ? 'Importing…' : 'Import'}
+            </Button>
+          </form>
+        </Card>
       ) : (
-        <p>Only an OWNER or ADMIN can import, and not while the shop is read-only.</p>
+        <p className="mt-4 text-[13px] text-stone-600">Only an OWNER or ADMIN can import, and not while the shop is read-only.</p>
       )}
-      {error ? <p role="alert">{error}</p> : null}
+      {error ? <p role="alert" className="mt-4 text-[13px] text-red-700">{error}</p> : null}
       {rowErrors.length > 0 ? (
-        <table aria-label="Row errors">
-          <thead>
-            <tr>
-              <th>Row</th>
-              <th>Column</th>
-              <th>Error</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rowErrors.map((row, index) => (
-              <tr key={`${row.row}-${row.column ?? ''}-${index}`}>
-                <td>{row.row}</td>
-                <td>{row.column ?? '—'}</td>
-                <td>{row.error}</td>
+        <div className="mt-4">
+          <DataTable aria-label="Row errors">
+            <DataTableHead>
+              <tr>
+                <DataTableTh>Row</DataTableTh>
+                <DataTableTh>Column</DataTableTh>
+                <DataTableTh>Error</DataTableTh>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </DataTableHead>
+            <tbody>
+              {rowErrors.map((row, index) => (
+                <DataTableRow key={`${row.row}-${row.column ?? ''}-${index}`}>
+                  <DataTableCell>{row.row}</DataTableCell>
+                  <DataTableCell>{row.column ?? '—'}</DataTableCell>
+                  <DataTableCell>{row.error}</DataTableCell>
+                </DataTableRow>
+              ))}
+            </tbody>
+          </DataTable>
+        </div>
       ) : null}
       {result ? (
-        <p>
+        <p className="mt-4 text-[13px] text-stone-700">
           Imported {result.rows} rows: {result.skus_created} created, {result.skus_updated} updated,{' '}
           {result.skus_unchanged} unchanged, {result.bundles_replaced} bundles updated, {result.products_created}{' '}
           new products.
         </p>
       ) : null}
-    </main>
+    </PageContent>
   )
 }

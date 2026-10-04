@@ -1,3 +1,7 @@
+import { Button } from '../ui/Button'
+import { PageContent } from '../ui/PageContent'
+import { PageHeader } from '../ui/PageHeader'
+
 type Props = {
   message: string
   onRetry: (() => void) | null
@@ -5,15 +9,17 @@ type Props = {
 
 export default function SettingUp({ message, onRetry }: Props) {
   return (
-    <main>
-      <p className="eyebrow">ThaiShopFun</p>
-      <h1>Setting up your shop</h1>
-      <p role="status">{message}</p>
+    <PageContent className="max-w-lg">
+      <p className="text-[11px] font-semibold uppercase tracking-wider text-brand-700">ThaiShopFun</p>
+      <PageHeader className="mt-2" title="Setting up your shop" />
+      <p role="status" className="mt-4 text-[13px] text-stone-600">
+        {message}
+      </p>
       {onRetry ? (
-        <button type="button" onClick={onRetry}>
+        <Button type="button" variant="primary" className="mt-6" onClick={onRetry}>
           Retry
-        </button>
+        </Button>
       ) : null}
-    </main>
+    </PageContent>
   )
 }

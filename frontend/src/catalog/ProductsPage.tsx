@@ -1,4 +1,17 @@
 import { useEffect, useState, type FormEvent } from 'react'
+import { Button } from '../ui/Button'
+import { Card } from '../ui/Card'
+import {
+  DataTable,
+  DataTableCell,
+  DataTableHead,
+  DataTableRow,
+  DataTableTh,
+} from '../ui/DataTable'
+import { Input } from '../ui/Input'
+import { Label } from '../ui/Label'
+import { PageContent } from '../ui/PageContent'
+import { PageHeader } from '../ui/PageHeader'
 import { catalogApi, messageFor, type Product } from './api'
 
 export default function ProductsPage({ canWrite }: { canWrite: boolean }) {
@@ -48,72 +61,81 @@ export default function ProductsPage({ canWrite }: { canWrite: boolean }) {
   }
 
   return (
-    <main className="wide">
-      <h1>Products</h1>
+    <PageContent wide>
+      <PageHeader title="Products" />
       {canWrite ? (
-        <form className="toolbar" onSubmit={create}>
-          <label>
-            New product name
-            <input value={newName} onChange={(event) => setNewName(event.target.value)} />
-          </label>
-          <button type="submit" disabled={busy || newName.trim() === ''}>
-            Add product
-          </button>
-        </form>
+        <Card className="mt-4">
+          <form className="flex flex-wrap items-end gap-4 p-4" onSubmit={create}>
+            <div className="min-w-[200px] flex-1">
+              <Label htmlFor="products-new-name">New product name</Label>
+              <Input id="products-new-name" value={newName} onChange={(event) => setNewName(event.target.value)} />
+            </div>
+            <Button type="submit" variant="primary" disabled={busy || newName.trim() === ''}>
+              Add product
+            </Button>
+          </form>
+        </Card>
       ) : null}
-      {error ? <p role="alert">{error}</p> : null}
-      <table>
-        <thead>
-          <tr>
-            <th>Name</th>
-            <th>Status</th>
-            <th>SKUs</th>
-            {canWrite ? <th>Actions</th> : null}
-          </tr>
-        </thead>
-        <tbody>
-          {products.map((product) => (
-            <tr key={product.id}>
-              <td>
-                {canWrite ? (
-                  <input
-                    aria-label={`Name of ${product.name}`}
-                    value={names[product.id] ?? ''}
-                    onChange={(event) => setNames({ ...names, [product.id]: event.target.value })}
-                  />
-                ) : (
-                  product.name
-                )}
-              </td>
-              <td>{product.status}</td>
-              <td>{product.sku_count}</td>
-              {canWrite ? (
-                <td>
-                  <button
-                    type="button"
-                    disabled={busy || (names[product.id] ?? '').trim() === product.name}
-                    onClick={() =>
-                      void run(
-                        () => catalogApi.updateProduct(product.id, names[product.id].trim(), product.status),
-                        'Could not rename the product',
-                      )
-                    }
-                  >
-                    Rename
-                  </button>
-                  <button
-                    type="button"
-                    disabled={busy || product.status === 'INACTIVE'}
-                    onClick={() => void run(() => catalogApi.archiveProduct(product.id), 'Could not archive')}
-                  >
-                    Archive
-                  </button>
-                </td>
-              ) : null}
+      {error ? <p role="alert" className="mt-4 text-[13px] text-red-700">{error}</p> : null}
+      <div className="mt-4">
+        <DataTable aria-label="Products">
+          <DataTableHead>
+            <tr>
+              <DataTableTh>Name</DataTableTh>
+              <DataTableTh>Status</DataTableTh>
+              <DataTableTh>SKUs</DataTableTh>
+              {canWrite ? <DataTableTh>Actions</DataTableTh> : null}
             </tr>
-          ))}
-        </tbody>
-      </table>
-    </main>
+          </DataTableHead>
+          <tbody>
+            {products.map((product) => (
+              <DataTableRow key={product.id}>
+                <DataTableCell>
+                  {canWrite ? (
+                    <Input
+                      aria-label={`Name of ${product.name}`}
+                      value={names[product.id] ?? ''}
+                      onChange={(event) => setNames({ ...names, [product.id]: event.target.value })}
+                      className="mt-0"
+                    />
+                  ) : (
+                    product.name
+                  )}
+                </DataTableCell>
+                <DataTableCell>{product.status}</DataTableCell>
+                <DataTableCell>{product.sku_count}</DataTableCell>
+                {canWrite ? (
+                  <DataTableCell>
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        disabled={busy || (names[product.id] ?? '').trim() === product.name}
+                        onClick={() =>
+                          void run(
+                            () => catalogApi.updateProduct(product.id, names[product.id].trim(), product.status),
+                            'Could not rename the product',
+                          )
+                        }
+                      >
+                        Rename
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        disabled={busy || product.status === 'INACTIVE'}
+                        onClick={() => void run(() => catalogApi.archiveProduct(product.id), 'Could not archive')}
+                      >
+                        Archive
+                      </Button>
+                    </div>
+                  </DataTableCell>
+                ) : null}
+              </DataTableRow>
+            ))}
+          </tbody>
+        </DataTable>
+      </div>
+    </PageContent>
   )
 }
