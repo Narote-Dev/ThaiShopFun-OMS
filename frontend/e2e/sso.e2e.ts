@@ -54,7 +54,7 @@ test('active shop sees its name on the dashboard', async ({ page }) => {
   })
   const tokens = await signIn(page, /^Active Shop/)
   await expect(page.getByRole('heading', { name: 'Active Shop' })).toBeVisible()
-  await expect(page.getByText('OWNER', { exact: true })).toBeVisible()
+  await expect(page.getByText('OWNER · PRO')).toBeVisible()
   await expect.poll(() => authorization).toBe(`Bearer ${tokens.access}`)
   expect(tokens.access).not.toBe(tokens.id)
   await expectNoStoredTokens(page, tokens)
