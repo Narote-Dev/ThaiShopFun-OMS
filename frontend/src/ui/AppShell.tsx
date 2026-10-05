@@ -104,7 +104,7 @@ export default function AppShell({ me, route, userDisplayName, onLogout, childre
         : 'TSF ยังไม่เชื่อมต่อ'
 
   return (
-    <div className="flex min-h-screen bg-canvas font-sans text-stone-900 antialiased">
+    <div className="flex min-h-dvh bg-canvas font-sans text-stone-900 antialiased">
       {sidebarOpen ? (
         <button
           type="button"
@@ -115,8 +115,10 @@ export default function AppShell({ me, route, userDisplayName, onLogout, childre
       ) : null}
       <aside
         className={cn(
-          'fixed inset-y-0 left-0 z-40 flex w-64 flex-col border-r border-stone-200 bg-white transition-transform lg:translate-x-0',
-          sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0',
+          'z-40 flex w-64 shrink-0 flex-col border-r border-stone-200 bg-white',
+          'max-lg:fixed max-lg:inset-y-0 max-lg:left-0 max-lg:transition-transform',
+          'lg:sticky lg:top-0 lg:h-dvh lg:max-h-dvh',
+          sidebarOpen ? 'max-lg:translate-x-0' : 'max-lg:-translate-x-full',
         )}
       >
         <div className="flex h-14 items-center gap-2.5 border-b border-stone-200 px-4">
@@ -155,7 +157,7 @@ export default function AppShell({ me, route, userDisplayName, onLogout, childre
             <ChevronsUpDown className="h-4 w-4 text-stone-400" />
           </a>
         </div>
-        <nav className="flex-1 overflow-y-auto px-3 py-3 text-[13.5px]" aria-label="Main">
+        <nav className="min-h-0 flex-1 overflow-y-auto px-3 py-3 text-[13.5px]" aria-label="Main">
           {sections.map((section) => (
             <div key={section.title}>
               <div className="mb-1 mt-3 px-2.5 text-[11px] font-medium uppercase tracking-wider text-stone-400 first:mt-0">
@@ -230,7 +232,7 @@ export default function AppShell({ me, route, userDisplayName, onLogout, childre
           </div>
         </div>
       </aside>
-      <div className="flex min-w-0 flex-1 flex-col lg:ml-64">
+      <div className="flex min-h-dvh min-w-0 flex-1 flex-col">
         <header className="sticky top-0 z-10 flex h-14 items-center gap-4 border-b border-stone-200 bg-white/85 px-4 backdrop-blur lg:px-6">
           <button
             type="button"

@@ -34,6 +34,18 @@ const staff: Me = {
 afterEach(() => cleanup())
 
 describe('AppShell navigation', () => {
+  it('uses sticky full-height sidebar on large screens', () => {
+    const { container } = render(
+      <AppShell me={staff} route="#/" userDisplayName={null} onLogout={() => undefined}>
+        <p>page</p>
+      </AppShell>,
+    )
+    const aside = container.querySelector('aside')
+    expect(aside?.className).toMatch(/lg:sticky/)
+    expect(aside?.className).toMatch(/lg:h-dvh/)
+    expect(aside?.className).not.toMatch(/lg:translate-x/)
+  })
+
   it('shows main catalog links for any signed-in role', () => {
     render(
       <AppShell me={staff} route="#/catalog/skus" userDisplayName={null} onLogout={() => undefined}>

@@ -25,7 +25,7 @@ Central mapping: `frontend/src/ui/status.ts` and `StatusBadge`. Examples:
 
 ## Layout
 
-- **AppShell** — sidebar (grouped Thai nav), shop card, user footer, top bar
+- **AppShell** — app shell: full-viewport column layout (`min-h-dvh`). On **lg+**, the sidebar is `sticky top-0 h-dvh` in the flex row (nav scrolls inside the aside; user footer stays at the bottom). On **narrow** viewports it stays a fixed off-canvas drawer (`max-lg:fixed`) with a slide transform only on mobile (transform is not applied on lg, so sticky height is reliable). Main column is `flex-1 min-h-dvh`; page body scrolls with the document while the top bar stays `sticky`.
 - **PageContent** — max width + padding (`wide` for tables)
 - **PageHeader** — title, subtitle, actions
 
