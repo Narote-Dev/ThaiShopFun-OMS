@@ -90,6 +90,11 @@ public class OrderGapRefetchService implements OrderGapRefetch {
       OrderDetail detail = adapter.getOrder(ref, externalOrderId);
       PaymentStatus payment = adapter.getPaymentStatus(ref, externalOrderId);
       long snapshotVersion = detail.aggregateVersion();
+      if ("order.paid".equals(inboxEventType)
+          && payment != null
+          && !"PAID".equals(payment.status())) {
+        throw new GapSnapshotNotReadyException(snapshotVersion, inboxAggregateVersion);
+      }
       Outcome outcome = Outcome.SKIPPED;
       if (inboxAggregateVersion <= 0 || snapshotVersion >= inboxAggregateVersion) {
         outcome =
