@@ -3,6 +3,7 @@ package com.thaishopfun.oms.order;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.thaishopfun.mocktsf.OmsEndpoint;
+import com.thaishopfun.mocktsf.idp.TokenIssuer;
 import com.thaishopfun.oms.auth.AuthTestSupport;
 import com.thaishopfun.oms.inbox.InboxWorker;
 import com.thaishopfun.oms.order.backfill.OrderBackfillJob;
@@ -64,7 +65,9 @@ class OrderBackfillT12CAcceptanceTest {
     registry.add("oms.inbox.hmac-secrets", () -> INBOX_SECRET);
     registry.add("oms.tsf.base-url", () -> "http://127.0.0.1:" + mockPort);
     registry.add("oms.tsf.token-uri", () -> "http://127.0.0.1:" + mockPort + "/tsf-idp/token");
-    registry.add("oms.tsf.client-secret", () -> "dev-tsf-client-secret");
+    registry.add("oms.tsf.client-id", () -> "oms-service");
+    registry.add("oms.tsf.client-secret", () -> "dev-oms-service-secret");
+    registry.add("oms.tsf.audience", () -> "tsf-internal");
   }
 
   @LocalServerPort private int port;
@@ -174,19 +177,8 @@ class OrderBackfillT12CAcceptanceTest {
     assertThat(response.statusCode()).isEqualTo(202);
   }
 
-  private static String tsfToken() throws Exception {
-    int mockPort = OrderIntakeMockRuntime.mockPort();
-    HttpRequest request =
-        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + mockPort + "/tsf-idp/token"))
-            .timeout(Duration.ofSeconds(10))
-            .header("Content-Type", "application/x-www-form-urlencoded")
-            .POST(
-                HttpRequest.BodyPublishers.ofString(
-                    "grant_type=client_credentials&client_id=oms-service&client_secret=dev-tsf-client-secret&audience=tsf-internal"))
-            .build();
-    HttpResponse<String> response =
-        HTTP.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-    return JSON.readTree(response.body()).path("access_token").asString();
+  private static String tsfToken() {
+    return OrderIntakeMockRuntime.mock().getBean(TokenIssuer.class).tsfServiceToken();
   }
 
   private static String sign(String secret, String timestamp, byte[] body) throws Exception {

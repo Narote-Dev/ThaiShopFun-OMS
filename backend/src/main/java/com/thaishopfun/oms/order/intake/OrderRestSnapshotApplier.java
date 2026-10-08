@@ -126,6 +126,9 @@ public class OrderRestSnapshotApplier {
     if (afterPayment != null
         && detail.aggregateVersion() > knownVersion
         && detail.recipient() != null) {
+      ObjectNode updatedData = json.createObjectNode();
+      updatedData.put("order_id", detail.orderId());
+      updatedData.set("recipient", json.valueToTree(detail.recipient()));
       InboxMessage updated =
           message(
               tenantId,
@@ -138,7 +141,7 @@ public class OrderRestSnapshotApplier {
                   detail.orderId(),
                   detail.aggregateVersion(),
                   "order.updated",
-                  detailData(detail)));
+                  updatedData));
       support.handleUpdated(updated);
       return Outcome.APPLIED;
     }
