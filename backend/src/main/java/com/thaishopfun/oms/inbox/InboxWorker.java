@@ -332,6 +332,7 @@ public class InboxWorker {
     boolean entVerOrdered = InboxEntitlementPolicy.ordersByEntVer(row.eventType());
     boolean superseded =
         !entVerOrdered
+            && "order.updated".equals(row.eventType())
             && row.aggregateVersion() > 0
             && supersededByPendingNewer(row);
     boolean stale =

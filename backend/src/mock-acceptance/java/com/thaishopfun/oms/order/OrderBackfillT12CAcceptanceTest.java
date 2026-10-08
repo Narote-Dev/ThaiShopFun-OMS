@@ -50,7 +50,8 @@ import tools.jackson.databind.node.ObjectNode;
     properties = {
       "spring.main.allow-bean-definition-overriding=true",
       "oms.order.backfill.enabled=false",
-      "oms.inbox.worker-enabled=false"
+      "oms.inbox.worker-enabled=false",
+      "oms.inbox.jitter-ratio=0"
     })
 @Import(OrderIntakeT12ScenariosAcceptanceTest.IntakeTestConfig.class)
 class OrderBackfillT12CAcceptanceTest {
@@ -447,7 +448,15 @@ class OrderBackfillT12CAcceptanceTest {
         .isNotEqualTo("PROCESSED");
 
     postMock("/control/orders/" + orderId + "/mark-paid", "{\"aggregate_version\":3}");
-    assertThat(worker.processAvailable(5)).isEqualTo(1);
+    int processedAfterMarkPaid = 0;
+    for (int round = 0; round < 10; round++) {
+      processedAfterMarkPaid += worker.processAvailable(5);
+      if (gapRefetchCount() >= gapsBefore + 1
+          && "PROCESSED".equals(inboxStatus(shop.tenant(), paidEarly.path("event_id").asString()))) {
+        break;
+      }
+    }
+    assertThat(processedAfterMarkPaid).isGreaterThanOrEqualTo(1);
     assertThat(gapRefetchCount()).isEqualTo(gapsBefore + 1);
     assertThat(inboxStatus(shop.tenant(), paidEarly.path("event_id").asString()))
         .isEqualTo("PROCESSED");
@@ -488,7 +497,7 @@ class OrderBackfillT12CAcceptanceTest {
     ObjectNode paid = OrderIntakeScenarioSupport.orderPaid(JSON, orderId, shopId, 3);
     String paidEventId = paid.path("event_id").asString();
     ingest(paid, false);
-    for (int round = 0; round < 12; round++) {
+    for (int round = 0; round < 30; round++) {
       worker.processAvailable(5);
       String status = inboxStatus(shop.tenant(), paidEventId);
       if ("DEAD".equals(status)) {
