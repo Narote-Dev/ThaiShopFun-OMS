@@ -155,11 +155,11 @@ public class InboxWorker {
   }
 
   public int processAvailable(int limit) {
-    // Claim one row at a time so a gap defer can unblock a lower-version sibling in the same call.
     int bounded = Math.min(Math.max(limit, 1), 1000);
     int handled = 0;
-    for (int i = 0; i < bounded; i++) {
-      List<Claimed> claimed = claim(1);
+    // Extra passes let a gap defer (1ms) unblock a lower-version sibling claimed in the same batch.
+    for (int pass = 0; pass < 5; pass++) {
+      List<Claimed> claimed = claim(bounded);
       if (claimed.isEmpty()) {
         break;
       }
