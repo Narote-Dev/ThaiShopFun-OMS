@@ -18,6 +18,8 @@ public final class InvariantCodes {
   public static final String ORDER_READY_TO_PICK_HOLD = "order.ready_to_pick_hold";
   public static final String ORDER_STATUS_HISTORY_MISSING = "order.status_history_missing";
   public static final String ORDER_READY_TO_PICK_COVERAGE = "order.ready_to_pick_coverage";
+  /** Nightly job could not complete {@link InvariantChecker#checkTenant} for one tenant. */
+  public static final String CHECK_FAILED = "check_failed";
 
   private InvariantCodes() {}
 }

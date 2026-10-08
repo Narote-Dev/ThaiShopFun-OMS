@@ -71,6 +71,13 @@ class InboxHandlerIdempotencyTest {
   }
 
   @Test
+  void fingerprintDetectsMutationsUnderRls() throws Exception {
+    Map<String, Long> before = fingerprint();
+    deliver(registry.find("order.created"), loadExample("order.created.json"), "fp-probe");
+    assertThat(fingerprint()).isNotEqualTo(before);
+  }
+
+  @Test
   void everyRegisteredHandlerIsIdempotentOnDoubleDelivery() throws Exception {
     for (String eventType : CONTRACTS.keySet()) {
       InboxHandler handler = registry.find(eventType);
@@ -111,18 +118,24 @@ class InboxHandlerIdempotencyTest {
   }
 
   private Map<String, Long> fingerprint() {
-    Map<String, Long> counts = new LinkedHashMap<>();
-    counts.put("sales_order", jdbc.queryForObject("SELECT count(*) FROM sales_order", Long.class));
-    counts.put(
-        "stock_reservation",
-        jdbc.queryForObject(
-            "SELECT count(*) FROM stock_reservation WHERE status = 'ACTIVE'", Long.class));
-    counts.put(
-        "inventory_ledger",
-        jdbc.queryForObject("SELECT count(*) FROM inventory_ledger", Long.class));
-    counts.put(
-        "channel_listing", jdbc.queryForObject("SELECT count(*) FROM channel_listing", Long.class));
-    return counts;
+    return fixture.inTenant(
+        tenantId,
+        () -> {
+          Map<String, Long> counts = new LinkedHashMap<>();
+          counts.put(
+              "sales_order", jdbc.queryForObject("SELECT count(*) FROM sales_order", Long.class));
+          counts.put(
+              "stock_reservation",
+              jdbc.queryForObject(
+                  "SELECT count(*) FROM stock_reservation WHERE status = 'ACTIVE'", Long.class));
+          counts.put(
+              "inventory_ledger",
+              jdbc.queryForObject("SELECT count(*) FROM inventory_ledger", Long.class));
+          counts.put(
+              "channel_listing",
+              jdbc.queryForObject("SELECT count(*) FROM channel_listing", Long.class));
+          return counts;
+        });
   }
 
   private static JsonNode loadExample(String file) throws Exception {

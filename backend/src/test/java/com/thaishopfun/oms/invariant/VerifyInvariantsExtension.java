@@ -6,10 +6,16 @@ import java.lang.reflect.Method;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.extension.AfterEachCallback;
+import org.junit.jupiter.api.extension.BeforeEachCallback;
 import org.junit.jupiter.api.extension.ExtensionContext;
 import org.springframework.test.context.junit.jupiter.SpringExtension;
 
-public class VerifyInvariantsExtension implements AfterEachCallback {
+public class VerifyInvariantsExtension implements BeforeEachCallback, AfterEachCallback {
+
+  @Override
+  public void beforeEach(ExtensionContext context) {
+    InvariantTestTenants.drain();
+  }
 
   @Override
   public void afterEach(ExtensionContext context) {
@@ -19,6 +25,7 @@ public class VerifyInvariantsExtension implements AfterEachCallback {
     }
     var applicationContext = SpringExtension.getApplicationContext(context);
     if (!applicationContext.containsBean("invariantChecker")) {
+      InvariantTestTenants.drain();
       return;
     }
     VerifyInvariants annotation = findAnnotation(context.getRequiredTestClass());

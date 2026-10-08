@@ -51,7 +51,15 @@ public class InvariantJob {
               "SELECT id FROM list_active_tenant_ids()",
               (rs, row) -> rs.getObject("id", UUID.class));
       for (UUID tenantId : tenants) {
-        violationCount += emit(checker.checkTenant(tenantId));
+        try {
+          violationCount += emit(checker.checkTenant(tenantId));
+        } catch (Exception ex) {
+          log.error("invariant check failed tenant_id={}", tenantId, ex);
+          meters
+              .counter(
+                  VIOLATIONS_METRIC, List.of(Tag.of("code", InvariantCodes.CHECK_FAILED)))
+              .increment();
+        }
       }
       if (violationCount == 0) {
         log.info("invariant check complete violations=0 tenants={}", tenants.size());

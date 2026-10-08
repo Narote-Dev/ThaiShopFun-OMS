@@ -39,7 +39,7 @@ public class InvariantChecker {
     this.clock = clock;
     this.tenantReadTx = new TransactionTemplate(transactions);
     this.tenantReadTx.setReadOnly(true);
-    this.tenantReadTx.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
+    this.tenantReadTx.setIsolationLevel(TransactionDefinition.ISOLATION_REPEATABLE_READ);
   }
 
   public List<Violation> checkAll() {
@@ -222,10 +222,10 @@ public class InvariantChecker {
             FROM stock_reservation sr
             WHERE sr.status = 'ACTIVE'
               AND sr.owner_type = 'ORDER'
-              AND sr.owner_ref ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+              AND lower(sr.owner_ref) ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
               AND NOT EXISTS (
                 SELECT 1 FROM sales_order o
-                WHERE o.tenant_id = sr.tenant_id AND o.id::text = sr.owner_ref
+                WHERE o.tenant_id = sr.tenant_id AND o.id::text = lower(sr.owner_ref)
               )
             LIMIT ?
             """,
@@ -308,10 +308,8 @@ public class InvariantChecker {
               AND o.order_status = 'ACTIVE'
               AND o.hold_reason = 'NONE'
               AND ca.mode = 'ACTIVE'
-            LIMIT ?
             """,
-            (rs, row) -> rs.getObject("id", UUID.class),
-            ENTITY_LIMIT);
+            (rs, row) -> rs.getObject("id", UUID.class));
     List<UUID> bad = new ArrayList<>();
     for (UUID orderId : orderIds) {
       List<ReserveItem> needs = mappedLineNeeds(orderId);
@@ -321,7 +319,15 @@ public class InvariantChecker {
     }
     return bad.isEmpty()
         ? List.of()
-        : List.of(Violation.of(InvariantCodes.ORDER_READY_TO_PICK_COVERAGE, tenantId, bad));
+        : List.of(
+            Violation.of(
+                InvariantCodes.ORDER_READY_TO_PICK_COVERAGE,
+                tenantId,
+                capEntityIds(bad)));
+  }
+
+  private static List<UUID> capEntityIds(List<UUID> ids) {
+    return ids.size() <= ENTITY_LIMIT ? ids : List.copyOf(ids.subList(0, ENTITY_LIMIT));
   }
 
   private List<ReserveItem> mappedLineNeeds(UUID orderId) {

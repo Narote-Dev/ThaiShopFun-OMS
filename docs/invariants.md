@@ -72,10 +72,13 @@ ACTIVE `ORDER` reservations on non-terminal orders are allowed; terminal statuse
 
 ## Test integration
 
-- `@VerifyInvariants` on `StockTestBase`, `OrderIntegrationTest`, checkout/order mock-acceptance classes, `StockDocumentApiTest`, `StockTenantLeakTest`.
-- `@SkipInvariantCheck("reason")` for deliberate corruption (`InvariantCheckerBreakTest`) and perf fixtures (`OrderApiPerfTest`).
+- `@VerifyInvariants` on `StockTestBase`, `OrderIntegrationTest` (all `OrderApi*Test`, `OrderHoldRecheckApiTest`, `ChannelListingApiTest`), checkout/order mock-acceptance classes (`OrderCancelApiTest` inherits via `OrderIntegrationTest`), `StockDocumentApiTest`, `StockTenantLeakTest`.
+- Tenants are registered in `StockFixture.shop()`, `CatalogHttp.shop()`, and `OrderFixture.shopFor()`; `VerifyInvariantsExtension` clears the per-thread registry before each test and drains after each test (including when the checker bean is absent or checks are skipped).
+- `@SkipInvariantCheck("reason")` for deliberate corruption (`InvariantCheckerBreakTest`, `InvariantJobTest`) and perf fixtures (`OrderApiPerfTest`).
 - `StockFixture.assertInvariants(shop)` delegates to `InvariantChecker` when injected.
 
 ## Deliberate-break tests
 
-`InvariantCheckerBreakTest` corrupts data via superuser / `session_replication_role = replica` and asserts the expected `InvariantCodes` value.
+`InvariantCheckerBreakTest` corrupts data under tenant RLS (`fixture.inTenant`) or via superuser (drop/re-add `inventory_quantity_check` for `stock.reserved_bounds`, probe table for `schema.force_rls`). **`schema.oms_app_role`** is not broken in tests (would require mutating the production role); it remains covered by `RuntimeRoleGuard` and Flyway.
+
+Nightly job: per-tenant failures are logged with `tenant_id`, emit `oms.invariant.violations{code=check_failed}`, and do not stop other tenants (`InvariantJobIsolationTest`).

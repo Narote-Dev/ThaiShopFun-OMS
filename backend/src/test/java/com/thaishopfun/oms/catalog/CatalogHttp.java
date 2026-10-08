@@ -3,6 +3,7 @@ package com.thaishopfun.oms.catalog;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.thaishopfun.oms.auth.AuthTestSupport;
+import com.thaishopfun.oms.invariant.InvariantTestTenants;
 import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -49,7 +50,9 @@ public final class CatalogHttp {
     String owner = token("owner-" + UUID.randomUUID(), shopId, "OWNER", "ACTIVE");
     Result me = get("/api/v1/me", owner);
     assertThat(me.status()).as(me.raw()).isEqualTo(200);
-    return new Shop(shopId, owner, UUID.fromString(me.body().path("tenant").path("id").asString()));
+    UUID tenantId = UUID.fromString(me.body().path("tenant").path("id").asString());
+    InvariantTestTenants.register(tenantId);
+    return new Shop(shopId, owner, tenantId);
   }
 
   /** Another member of the same shop, provisioned on its first call. */
