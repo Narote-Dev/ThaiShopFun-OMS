@@ -94,8 +94,8 @@ public class ControlController {
   }
 
   @PostMapping("/orders/{orderId}/mark-paid")
-  public ResponseEntity<String> markPaid(
-      @PathVariable String orderId, HttpServletRequest request) throws IOException {
+  public ResponseEntity<String> markPaid(@PathVariable String orderId, HttpServletRequest request)
+      throws IOException {
     JsonNode body = readObject(request);
     long version = body.path("aggregate_version").asLong(2);
     catalog.markPaid(orderId, version);

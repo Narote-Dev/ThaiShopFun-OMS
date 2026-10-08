@@ -78,7 +78,8 @@ public class TsfCatalog {
       String orderId = "TSF-BULK-" + sequence.getAndIncrement();
       long version = paid && "PREPAID".equals(paymentMethod) ? 2L : 1L;
       Map<String, Object> detail = base(orderId, "rsv_" + orderId, updated, version);
-      detail.put("lines", List.of(line("L1", "tsf_sku_7781", "TSHIRT-BLK-M", "เสื้อยืดดำ M", 1, 100)));
+      detail.put(
+          "lines", List.of(line("L1", "tsf_sku_7781", "TSHIRT-BLK-M", "เสื้อยืดดำ M", 1, 100)));
       detail.put("totals", totals(100, 0, 0, 100));
       detail.put("payment_method", paymentMethod);
       detail.put("status", "ACTIVE");
@@ -100,7 +101,8 @@ public class TsfCatalog {
     }
     Instant updated = Instant.now();
     Map<String, Object> detail = base(orderId, "rsv_" + orderId, updated, 1);
-    detail.put("lines", List.of(line("L1", "tsf_sku_7781", "TSHIRT-BLK-M", "เสื้อยืดดำ M", 1, 100)));
+    detail.put(
+        "lines", List.of(line("L1", "tsf_sku_7781", "TSHIRT-BLK-M", "เสื้อยืดดำ M", 1, 100)));
     detail.put("totals", totals(100, 0, 0, 100));
     detail.put("payment_method", "PREPAID");
     detail.put("payment_expires_at", updated.plusSeconds(3600).toString());
@@ -117,13 +119,7 @@ public class TsfCatalog {
               detail.put("updated_at", updated.toString());
               Map<String, Object> pay = payment(orderId, "PAID");
               replaceOrder(
-                  new Order(
-                      current.shopId(),
-                      orderId,
-                      updated,
-                      aggregateVersion,
-                      detail,
-                      pay));
+                  new Order(current.shopId(), orderId, updated, aggregateVersion, detail, pay));
             });
   }
 
@@ -154,8 +150,7 @@ public class TsfCatalog {
     if ("order.paid".equals(type)) {
       pay.put("status", "PAID");
     }
-    replaceOrder(
-        new Order(current.shopId(), orderId, updated, version, detail, pay));
+    replaceOrder(new Order(current.shopId(), orderId, updated, version, detail, pay));
   }
 
   private void replaceOrder(Order replacement) {
