@@ -107,8 +107,7 @@ public class OrderHoldResolverJob {
           ReevalSummary summary =
               resolveOrders(tenantId, orderIds, 0, "order.remap", null, false, true);
           processed += summary.released() + summary.outOfStock() + summary.stillHeld();
-          backoffOrders +=
-              tenantReadTx.execute(status -> retries.countInBackoff(tenantId, now));
+          backoffOrders += tenantReadTx.execute(status -> retries.countInBackoff(tenantId, now));
         } catch (RuntimeException ex) {
           log.error("hold resolver failed for tenant {}", tenantId, ex);
         } finally {
@@ -199,11 +198,7 @@ public class OrderHoldResolverJob {
   }
 
   private void persistRetryState(
-      UUID tenantId,
-      UUID orderId,
-      Outcome outcome,
-      boolean applyBackoff,
-      RuntimeException error) {
+      UUID tenantId, UUID orderId, Outcome outcome, boolean applyBackoff, RuntimeException error) {
     try {
       tenantWriteTx.execute(
           status -> {

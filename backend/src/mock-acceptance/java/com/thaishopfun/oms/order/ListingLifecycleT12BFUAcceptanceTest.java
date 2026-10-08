@@ -18,8 +18,8 @@ import com.thaishopfun.oms.stock.StockRepositorySkuOmitTestConfiguration;
 import com.thaishopfun.oms.stock.StockSkuLookupTestSupport;
 import com.thaishopfun.oms.stock.StockTestConfig.Fault;
 import com.thaishopfun.oms.stock.StockTestConfig.FaultHooks;
-import io.micrometer.core.instrument.MeterRegistry;
 import com.thaishopfun.oms.tenant.TenantContext;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -40,13 +40,13 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
-import org.postgresql.util.PSQLException;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.Timeout.ThreadMode;
+import org.postgresql.util.PSQLException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
@@ -142,6 +142,7 @@ class ListingLifecycleT12BFUAcceptanceTest {
       return new MutableClock();
     }
   }
+
   private final java.util.concurrent.atomic.AtomicLong listingAggregateVersion =
       new java.util.concurrent.atomic.AtomicLong(0);
 
@@ -196,8 +197,7 @@ class ListingLifecycleT12BFUAcceptanceTest {
                       AND external_sku_id LIKE 'L-demo-%'
                       AND removed_at IS NULL
                     """,
-                    Long.class,
-                    account));
+                    Long.class, account));
     assertThat(demoActive).isEqualTo(6);
 
     UUID missingSku =
@@ -661,7 +661,8 @@ class ListingLifecycleT12BFUAcceptanceTest {
       UUID orderB = UuidV7.generate();
       UUID accountA = fixture.tsfChannelAccount(shopA, "ACTIVE", "CONNECTED");
       seedOrder(shopA, accountA, orderA, "TSF-RLS-A");
-      seedOrder(shopB, fixture.tsfChannelAccount(shopB, "ACTIVE", "CONNECTED"), orderB, "TSF-RLS-B");
+      seedOrder(
+          shopB, fixture.tsfChannelAccount(shopB, "ACTIVE", "CONNECTED"), orderB, "TSF-RLS-B");
 
       try (Connection app = AuthTestSupport.app()) {
         app.setAutoCommit(false);
