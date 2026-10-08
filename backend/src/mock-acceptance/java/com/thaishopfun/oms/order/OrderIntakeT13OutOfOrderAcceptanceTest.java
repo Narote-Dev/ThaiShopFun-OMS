@@ -6,6 +6,7 @@ import com.thaishopfun.mocktsf.OmsEndpoint;
 import com.thaishopfun.mocktsf.idp.TokenIssuer;
 import com.thaishopfun.oms.auth.AuthTestSupport;
 import com.thaishopfun.oms.inbox.InboxWorker;
+import com.thaishopfun.oms.invariant.VerifyInvariants;
 import com.thaishopfun.oms.stock.StockFixture;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -40,6 +41,7 @@ import tools.jackson.databind.node.ObjectNode;
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
     properties = {"spring.main.allow-bean-definition-overriding=true"})
 @Import(OrderIntakeT12ScenariosAcceptanceTest.IntakeTestConfig.class)
+@VerifyInvariants
 class OrderIntakeT13OutOfOrderAcceptanceTest {
 
   private static final String INBOX_SECRET = "dev-inbox-hmac-secret";

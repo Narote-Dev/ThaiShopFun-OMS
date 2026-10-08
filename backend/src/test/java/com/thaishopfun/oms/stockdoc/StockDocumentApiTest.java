@@ -7,6 +7,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.thaishopfun.oms.catalog.CatalogHttp;
 import com.thaishopfun.oms.catalog.CatalogIntegrationTest;
+import com.thaishopfun.oms.invariant.VerifyInvariants;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -23,6 +24,7 @@ import org.junit.jupiter.api.Test;
 import tools.jackson.databind.JsonNode;
 
 /** T08A stock documents and stock history over HTTP, as {@code oms_app} under FORCE RLS. */
+@VerifyInvariants(scope = VerifyInvariants.Scope.STOCK_ONLY)
 class StockDocumentApiTest extends CatalogIntegrationTest {
 
   private static final String DOCS = "/api/v1/stock-documents";
@@ -223,6 +225,10 @@ class StockDocumentApiTest extends CatalogIntegrationTest {
     assertThat(noReason.body().path("errors").get(0).path("error").asString())
         .isEqualTo("REASON_REQUIRED");
     assertThat(ledger(shop, mug, "DAMAGE_WRITE_OFF") + ledger(shop, mug, "ADJUST_OUT")).isZero();
+    execute(
+        "UPDATE inventory SET reserved = 0 WHERE tenant_id = ? AND sku_id = ?",
+        shop.tenantId(),
+        UUID.fromString(mug.id()));
   }
 
   @Test

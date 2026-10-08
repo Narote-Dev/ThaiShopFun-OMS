@@ -573,7 +573,7 @@ cd frontend && npm ci && npm run dev                              # UI :5173
 | Contracts | `cd contracts && npm ci && npm run lint` + `ContractExamplesTest` | job **Contract examples** |
 | Frontend | `cd frontend && npm ci && npm run lint && npm run build && npm test` | Vitest ผ่าน · job **Frontend** |
 | E2E | `cd frontend && npm run test:e2e` (หรือ `frontend/scripts/e2e-stack.sh`) | Playwright SSO · job **Frontend e2e** |
-| Invariant (หลัง T00) | เรียก `InvariantChecker` ท้าย integration/acceptance/E2E ที่แตะสต๊อก/ออเดอร์ | ยังไม่มีในโค้ด — T00 |
+| Invariant (หลัง T00) | `@VerifyInvariants` → `InvariantChecker.checkAll()` ท้าย integration/acceptance ที่แตะสต๊อก/ออเดอร์; nightly `InvariantJob` | `docs/invariants.md` |
 
 **CI ที่รู้จัก flaky:** `InboxApiTest` (backlog C4) — ยังถือว่า CI "เขียว" ถ้า job Backend ผ่าน แต่ **ห้ามใช้เป็นด่าน deploy จนกว่าแก้ flake**
 

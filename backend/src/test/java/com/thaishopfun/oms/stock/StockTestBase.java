@@ -1,6 +1,7 @@
 package com.thaishopfun.oms.stock;
 
 import com.thaishopfun.oms.auth.AuthTestSupport;
+import com.thaishopfun.oms.invariant.VerifyInvariants;
 import com.thaishopfun.oms.stock.StockTestConfig.FaultHooks;
 import com.thaishopfun.oms.stock.StockTestConfig.MutableClock;
 import com.thaishopfun.oms.stock.StockTestConfig.StockEventRecorder;
@@ -33,7 +34,8 @@ import org.springframework.transaction.PlatformTransactionManager;
 @Import(StockTestConfig.class)
 // Closed after the class: every cached context holds a pool on the shared Postgres.
 @DirtiesContext
-abstract class StockTestBase {
+@VerifyInvariants(scope = VerifyInvariants.Scope.STOCK_ONLY)
+public abstract class StockTestBase {
 
   @DynamicPropertySource
   static void properties(DynamicPropertyRegistry registry) {
@@ -44,14 +46,14 @@ abstract class StockTestBase {
   @Autowired StockAvailability availability;
   @Autowired StockExpiryJob expiryJob;
   @Autowired StockProperties properties;
-  @Autowired JdbcTemplate jdbc;
+  @Autowired protected JdbcTemplate jdbc;
   @Autowired PlatformTransactionManager transactions;
   @Autowired MutableClock clock;
   @Autowired FaultHooks faults;
   @Autowired StockEventRecorder events;
   @Autowired MeterRegistry meters;
 
-  StockFixture fixture;
+  protected StockFixture fixture;
 
   @BeforeEach
   void fixture() {
@@ -67,7 +69,7 @@ abstract class StockTestBase {
   }
 
   /** Runs an engine call as the shop, the way a request thread or a handler would. */
-  <T> T as(StockFixture.Shop shop, Supplier<T> call) {
+  protected <T> T as(StockFixture.Shop shop, Supplier<T> call) {
     TenantContext.set(shop.tenant(), null);
     try {
       return call.get();

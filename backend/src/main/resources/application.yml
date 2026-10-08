@@ -79,6 +79,10 @@ oms:
     jitter-ratio: 0.2
     defer-delay: 30s
     max-defer: 24h
+  invariant:
+    enabled: ${OMS_INVARIANT_ENABLED:true}
+    cron: ${OMS_INVARIANT_CRON:0 30 2 * * *}
+    zone: ${OMS_INVARIANT_ZONE:Asia/Bangkok}
   order:
     unpaid-hold-grace: 10m
   order-intake:

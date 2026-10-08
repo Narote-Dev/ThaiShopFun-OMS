@@ -3,6 +3,8 @@ package com.thaishopfun.oms.stock;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.thaishopfun.oms.auth.UuidV7;
+import com.thaishopfun.oms.invariant.InvariantChecker;
+import com.thaishopfun.oms.invariant.InvariantTestTenants;
 import com.thaishopfun.oms.tenant.TenantContext;
 import java.time.Instant;
 import java.time.OffsetDateTime;
@@ -50,6 +52,11 @@ public final class StockFixture {
         });
   }
 
+  /** Runs JDBC work as {@code oms_app} under the tenant (for tests outside this package). */
+  public void runInTenant(UUID tenantId, Runnable work) {
+    inTenant(tenantId, work);
+  }
+
   /** A tenant with one product and a default warehouse. */
   public Shop shop(String entitlementStatus) {
     return shop(entitlementStatus, true);
@@ -80,6 +87,7 @@ public final class StockFixture {
               "WH-" + warehouse,
               defaultWarehouse);
         });
+    InvariantTestTenants.register(tenant);
     return new Shop(tenant, product, warehouse);
   }
 
@@ -222,7 +230,7 @@ public final class StockFixture {
                 "SELECT tsf_shop_id FROM tenant WHERE id = ?", String.class, shop.tenant()));
   }
 
-  void setTsfShopId(Shop shop, String tsfShopId) {
+  public void setTsfShopId(Shop shop, String tsfShopId) {
     inTenant(
         shop.tenant(),
         () ->
@@ -373,6 +381,16 @@ public final class StockFixture {
    * {@code reserved}.
    */
   public void assertInvariants(Shop shop) {
+    assertInvariants(shop, null);
+  }
+
+  /** Delegates to {@link InvariantChecker} when a checker is wired; otherwise uses inline SQL. */
+  public void assertInvariants(Shop shop, InvariantChecker checker) {
+    if (checker != null) {
+      var violations = checker.checkTenant(shop.tenant());
+      assertThat(violations).as(InvariantChecker.formatFailures(violations)).isEmpty();
+      return;
+    }
     inTenant(
         shop.tenant(),
         () -> {

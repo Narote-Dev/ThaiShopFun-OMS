@@ -6,6 +6,7 @@ import com.thaishopfun.mocktsf.OmsEndpoint;
 import com.thaishopfun.oms.auth.AuthTestSupport;
 import com.thaishopfun.oms.auth.UuidV7;
 import com.thaishopfun.oms.inbox.InboxWorker;
+import com.thaishopfun.oms.invariant.VerifyInvariants;
 import com.thaishopfun.oms.stock.OrderIntakeFaultTestConfig;
 import com.thaishopfun.oms.stock.StockExpiryJob;
 import com.thaishopfun.oms.stock.StockFixture;
@@ -62,6 +63,7 @@ import tools.jackson.databind.node.ObjectNode;
   OrderIntakeT12ScenariosAcceptanceTest.IntakeTestConfig.class,
   OrderIntakeFaultTestConfig.class
 })
+@VerifyInvariants
 class OrderIntakeT12ConcurrencyAcceptanceTest {
 
   private enum StepKind {

@@ -2,8 +2,11 @@ package com.thaishopfun.oms.inbox;
 
 import com.thaishopfun.oms.auth.UuidV7;
 import java.sql.Types;
+import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.Objects;
+import java.util.UUID;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
@@ -35,19 +38,30 @@ public class MembershipChangedHandler implements InboxHandler {
     // Step 2: Read the current row under this tenant's RLS context.
     Current current =
         jdbc.query(
-            "SELECT entitlement_status, ent_ver FROM tenant WHERE id = ?",
+            """
+            SELECT membership_tier, entitlement_status, entitlement_expires_at, ent_ver
+            FROM tenant WHERE id = ?
+            """,
             rs -> {
               if (!rs.next()) {
                 throw new IllegalStateException("tenant is not visible");
               }
-              return new Current(rs.getString("entitlement_status"), rs.getLong("ent_ver"));
+              return new Current(
+                  rs.getString("membership_tier"),
+                  rs.getString("entitlement_status"),
+                  rs.getObject("entitlement_expires_at", OffsetDateTime.class),
+                  rs.getLong("ent_ver"));
             },
             message.tenantId());
     if (current == null) {
       throw new IllegalStateException("tenant is not visible");
     }
 
-    // Step 3: A stale ent_ver does not overwrite a newer membership. The inbox row still completes.
+    // Step 3: Stale ent_ver does not overwrite a newer membership. The inbox row still completes.
+    if (incoming.entVer < current.entVer) {
+      return;
+    }
+    boolean idempotentReplay = incoming.entVer == current.entVer && current.matches(incoming);
     int updated =
         jdbc.update(
             """
@@ -75,7 +89,7 @@ public class MembershipChangedHandler implements InboxHandler {
       return;
     }
 
-    // Step 4: Wake only entitlement defers. A FAILED row on the normal backoff ladder stays put.
+    // Step 5: Wake only entitlement defers. A FAILED row on the normal backoff ladder stays put.
     if ("ACTIVE".equals(incoming.status) || "GRACE".equals(incoming.status)) {
       jdbc.update(
           """
@@ -92,19 +106,52 @@ public class MembershipChangedHandler implements InboxHandler {
           InboxWorker.ENTITLEMENT_DEFERRED);
     }
 
-    // Step 5: Audit the status change. No shop name, email, or event payload.
-    jdbc.update(
-        """
-        INSERT INTO audit_log (
-          id, tenant_id, actor_type, action, entity_type, entity_id, "before", "after"
-        ) VALUES (?, ?, 'TSF', 'membership.changed', 'tenant', ?, ?::jsonb, ?::jsonb)
-        """,
-        UuidV7.generate(),
-        message.tenantId(),
-        message.tenantId().toString(),
-        "{\"entitlement_status\":\"" + current.status + "\",\"ent_ver\":" + current.entVer + "}",
-        "{\"entitlement_status\":\"" + incoming.status + "\",\"ent_ver\":" + incoming.entVer + "}");
+    // Step 6: Audit the status change. Skip equal-ent_ver replays unless JIT provision already
+    // applied tenant state without an audit row (first inbox pass after shop create).
+    if (shouldWriteAudit(message.tenantId(), idempotentReplay, incoming.entVer)) {
+      jdbc.update(
+          """
+          INSERT INTO audit_log (
+            id, tenant_id, actor_type, action, entity_type, entity_id, "before", "after"
+          ) VALUES (?, ?, 'TSF', 'membership.changed', 'tenant', ?, ?::jsonb, ?::jsonb)
+          """,
+          UuidV7.generate(),
+          message.tenantId(),
+          message.tenantId().toString(),
+          "{\"entitlement_status\":\"" + current.status + "\",\"ent_ver\":" + current.entVer + "}",
+          "{\"entitlement_status\":\""
+              + incoming.status
+              + "\",\"ent_ver\":"
+              + incoming.entVer
+              + "}");
+    }
   }
 
-  private record Current(String status, long entVer) {}
+  private boolean shouldWriteAudit(UUID tenantId, boolean idempotentReplay, long entVer) {
+    if (!idempotentReplay) {
+      return true;
+    }
+    Long prior =
+        jdbc.queryForObject(
+            """
+            SELECT count(*) FROM audit_log
+            WHERE tenant_id = ?
+              AND action = 'membership.changed'
+              AND ("after"->>'ent_ver')::bigint = ?
+            """,
+            Long.class,
+            tenantId,
+            entVer);
+    return prior == null || prior == 0;
+  }
+
+  private record Current(String tier, String status, OffsetDateTime expiresAt, long entVer) {
+
+    boolean matches(MembershipPayload incoming) {
+      Instant currentExpiry = expiresAt == null ? null : expiresAt.toInstant();
+      return Objects.equals(tier, incoming.tier)
+          && Objects.equals(status, incoming.status)
+          && Objects.equals(currentExpiry, incoming.expiresAt);
+    }
+  }
 }

@@ -6,6 +6,7 @@ import com.thaishopfun.mocktsf.OmsEndpoint;
 import com.thaishopfun.mocktsf.idp.TokenIssuer;
 import com.thaishopfun.oms.auth.AuthTestSupport;
 import com.thaishopfun.oms.inbox.InboxWorker;
+import com.thaishopfun.oms.invariant.VerifyInvariants;
 import com.thaishopfun.oms.stock.StockFixture;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -42,6 +43,7 @@ import tools.jackson.databind.node.ObjectNode;
 /** T13 B1: orphan reconciliation count stays distinct across defer-cap retries. */
 @ActiveProfiles("test")
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@VerifyInvariants
 class InboxOrphanDeferCapTest {
 
   private static final String INBOX_SECRET = "dev-inbox-hmac-secret";

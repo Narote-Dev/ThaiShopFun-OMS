@@ -4,6 +4,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.thaishopfun.oms.auth.AuthTestSupport;
 import com.thaishopfun.oms.catalog.CatalogHttp;
+import com.thaishopfun.oms.invariant.InvariantChecker;
+import com.thaishopfun.oms.invariant.InvariantCodes;
+import com.thaishopfun.oms.invariant.VerifyInvariants;
 import com.thaishopfun.oms.order.demo.OrderDemoCatalogService;
 import com.thaishopfun.oms.tenant.TenantContext;
 import java.net.URI;
@@ -22,6 +25,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import tools.jackson.databind.json.JsonMapper;
 
 /** Demo catalog seed for mock-tsf demo orders ({@code local}/{@code e2e} profiles). */
+@VerifyInvariants
 class OrderDemoCatalogApiTest extends OrderIntegrationTest {
 
   private static final JsonMapper JSON = JsonMapper.builder().build();
@@ -29,6 +33,7 @@ class OrderDemoCatalogApiTest extends OrderIntegrationTest {
       HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
 
   @Autowired OrderDemoCatalogService catalog;
+  @Autowired InvariantChecker invariantChecker;
 
   @AfterEach
   void clearTenant() throws Exception {
@@ -103,5 +108,34 @@ class OrderDemoCatalogApiTest extends OrderIntegrationTest {
         assertThat(rs.getLong(1)).isZero();
       }
     }
+    assertThat(invariantChecker.checkTenant(shop.tenantId())).isEmpty();
+  }
+
+  @Test
+  void ensureDemoCatalogReconcilesLedgerWhenOnHandDriftsFromLedger() throws Exception {
+    CatalogHttp.Shop httpShop = http.catalog().shop();
+    OrderFixture.Shop shop = OrderFixture.shopFor(httpShop);
+    TenantContext.set(shop.tenantId(), null);
+    catalog.ensureDemoCatalog();
+
+    try (Connection admin = AuthTestSupport.admin();
+        PreparedStatement drift =
+            admin.prepareStatement(
+                """
+                UPDATE inventory i
+                SET on_hand = on_hand + 7, stock_version = stock_version + 1
+                FROM sku s
+                WHERE s.tenant_id = i.tenant_id AND s.id = i.sku_id
+                  AND s.tenant_id = ? AND s.sku_code = 'DEMO-SKU-READY'
+                """)) {
+      drift.setObject(1, shop.tenantId());
+      assertThat(drift.executeUpdate()).isEqualTo(1);
+    }
+
+    assertThat(invariantChecker.checkTenant(shop.tenantId()))
+        .anyMatch(v -> InvariantCodes.STOCK_LEDGER_MISMATCH.equals(v.code()));
+
+    catalog.ensureDemoCatalog();
+    assertThat(invariantChecker.checkTenant(shop.tenantId())).isEmpty();
   }
 }

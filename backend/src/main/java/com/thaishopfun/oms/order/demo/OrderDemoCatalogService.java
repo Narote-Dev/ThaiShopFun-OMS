@@ -248,24 +248,35 @@ public class OrderDemoCatalogService {
             "SELECT id FROM warehouse WHERE tenant_id = ? AND is_default = true LIMIT 1",
             UUID.class,
             shop.tenantId());
-    Long count =
-        jdbc.queryForObject(
-            "SELECT count(*) FROM inventory WHERE tenant_id = ? AND sku_id = ? AND warehouse_id = ?",
-            Long.class,
+    java.util.List<Integer> existingRows =
+        jdbc.query(
+            """
+            SELECT on_hand FROM inventory
+            WHERE tenant_id = ? AND sku_id = ? AND warehouse_id = ?
+            FOR UPDATE
+            """,
+            (rs, row) -> rs.getInt("on_hand"),
             shop.tenantId(),
             skuId,
             warehouse);
-    if (count != null && count > 0) {
+    if (!existingRows.isEmpty()) {
+      int ledgerOnHand = ledgerOnHandSum(shop.tenantId(), skuId, warehouse);
+      int target = Math.max(onHand, reservedForSku(shop.tenantId(), skuId, warehouse));
+      int delta = target - ledgerOnHand;
       jdbc.update(
           """
           UPDATE inventory
-          SET on_hand = GREATEST(?, reserved), stock_version = stock_version + 1
+          SET on_hand = ?, stock_version = stock_version + 1
           WHERE tenant_id = ? AND sku_id = ? AND warehouse_id = ?
           """,
-          onHand,
+          target,
           shop.tenantId(),
           skuId,
           warehouse);
+      if (delta != 0) {
+        writeLedger(
+            shop.tenantId(), skuId, warehouse, delta, delta > 0 ? "ADJUST_IN" : "ADJUST_OUT");
+      }
       return;
     }
     jdbc.update(
@@ -275,6 +286,61 @@ public class OrderDemoCatalogService {
         skuId,
         warehouse,
         onHand);
+    writeLedger(shop.tenantId(), skuId, warehouse, onHand, "OPENING_BALANCE");
+  }
+
+  private int ledgerOnHandSum(UUID tenantId, UUID skuId, UUID warehouse) {
+    Integer sum =
+        jdbc.queryForObject(
+            """
+            SELECT coalesce(sum(delta_on_hand), 0)
+            FROM inventory_ledger
+            WHERE tenant_id = ? AND sku_id = ? AND warehouse_id = ?
+            """,
+            Integer.class,
+            tenantId,
+            skuId,
+            warehouse);
+    return sum == null ? 0 : sum;
+  }
+
+  private int reservedForSku(UUID tenantId, UUID skuId, UUID warehouse) {
+    Integer reserved =
+        jdbc.queryForObject(
+            "SELECT reserved FROM inventory WHERE tenant_id = ? AND sku_id = ? AND warehouse_id = ?",
+            Integer.class,
+            tenantId,
+            skuId,
+            warehouse);
+    return reserved == null ? 0 : reserved;
+  }
+
+  private void writeLedger(
+      UUID tenantId, UUID skuId, UUID warehouse, int deltaOnHand, String reason) {
+    long seq =
+        jdbc.queryForObject(
+            """
+            UPDATE inventory SET ledger_seq = ledger_seq + 1
+            WHERE tenant_id = ? AND sku_id = ? AND warehouse_id = ?
+            RETURNING ledger_seq
+            """,
+            Long.class,
+            tenantId,
+            skuId,
+            warehouse);
+    jdbc.update(
+        """
+        INSERT INTO inventory_ledger (
+          id, tenant_id, sku_id, warehouse_id, delta_on_hand, delta_reserved, reason, actor, ledger_seq
+        ) VALUES (?, ?, ?, ?, ?, 0, ?, 'demo-seed', ?)
+        """,
+        UuidV7.generate(),
+        tenantId,
+        skuId,
+        warehouse,
+        deltaOnHand,
+        reason,
+        seq);
   }
 
   private List<UUID> listTsfChannelAccounts(UUID tenantId) {

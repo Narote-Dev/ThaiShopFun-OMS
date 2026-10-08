@@ -8,6 +8,7 @@ import com.thaishopfun.mocktsf.contract.ContractValidator;
 import com.thaishopfun.oms.auth.AuthTestSupport;
 import com.thaishopfun.oms.catalog.CatalogHttp;
 import com.thaishopfun.oms.inbox.InboxWorker;
+import com.thaishopfun.oms.invariant.PiiLogAssertions;
 import com.thaishopfun.oms.order.OrderRecipientRepository;
 import com.thaishopfun.oms.order.OrderStatusHistoryRepository;
 import com.thaishopfun.oms.order.SalesOrder;
@@ -119,6 +120,13 @@ class OrderCancelApiTest extends OrderIntegrationTest {
 
   @Test
   void ownerCancelIsIdempotent() throws Exception {
+    try (PiiLogAssertions logs = PiiLogAssertions.attach("com.thaishopfun.oms.order.web")) {
+      ownerCancelIsIdempotentBody();
+      logs.assertNoPii();
+    }
+  }
+
+  private void ownerCancelIsIdempotentBody() throws Exception {
     ActiveShop shop = shopActive();
     registerMockOrder("TSF-240929-000123");
     SalesOrder order = fixture.insert(shop.fixture(), "TSF-240929-000123", "READY_TO_PICK", "NONE");

@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.thaishopfun.mocktsf.contract.ContractValidator;
 import com.thaishopfun.oms.auth.AuthTestSupport;
+import com.thaishopfun.oms.invariant.VerifyInvariants;
 import com.thaishopfun.oms.stock.ReservationEngine;
 import com.thaishopfun.oms.stock.StockExpiryJob;
 import com.thaishopfun.oms.stock.StockFixture;
@@ -58,6 +59,7 @@ import tools.jackson.databind.node.ObjectNode;
 @ActiveProfiles("test")
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @Import(StockTestConfig.class)
+@VerifyInvariants
 class CheckoutT12AAcceptanceTest {
 
   private static final JsonMapper JSON = JsonMapper.builder().build();
