@@ -4,10 +4,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.thaishopfun.oms.stock.StockFixture;
 import com.thaishopfun.oms.stock.StockTestBase;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
@@ -15,22 +16,21 @@ import org.junit.jupiter.api.Timeout;
 @VerifyInvariants(scope = VerifyInvariants.Scope.STOCK_ONLY)
 class InvariantTestTenantsSeparateThreadTest extends StockTestBase {
 
-  private UUID expectedTenant;
+  private static volatile Set<UUID> drainedByExtension;
+  private static volatile UUID expectedTenant;
 
-  @BeforeEach
-  void hookDrainObserver() {
+  @BeforeAll
+  static void captureExtensionDrain() {
+    drainedByExtension = null;
     expectedTenant = null;
-    VerifyInvariantsExtension.drainObserver =
-        drained -> {
-          if (expectedTenant != null) {
-            assertThat(drained).contains(expectedTenant);
-          }
-        };
+    VerifyInvariantsExtension.drainObserver = drained -> drainedByExtension = drained;
   }
 
-  @AfterEach
-  void unhookDrainObserver() {
+  @AfterAll
+  static void assertExtensionSawWorkerThreadTenant() {
     VerifyInvariantsExtension.drainObserver = null;
+    assertThat(drainedByExtension).isNotNull();
+    assertThat(drainedByExtension).contains(expectedTenant);
   }
 
   @Test

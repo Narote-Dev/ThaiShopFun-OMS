@@ -277,7 +277,7 @@ public class InvariantChecker {
             SELECT sr.id
             FROM stock_reservation sr
             JOIN sales_order o
-              ON o.tenant_id = sr.tenant_id AND o.id::text = sr.owner_ref
+              ON o.tenant_id = sr.tenant_id AND o.id::text = lower(sr.owner_ref)
             WHERE sr.status = 'ACTIVE'
               AND sr.owner_type = 'ORDER'
               AND o.order_status = 'CANCELLED'
@@ -301,7 +301,7 @@ public class InvariantChecker {
             SELECT sr.id
             FROM stock_reservation sr
             JOIN sales_order o
-              ON o.tenant_id = sr.tenant_id AND o.id::text = sr.owner_ref
+              ON o.tenant_id = sr.tenant_id AND o.id::text = lower(sr.owner_ref)
             WHERE sr.status = 'ACTIVE'
               AND sr.owner_type = 'ORDER'
               AND o.order_status = 'COMPLETED'

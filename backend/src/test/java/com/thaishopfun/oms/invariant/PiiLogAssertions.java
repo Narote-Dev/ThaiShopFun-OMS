@@ -8,12 +8,25 @@ import ch.qos.logback.core.read.ListAppender;
 import java.util.List;
 import org.slf4j.LoggerFactory;
 
-/** Captures log lines in tests; asserts sentinel PII strings never appear (T27 will widen this). */
+/** Captures log lines in tests; asserts known PII from fixtures and contracts never appear. */
 public final class PiiLogAssertions implements AutoCloseable {
 
+  /** Legacy sentinel; kept for tests that embed this value explicitly. */
   public static final String SENTINEL_PHONE = "0812345678";
   public static final String SENTINEL_EMAIL = "customer-pii@example.com";
   public static final String SENTINEL_NAME = "สมชาย ใจดี";
+
+  /** Values used by order intake examples, OrderFixture, and related API tests (T00 AC6). */
+  private static final List<String> FORBIDDEN =
+      List.of(
+          SENTINEL_PHONE,
+          SENTINEL_EMAIL,
+          SENTINEL_NAME,
+          "0812341234",
+          "081-234-5678",
+          "+66812345678",
+          "66812345678",
+          "812345678");
 
   private final ListAppender<ILoggingEvent> appender;
 
@@ -32,9 +45,9 @@ public final class PiiLogAssertions implements AutoCloseable {
   public void assertNoPii() {
     for (ILoggingEvent event : appender.list) {
       String line = event.getFormattedMessage();
-      assertThat(line).doesNotContain(SENTINEL_PHONE);
-      assertThat(line).doesNotContain(SENTINEL_EMAIL);
-      assertThat(line).doesNotContain(SENTINEL_NAME);
+      for (String secret : FORBIDDEN) {
+        assertThat(line).doesNotContain(secret);
+      }
     }
   }
 

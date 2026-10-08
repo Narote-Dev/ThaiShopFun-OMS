@@ -53,21 +53,24 @@ class InvariantCheckerBreakTest extends StockTestBase {
     try {
       assertStockCode(shop.tenant(), InvariantCodes.STOCK_RESERVED_BOUNDS);
     } finally {
-      fixture.inTenant(
-          shop.tenant(),
-          () ->
-              jdbc.update(
-                  """
-                  UPDATE inventory SET reserved = 0, on_hand = 5
-                  WHERE tenant_id = ? AND sku_id = ? AND warehouse_id = ?
-                  """,
-                  shop.tenant(),
-                  sku,
-                  shop.warehouse()));
-    }
-    try (Connection admin = AuthTestSupport.admin();
-        Statement st = admin.createStatement()) {
-      st.execute(INVENTORY_QUANTITY_CHECK);
+      try {
+        fixture.inTenant(
+            shop.tenant(),
+            () ->
+                jdbc.update(
+                    """
+                    UPDATE inventory SET reserved = 0, on_hand = 5
+                    WHERE tenant_id = ? AND sku_id = ? AND warehouse_id = ?
+                    """,
+                    shop.tenant(),
+                    sku,
+                    shop.warehouse()));
+      } finally {
+        try (Connection admin = AuthTestSupport.admin();
+            Statement st = admin.createStatement()) {
+          st.execute(INVENTORY_QUANTITY_CHECK);
+        }
+      }
     }
   }
 
@@ -240,7 +243,7 @@ class InvariantCheckerBreakTest extends StockTestBase {
               shop.tenant(),
               sku,
               shop.warehouse(),
-              orderId.toString(),
+              orderId.toString().toUpperCase(),
               reservation);
         });
     assertCode(shop.tenant(), InvariantCodes.ORDER_CANCELLED_ACTIVE_RESERVATION);
@@ -279,7 +282,7 @@ class InvariantCheckerBreakTest extends StockTestBase {
               shop.tenant(),
               sku,
               shop.warehouse(),
-              orderId.toString(),
+              orderId.toString().toUpperCase(),
               reservation);
         });
     assertCode(shop.tenant(), InvariantCodes.ORDER_TERMINAL_ACTIVE_RESERVATION);

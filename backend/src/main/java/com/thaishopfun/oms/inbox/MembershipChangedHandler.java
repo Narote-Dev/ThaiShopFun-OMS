@@ -108,7 +108,7 @@ public class MembershipChangedHandler implements InboxHandler {
 
     // Step 6: Audit the status change. Skip equal-ent_ver replays unless JIT provision already
     // applied tenant state without an audit row (first inbox pass after shop create).
-    if (shouldWriteAudit(message.tenantId(), idempotentReplay)) {
+    if (shouldWriteAudit(message.tenantId(), idempotentReplay, incoming.entVer)) {
       jdbc.update(
           """
           INSERT INTO audit_log (
@@ -127,7 +127,7 @@ public class MembershipChangedHandler implements InboxHandler {
     }
   }
 
-  private boolean shouldWriteAudit(UUID tenantId, boolean idempotentReplay) {
+  private boolean shouldWriteAudit(UUID tenantId, boolean idempotentReplay, long entVer) {
     if (!idempotentReplay) {
       return true;
     }
@@ -135,10 +135,13 @@ public class MembershipChangedHandler implements InboxHandler {
         jdbc.queryForObject(
             """
             SELECT count(*) FROM audit_log
-            WHERE tenant_id = ? AND action = 'membership.changed'
+            WHERE tenant_id = ?
+              AND action = 'membership.changed'
+              AND ("after"->>'ent_ver')::bigint = ?
             """,
             Long.class,
-            tenantId);
+            tenantId,
+            entVer);
     return prior == null || prior == 0;
   }
 
