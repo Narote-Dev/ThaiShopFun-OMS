@@ -33,7 +33,6 @@ import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
-import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -125,11 +124,6 @@ class ListingLifecycleBackoffAcceptanceTest {
   @Autowired MeterRegistry meters;
 
   StockFixture fixture;
-
-  @AfterAll
-  static void stopMockTsf() {
-    OrderIntakeMockRuntime.stopMock();
-  }
 
   @AfterEach
   void teardown() {
@@ -400,8 +394,8 @@ class ListingLifecycleBackoffAcceptanceTest {
                 """
                 INSERT INTO sales_order (
                   id, tenant_id, channel_account_id, external_order_id, order_status,
-                  fulfillment_status, payment_status, hold_reason, ordered_at
-                ) VALUES (?, ?, ?, ?, 'ACTIVE', 'UNFULFILLED', 'UNPAID', 'SKU_NOT_MAPPED', now())
+                  fulfillment_status, payment_status, payment_method, hold_reason, ordered_at
+                ) VALUES (?, ?, ?, ?, 'ACTIVE', 'UNFULFILLED', 'UNPAID', 'COD', 'SKU_NOT_MAPPED', now())
                 """,
                 orderId,
                 shop.tenant(),

@@ -36,7 +36,6 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
-import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
@@ -125,11 +124,6 @@ class ListingLifecycleT12BFUAcceptanceTest {
   StockFixture fixture;
   private final java.util.concurrent.atomic.AtomicLong listingAggregateVersion =
       new java.util.concurrent.atomic.AtomicLong(0);
-
-  @AfterAll
-  static void stopMockTsf() {
-    OrderIntakeMockRuntime.stopMock();
-  }
 
   @AfterEach
   void teardown() throws Exception {
@@ -255,30 +249,27 @@ class ListingLifecycleT12BFUAcceptanceTest {
     UUID account = fixture.channelAccount(shop, shopId, "ACTIVE", "CONNECTED");
     UUID sku = fixture.sku(shop, 8);
     String listingSku = "L-lc-sweeper";
-    fixture.channelListing(shop, account, listingSku, sku, true);
+    fixture.channelListing(shop, account, listingSku, null, true, false);
 
     String externalOrderId = "TSF-LC-AC03-" + UUID.randomUUID();
     ingest(
         OrderIntakeScenarioSupport.orderCreated(
             JSON, externalOrderId, shopId, null, "COD", listingSku, 1, 1));
     worker.processAvailable(10);
+    assertThat(holdReason(shop, externalOrderId)).isEqualTo("SKU_NOT_MAPPED");
 
     fixture.inTenant(
         shop.tenant(),
         () ->
             jdbc.update(
                 """
-                UPDATE channel_listing SET removed_at = now()
+                UPDATE channel_listing
+                SET sku_id = ?, mapping_source = 'MANUAL', mapped_at = now(), removed_at = now()
                 WHERE channel_account_id = ? AND external_sku_id = ?
                 """,
+                sku,
                 account,
                 listingSku));
-    fixture.inTenant(
-        shop.tenant(),
-        () ->
-            jdbc.update(
-                "UPDATE sales_order SET hold_reason = 'SKU_NOT_MAPPED' WHERE external_order_id = ?",
-                externalOrderId));
 
     long reservationsBefore = stockReservationCount(shop);
     listingChanged(shopId, listingSku, "UPSERT", "LC-SWEEPER", "Revived via event");
