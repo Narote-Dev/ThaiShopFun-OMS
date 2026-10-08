@@ -7,6 +7,7 @@ import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Clock;
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
@@ -91,6 +92,7 @@ public class OrderHoldResolverJob {
     UUID previousUser = TenantContext.userId();
     int processed = 0;
     long backoffOrders = 0;
+    Instant now = clock.instant();
     try {
       TenantContext.clear();
       List<UUID> tenants = listings.listActiveTenantIds();
@@ -101,11 +103,12 @@ public class OrderHoldResolverJob {
               tenantReadTx.execute(
                   status ->
                       listings.findResolvableSkuNotMappedOrderIds(
-                          tenantId, properties.getBatchSize()));
+                          tenantId, properties.getBatchSize(), now));
           ReevalSummary summary =
               resolveOrders(tenantId, orderIds, 0, "order.remap", null, false, true);
           processed += summary.released() + summary.outOfStock() + summary.stillHeld();
-          backoffOrders += retries.countInBackoff(tenantId, clock.instant());
+          backoffOrders +=
+              tenantReadTx.execute(status -> retries.countInBackoff(tenantId, now));
         } catch (RuntimeException ex) {
           log.error("hold resolver failed for tenant {}", tenantId, ex);
         } finally {
@@ -169,7 +172,7 @@ public class OrderHoldResolverJob {
                 status ->
                     resolver.resolveHeldOrder(
                         orderId, keyPrefix, recheckIdempotencyKey, attemptId));
-        handleRetryState(tenantId, orderId, outcome, applyBackoff, null);
+        persistRetryState(tenantId, orderId, outcome, applyBackoff, null);
         return outcome;
       } catch (RuntimeException ex) {
         lastError = ex;
@@ -184,31 +187,47 @@ public class OrderHoldResolverJob {
             orderId,
             attempt,
             ex.getClass().getSimpleName());
-        handleRetryState(tenantId, orderId, Outcome.DEFERRED, applyBackoff, ex);
+        persistRetryState(tenantId, orderId, Outcome.DEFERRED, applyBackoff, ex);
         deferredCounter.increment();
         return Outcome.DEFERRED;
       }
     }
-    handleRetryState(tenantId, orderId, Outcome.DEFERRED, applyBackoff, lastError);
+    persistRetryState(tenantId, orderId, Outcome.DEFERRED, applyBackoff, lastError);
     deferredCounter.increment();
     return Outcome.DEFERRED;
   }
 
-  private void handleRetryState(
-      UUID tenantId, UUID orderId, Outcome outcome, boolean applyBackoff, RuntimeException error) {
-    if (outcome == Outcome.RELEASED || outcome == Outcome.OUT_OF_STOCK) {
-      retries.clear(tenantId, orderId);
-      return;
-    }
-    if (!applyBackoff) {
-      return;
-    }
-    if (outcome == Outcome.DEFERRED || outcome == Outcome.STILL_HELD) {
-      String code =
-          error == null
-              ? (outcome == Outcome.STILL_HELD ? "STILL_HELD" : "DEFERRED")
-              : error.getClass().getSimpleName();
-      retries.recordBackoff(tenantId, orderId, code, clock.instant());
+  private void persistRetryState(
+      UUID tenantId,
+      UUID orderId,
+      Outcome outcome,
+      boolean applyBackoff,
+      RuntimeException error) {
+    try {
+      tenantWriteTx.execute(
+          status -> {
+            if (outcome == Outcome.RELEASED || outcome == Outcome.OUT_OF_STOCK) {
+              retries.clear(tenantId, orderId);
+              return null;
+            }
+            if (!applyBackoff) {
+              return null;
+            }
+            if (outcome == Outcome.DEFERRED || outcome == Outcome.STILL_HELD) {
+              String code =
+                  error == null
+                      ? (outcome == Outcome.STILL_HELD ? "STILL_HELD" : "DEFERRED")
+                      : error.getClass().getSimpleName();
+              retries.recordBackoff(tenantId, orderId, code, clock.instant());
+            }
+            return null;
+          });
+    } catch (RuntimeException ex) {
+      log.warn(
+          "hold retry state update failed for tenantId={} orderId={}: {}",
+          tenantId,
+          orderId,
+          ex.getClass().getSimpleName());
     }
   }
 
