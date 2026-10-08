@@ -26,18 +26,19 @@ class InvariantJobTest extends StockTestBase {
   void runOnceEmitsMetricAndIdOnlyLogs() {
     StockFixture.Shop shop = fixture.shop("ACTIVE");
     UUID sku = fixture.sku(shop, 2);
-    as(
-        shop,
+    fixture.runInTenant(
+        shop.tenant(),
         () -> {
-          jdbc.update(
-              """
-              UPDATE inventory SET on_hand = on_hand + 1, stock_version = stock_version + 1
-              WHERE tenant_id = ? AND sku_id = ? AND warehouse_id = ?
-              """,
-              shop.tenant(),
-              sku,
-              shop.warehouse());
-          return null;
+          int updated =
+              jdbc.update(
+                  """
+                  UPDATE inventory SET on_hand = on_hand + 1, stock_version = stock_version + 1
+                  WHERE tenant_id = ? AND sku_id = ? AND warehouse_id = ?
+                  """,
+                  shop.tenant(),
+                  sku,
+                  shop.warehouse());
+          assertThat(updated).isEqualTo(1);
         });
 
     Logger logger = (Logger) LoggerFactory.getLogger(InvariantJob.class);

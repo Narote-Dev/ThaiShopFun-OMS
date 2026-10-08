@@ -260,9 +260,9 @@ public class OrderDemoCatalogService {
             skuId,
             warehouse);
     if (!existingRows.isEmpty()) {
-      int existing = existingRows.get(0);
+      int ledgerOnHand = ledgerOnHandSum(shop.tenantId(), skuId, warehouse);
       int target = Math.max(onHand, reservedForSku(shop.tenantId(), skuId, warehouse));
-      int delta = target - existing;
+      int delta = target - ledgerOnHand;
       jdbc.update(
           """
           UPDATE inventory
@@ -287,6 +287,21 @@ public class OrderDemoCatalogService {
         warehouse,
         onHand);
     writeLedger(shop.tenantId(), skuId, warehouse, onHand, "OPENING_BALANCE");
+  }
+
+  private int ledgerOnHandSum(UUID tenantId, UUID skuId, UUID warehouse) {
+    Integer sum =
+        jdbc.queryForObject(
+            """
+            SELECT coalesce(sum(delta_on_hand), 0)
+            FROM inventory_ledger
+            WHERE tenant_id = ? AND sku_id = ? AND warehouse_id = ?
+            """,
+            Integer.class,
+            tenantId,
+            skuId,
+            warehouse);
+    return sum == null ? 0 : sum;
   }
 
   private int reservedForSku(UUID tenantId, UUID skuId, UUID warehouse) {

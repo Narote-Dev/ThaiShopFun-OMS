@@ -224,27 +224,27 @@ public class InvariantChecker {
   }
 
   private void logMalformedOrderOwnerRefs(UUID tenantId) {
-    List<String> refs =
-        jdbc.query(
-            """
-            SELECT sr.id::text || ':' || sr.owner_ref AS ref
-            FROM stock_reservation sr
-            WHERE sr.status = 'ACTIVE'
-              AND sr.owner_type = 'ORDER'
-              AND btrim(sr.owner_ref) <> ''
-              AND lower(sr.owner_ref) !~ ?
-              AND sr.owner_ref !~ '^ord-'
-            LIMIT ?
-            """,
-            (rs, row) -> rs.getString("ref"),
-            ORDER_OWNER_UUID_PATTERN,
-            ENTITY_LIMIT);
-    for (String ref : refs) {
-      log.warn(
-          "invariant skipped orphan check for malformed ORDER owner_ref tenant_id={} {}",
-          tenantId,
-          ref);
-    }
+    jdbc.query(
+        """
+        SELECT sr.id, length(sr.owner_ref) AS owner_ref_len
+        FROM stock_reservation sr
+        WHERE sr.status = 'ACTIVE'
+          AND sr.owner_type = 'ORDER'
+          AND btrim(sr.owner_ref) <> ''
+          AND lower(sr.owner_ref) !~ ?
+          AND sr.owner_ref !~ '^ord-'
+        LIMIT ?
+        """,
+        (rs, row) -> {
+          log.warn(
+              "invariant skipped orphan check for malformed ORDER owner_ref tenant_id={} reservation_id={} owner_ref_len={}",
+              tenantId,
+              rs.getObject("id", UUID.class),
+              rs.getInt("owner_ref_len"));
+          return null;
+        },
+        ORDER_OWNER_UUID_PATTERN,
+        ENTITY_LIMIT);
   }
 
   private List<Violation> orderReservationOrphan(UUID tenantId) {
