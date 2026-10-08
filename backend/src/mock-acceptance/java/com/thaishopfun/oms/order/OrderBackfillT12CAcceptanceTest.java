@@ -63,8 +63,7 @@ class OrderBackfillT12CAcceptanceTest {
     registry.add("oms.security.internal-client-ids", () -> "tsf,tsf-checkout");
     registry.add("oms.inbox.hmac-secrets", () -> INBOX_SECRET);
     registry.add("oms.tsf.base-url", () -> "http://127.0.0.1:" + mockPort);
-    registry.add(
-        "oms.tsf.token-uri", () -> "http://127.0.0.1:" + mockPort + "/tsf-idp/oauth/token");
+    registry.add("oms.tsf.token-uri", () -> "http://127.0.0.1:" + mockPort + "/tsf-idp/token");
     registry.add("oms.tsf.client-secret", () -> "dev-tsf-client-secret");
   }
 
@@ -113,13 +112,13 @@ class OrderBackfillT12CAcceptanceTest {
     postMock(
         "/control/orders/bulk",
         "{\"count\":50,\"payment\":\"PREPAID\",\"paid\":true,\"shop_id\":\"" + shopId + "\"}");
-    backfill.runOnce();
+    backfill.runOnceForTenant(shop.tenant());
     long count =
         fixture.inTenant(
             shop.tenant(),
             () -> jdbc.queryForObject("SELECT count(*) FROM sales_order", Long.class));
     assertThat(count).isEqualTo(50);
-    backfill.runOnce();
+    backfill.runOnceForTenant(shop.tenant());
     long again =
         fixture.inTenant(
             shop.tenant(),
@@ -178,7 +177,7 @@ class OrderBackfillT12CAcceptanceTest {
   private static String tsfToken() throws Exception {
     int mockPort = OrderIntakeMockRuntime.mockPort();
     HttpRequest request =
-        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + mockPort + "/tsf-idp/oauth/token"))
+        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + mockPort + "/tsf-idp/token"))
             .timeout(Duration.ofSeconds(10))
             .header("Content-Type", "application/x-www-form-urlencoded")
             .POST(

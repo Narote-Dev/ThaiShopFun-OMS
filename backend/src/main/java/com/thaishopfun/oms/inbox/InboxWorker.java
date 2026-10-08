@@ -329,7 +329,10 @@ public class InboxWorker {
     if (gap) {
       String shopId = row.payload().path("tsf_shop_id").asString(null);
       String orderId = row.payload().path("data").path("order_id").asString(null);
-      if (shopId == null || orderId == null) {
+      if (orderId == null || orderId.isBlank()) {
+        orderId = row.aggregateId();
+      }
+      if (shopId == null || orderId == null || orderId.isBlank()) {
         throw new NonRetryableInboxException("gap event is missing shop or order id");
       }
       throw new InboxGapRefetchRequired(

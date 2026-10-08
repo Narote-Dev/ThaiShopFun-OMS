@@ -88,13 +88,21 @@ public class OrderBackfillJob {
   }
 
   public int runOnce() {
+    return runOnceForTenants(listTenants());
+  }
+
+  /** Test hook: backfill one tenant without scanning every eligible shop in the database. */
+  public int runOnceForTenant(UUID tenantId) {
+    return runOnceForTenants(List.of(tenantId));
+  }
+
+  private int runOnceForTenants(List<UUID> tenants) {
     assertNoActiveTransaction("runOnce");
     UUID previousTenant = TenantContext.tenantId();
     UUID previousUser = TenantContext.userId();
     int touched = 0;
     try {
       TenantContext.clear();
-      List<UUID> tenants = listTenants();
       for (UUID tenantId : tenants) {
         TenantContext.set(tenantId, null);
         try {
