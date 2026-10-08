@@ -154,7 +154,7 @@ public class OrderRestSnapshotApplier {
             .findByExternalId(account.id(), orderId)
             .map(o -> o.externalVersion() == null ? 0L : o.externalVersion())
             .orElse(0L);
-    if (version > 0 && version <= known) {
+    if (version > 0 && version <= known && !"order.paid".equals(eventType)) {
       return Outcome.SKIPPED;
     }
     if (!orders.existsByExternalId(account.id(), orderId)) {
