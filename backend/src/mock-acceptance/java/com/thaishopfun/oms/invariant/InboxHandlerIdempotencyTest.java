@@ -74,7 +74,8 @@ class InboxHandlerIdempotencyTest {
   @Test
   void fingerprintDetectsMutationsUnderRls() throws Exception {
     Map<String, Long> before = fingerprint();
-    deliver(registry.find("order.created"), loadExample("order.created.json", tsfShopId), "fp-probe");
+    deliver(
+        registry.find("order.created"), loadExample("order.created.json", tsfShopId), "fp-probe");
     assertThat(fingerprint()).isNotEqualTo(before);
   }
 

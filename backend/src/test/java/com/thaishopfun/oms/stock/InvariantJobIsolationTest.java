@@ -32,8 +32,7 @@ class InvariantJobIsolationTest {
     UUID failing = UUID.randomUUID();
     UUID ok = UUID.randomUUID();
     when(checker.checkSchema()).thenReturn(List.of());
-    when(jdbc.query(anyString(), any(RowMapper.class)))
-        .thenReturn(List.of(failing, ok));
+    when(jdbc.query(anyString(), any(RowMapper.class))).thenReturn(List.of(failing, ok));
     when(checker.checkTenant(any()))
         .thenAnswer(
             inv -> {

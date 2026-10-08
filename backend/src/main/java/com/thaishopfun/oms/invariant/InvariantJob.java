@@ -56,8 +56,7 @@ public class InvariantJob {
         } catch (Exception ex) {
           log.error("invariant check failed tenant_id={}", tenantId, ex);
           meters
-              .counter(
-                  VIOLATIONS_METRIC, List.of(Tag.of("code", InvariantCodes.CHECK_FAILED)))
+              .counter(VIOLATIONS_METRIC, List.of(Tag.of("code", InvariantCodes.CHECK_FAILED)))
               .increment();
         }
       }

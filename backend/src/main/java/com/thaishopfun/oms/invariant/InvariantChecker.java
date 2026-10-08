@@ -320,10 +320,7 @@ public class InvariantChecker {
     return bad.isEmpty()
         ? List.of()
         : List.of(
-            Violation.of(
-                InvariantCodes.ORDER_READY_TO_PICK_COVERAGE,
-                tenantId,
-                capEntityIds(bad)));
+            Violation.of(InvariantCodes.ORDER_READY_TO_PICK_COVERAGE, tenantId, capEntityIds(bad)));
   }
 
   private static List<UUID> capEntityIds(List<UUID> ids) {
