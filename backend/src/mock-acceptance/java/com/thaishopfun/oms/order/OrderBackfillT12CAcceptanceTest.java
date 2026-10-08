@@ -450,6 +450,7 @@ class OrderBackfillT12CAcceptanceTest {
     postMock("/control/orders/" + orderId + "/mark-paid", "{\"aggregate_version\":3}");
     int processedAfterMarkPaid = 0;
     for (int round = 0; round < 10; round++) {
+      wakeInboxRetries();
       processedAfterMarkPaid += worker.processAvailable(5);
       if (gapRefetchCount() >= gapsBefore + 1
           && "PROCESSED".equals(inboxStatus(shop.tenant(), paidEarly.path("event_id").asString()))) {
@@ -498,6 +499,7 @@ class OrderBackfillT12CAcceptanceTest {
     String paidEventId = paid.path("event_id").asString();
     ingest(paid, false);
     for (int round = 0; round < 30; round++) {
+      wakeInboxRetries();
       worker.processAvailable(5);
       String status = inboxStatus(shop.tenant(), paidEventId);
       if ("DEAD".equals(status)) {
@@ -539,6 +541,19 @@ class OrderBackfillT12CAcceptanceTest {
                 "SELECT external_version FROM sales_order WHERE external_order_id = ?",
                 Long.class,
                 orderId));
+  }
+
+  private void wakeInboxRetries() throws Exception {
+    try (Connection admin = AuthTestSupport.admin();
+        var statement = admin.createStatement()) {
+      statement.execute(
+          """
+          UPDATE inbox_event
+          SET next_attempt_at = pg_catalog.now() - interval '1 millisecond'
+          WHERE status IN ('RECEIVED', 'FAILED')
+            AND next_attempt_at > pg_catalog.now()
+          """);
+    }
   }
 
   private void ingest(ObjectNode event) throws Exception {

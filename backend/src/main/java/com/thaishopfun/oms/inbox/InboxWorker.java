@@ -383,7 +383,15 @@ public class InboxWorker {
             markProcessed(row);
           });
     } catch (com.thaishopfun.oms.order.backfill.GapSnapshotNotReadyException notReady) {
-      recordFailure(claimed, notReady);
+      failureTx.executeWithoutResult(
+          status -> {
+            InboxRow row = lock(claimed.id());
+            if (row == null || !leaseMatches(row.nextAttemptAt(), gap.leaseUntil())) {
+              return;
+            }
+            // REST is behind the inbox version; retry soon without burning the failure ladder.
+            pushBack(row, Duration.ofMillis(1), sanitize(notReady));
+          });
     } catch (RuntimeException ex) {
       recordFailure(claimed, ex);
     }
