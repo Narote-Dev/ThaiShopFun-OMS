@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 import subprocess
 import sys
+import tempfile
 from collections import defaultdict
 from pathlib import Path
 
@@ -12,6 +13,10 @@ ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_SCHEMA = ROOT / "docs/schema/schema-ee4e425_39c6.sql"
 DEFAULT_COLS = ROOT / "docs/schema/columns-ee4e425_4276.tsv"
 REF = "อ้างอิง main @ ee4e425 (Flyway V13)"
+GENERATED_NOTE = (
+    "> **Generated** — แก้ที่ `docs/tools/modules_body.md` / `docs/tools/pages_body.md` "
+    "แล้วรัน `python docs/tools/build_reference_docs.py`.\n\n"
+)
 
 sys.path.insert(0, str(ROOT / "docs/tools"))
 from field_meta.all_fields import FIELDS  # noqa: E402
@@ -285,7 +290,7 @@ def render_table(name, columns, parsed, meta):
     if checks.get(name):
         lines.append("- **CHECK:**")
         for cname, expr in checks[name]:
-            lines.append(f"  - `{cname}`: `{expr[:200]}{'…' if len(expr) > 200 else ''}`")
+            lines.append(f"  - `{cname}`: `{expr}`")
     if indexes.get(name):
         lines.append("- **Indexes:**")
         for iname, kind, cols_i, where in indexes[name]:
@@ -317,7 +322,26 @@ def md_table(rows):
     return "\n".join(out) + "\n"
 
 
-def mermaid_er(domain_tables, fks, pks):
+def mermaid_pg_type(dtype: str) -> str:
+    d = dtype.lower()
+    if "uuid" in d:
+        return "uuid"
+    if "timestamp" in d:
+        return "timestamptz"
+    if "bigint" in d:
+        return "bigint"
+    if "integer" in d or "smallint" in d:
+        return "int"
+    if "numeric" in d or "decimal" in d:
+        return "numeric"
+    if "boolean" in d:
+        return "bool"
+    if "json" in d:
+        return "jsonb"
+    return "text"
+
+
+def mermaid_er(domain_tables, fks, pks, col_types: dict[tuple[str, str], str]):
     domain_set = set(domain_tables)
     lines = ["```mermaid", "erDiagram"]
     for t in domain_tables:
@@ -325,8 +349,8 @@ def mermaid_er(domain_tables, fks, pks):
         pk_raw = pks.get(t, "id")
         for pk_col in pk_raw.split(","):
             pk_col = pk_col.strip()
-            # mermaid erDiagram requires "type name" lines
-            lines.append(f"    uuid {pk_col}")
+            mtype = mermaid_pg_type(col_types.get((t, pk_col), "uuid"))
+            lines.append(f"    {mtype} {pk_col}")
         lines.append("  }")
     seen = set()
     for t in domain_tables:
@@ -353,6 +377,7 @@ def build_data_dictionary(schema_path: Path, cols_path: Path):
     text = schema_path.read_text()
     parsed = parse_schema(text)
     columns = parse_columns(cols_path)
+    col_types = {(t, c[1]): c[2] for t, cols in columns.items() for c in cols}
     parts = [
         f"# OMS Data Dictionary\n\n{REF}\n",
         "พจนานุกรมข้อมูลทุกคอลัมน์ธุรกิจ (329) จาก `docs/schema/schema-ee4e425_39c6.sql` / `columns-ee4e425_4276.tsv` "
@@ -365,7 +390,7 @@ def build_data_dictionary(schema_path: Path, cols_path: Path):
     parts.append("## ER diagrams\n")
     for domain, tbls in DOMAINS.items():
         parts.append(f"### {domain}\n")
-        parts.append(mermaid_er(tbls, parsed[0], parsed[2]) + "\n")
+        parts.append(mermaid_er(tbls, parsed[0], parsed[2], col_types) + "\n")
     parts.append(CROSS_DOMAIN_ER + "\n")
     parts.append("## ค่า enum / status\n" + enum_section())
     parts.append("## DB roles, RLS, Flyway\n" + roles_section())
@@ -376,27 +401,37 @@ def build_data_dictionary(schema_path: Path, cols_path: Path):
 
 
 def build_modules():
-    return (ROOT / "docs/tools/modules_body.md").read_text(encoding="utf-8")
+    body = (ROOT / "docs/tools/modules_body.md").read_text(encoding="utf-8")
+    if body.startswith("> **Generated**"):
+        return body
+    return GENERATED_NOTE + body
 
 
 def build_pages():
-    return (ROOT / "docs/tools/pages_body.md").read_text(encoding="utf-8")
+    body = (ROOT / "docs/tools/pages_body.md").read_text(encoding="utf-8")
+    if body.startswith("> **Generated**"):
+        return body
+    return GENERATED_NOTE + body
 
 
 def build_docs_readme():
     body = (ROOT / "docs/tools/docs_readme_body.md").read_text(encoding="utf-8")
-    return f"# ดัชนีเอกสาร OMS\n\n{REF}\n\n{body}"
+    return f"# ดัชนีเอกสาร OMS\n\n{REF}\n\n{GENERATED_NOTE}{body}"
 
 
 def verify_mermaid(md_path: Path) -> int:
     blocks = re.findall(r"```mermaid\n(.*?)```", md_path.read_text(encoding="utf-8"), re.S)
     ok = 0
     for i, block in enumerate(blocks):
-        tmp = Path(f"/tmp/mermaid_{i}.mmd")
-        tmp.write_text(block, encoding="utf-8")
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".mmd", prefix=f"mermaid_{i}_", delete=False, encoding="utf-8"
+        ) as tmp:
+            tmp.write(block)
+            mmd_path = tmp.name
+        svg_path = mmd_path.replace(".mmd", ".svg")
         try:
             subprocess.run(
-                ["npx", "-y", "@mermaid-js/mermaid-cli", "-i", str(tmp), "-o", f"/tmp/mermaid_{i}.svg"],
+                ["npx", "-y", "@mermaid-js/mermaid-cli", "-i", mmd_path, "-o", svg_path],
                 check=True,
                 capture_output=True,
                 timeout=120,
@@ -404,6 +439,9 @@ def verify_mermaid(md_path: Path) -> int:
             ok += 1
         except (subprocess.CalledProcessError, FileNotFoundError) as e:
             print("mermaid render failed", i, e)
+        finally:
+            Path(mmd_path).unlink(missing_ok=True)
+            Path(svg_path).unlink(missing_ok=True)
     return ok
 
 

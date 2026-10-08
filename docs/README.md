@@ -2,6 +2,8 @@
 
 อ้างอิง main @ ee4e425 (Flyway V13)
 
+> **Generated** — แก้ที่ `docs/tools/modules_body.md` / `docs/tools/pages_body.md` แล้วรัน `python docs/tools/build_reference_docs.py`.
+
 
 | ไฟล์ | ใช้ทำอะไร |
 |---|---|

@@ -66,9 +66,14 @@ def main():
     assert dd.count("```mermaid") >= 7
 
     mermaid_blocks = dd.count("```mermaid")
+    from generate_field_usage import verify_usage_against_java
+
+    mismatches = verify_usage_against_java(USAGE)
+    assert not mismatches, f"usage/class-column mismatches: {mismatches[:3]}"
+
     print(
         f"OK columns={len(cols)} fields={len(FIELDS)} fks={fk} checks={check_count} "
-        f"blank_meanings=0 usage=329 mermaid_blocks={mermaid_blocks}"
+        f"blank_meanings=0 usage=329 usage_mismatches=0 mermaid_blocks={mermaid_blocks}"
     )
 
 

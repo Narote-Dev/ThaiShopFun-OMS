@@ -1,3 +1,5 @@
+> **Generated** — แก้ที่ `docs/tools/modules_body.md` / `docs/tools/pages_body.md` แล้วรัน `python docs/tools/build_reference_docs.py`.
+
 # Frontend pages
 
 อ้างอิง main @ ee4e425 (Flyway V13)
@@ -86,7 +88,7 @@ Hash routing (`#/...`). สี/label: [`frontend/src/ui/status.ts`](../../fronte
 
 ## `#/channel/listings` — Listings (`ListingsPage`)
 
-- **Hash params:** `channel_account_id`, `mapped` (`true`/`false`/`all`, default **unmapped**), `removed=true`, `q`, `offset`
+- **Hash params:** `channel_account_id`, `mapped` (`true`/`false`/`all`, default **unmapped**), `removed=true`, `q`, `offset` — เปิด chip removed บังคับ `mapped=all` **เฉพาะเมื่อ** filter เดิมเป็น unmapped (ถ้าเลือก mapped/all อยู่แล้วไม่เปลี่ยน)
 - **API:** `GET /api/v1/channel-accounts`, `GET /api/v1/channel-listings`, `PUT .../mapping`, `DELETE .../mapping`, `POST .../listing-syncs`
 - **ส่วน:** filter บัญชี, select mapped/unmapped/all, **chip removed** (`aria-pressed` toggle — เปิดแล้วบังคับ `mapped=all`), ค้นหา seller sku/name, ตาราง, ปุ่ม sync, dialog แมป SKU
 - **Sync result (ไทยใน UI):** แสดงจำนวน inserted/updated/removed + `ReevalSummary` (released/outOfStock/stillHeld/deferred)
