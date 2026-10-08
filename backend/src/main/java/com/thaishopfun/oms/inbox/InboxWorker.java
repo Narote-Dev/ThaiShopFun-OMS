@@ -157,16 +157,32 @@ public class InboxWorker {
   public int processAvailable(int limit) {
     int bounded = Math.min(Math.max(limit, 1), 1000);
     int handled = 0;
-    // Extra passes let a gap defer (1ms) unblock a lower-version sibling claimed in the same batch.
-    for (int pass = 0; pass < 5; pass++) {
-      List<Claimed> claimed = claim(bounded);
-      if (claimed.isEmpty()) {
-        break;
-      }
-      for (Claimed row : claimed) {
-        try {
-          processClaim(row);
+    List<Claimed> claimed = claim(bounded);
+    if (claimed.isEmpty()) {
+      return 0;
+    }
+    boolean gapRetry = false;
+    boolean progressed = false;
+    for (Claimed row : claimed) {
+      try {
+        ClaimOutcome outcome = processClaim(row);
+        if (outcome.countsAsHandled()) {
           handled++;
+        }
+        gapRetry |= outcome == ClaimOutcome.GAP_RETRY;
+        progressed |= outcome == ClaimOutcome.PROCESSED;
+      } catch (RuntimeException ex) {
+        log.error("inbox event {} was not completed", row.id(), ex);
+      }
+    }
+    // One follow-up pass when a gap defer (1ms) ran alongside a sibling that finished PROCESSED.
+    if (gapRetry && progressed) {
+      for (Claimed row : claim(bounded)) {
+        try {
+          ClaimOutcome outcome = processClaim(row);
+          if (outcome.countsAsHandled()) {
+            handled++;
+          }
         } catch (RuntimeException ex) {
           log.error("inbox event {} was not completed", row.id(), ex);
         }
@@ -178,6 +194,17 @@ public class InboxWorker {
   /** Applies one already-claimed row. Tests use this to show a stale lease cannot write. */
   void applyClaim(UUID id, UUID tenantId, OffsetDateTime leaseUntil) {
     processClaim(new Claimed(id, tenantId, leaseUntil));
+  }
+
+  private enum ClaimOutcome {
+    PROCESSED,
+    HANDLED,
+    GAP_RETRY,
+    NOOP;
+
+    boolean countsAsHandled() {
+      return this == PROCESSED || this == HANDLED || this == GAP_RETRY;
+    }
   }
 
   private List<Claimed> claim(int limit) {
@@ -207,37 +234,38 @@ public class InboxWorker {
     return claim(limit).stream().map(Claimed::leaseUntil).toList();
   }
 
-  private void processClaim(Claimed claimed) {
+  private ClaimOutcome processClaim(Claimed claimed) {
     TenantContext.set(claimed.tenantId(), null);
     try {
       int attempts = 0;
       while (true) {
         try {
+          ClaimOutcome[] outcome = {ClaimOutcome.NOOP};
           applyTx.executeWithoutResult(
               status -> {
                 jdbc.execute(
                     "SET LOCAL statement_timeout = " + properties.getHandlerTimeout().toMillis());
-                apply(claimed);
+                outcome[0] = apply(claimed);
               });
-          break;
+          return outcome[0];
         } catch (InboxDeferException defer) {
           handleDefer(claimed, defer);
-          break;
+          return ClaimOutcome.HANDLED;
         } catch (InboxGapRefetchRequired gap) {
-          handleGapRefetch(claimed, gap);
-          break;
+          return handleGapRefetch(claimed, gap);
         } catch (RuntimeException ex) {
           if (attempts < 3 && retryableTransaction(ex)) {
             attempts++;
             continue;
           }
           recordFailure(claimed, ex);
-          break;
+          return ClaimOutcome.HANDLED;
         }
       }
     } finally {
       TenantContext.clear();
     }
+    return ClaimOutcome.NOOP;
   }
 
   private void handleDefer(Claimed claimed, InboxDeferException defer) {
@@ -295,28 +323,28 @@ public class InboxWorker {
     return StockRetry.classify(ex) != null;
   }
 
-  private void apply(Claimed claimed) {
+  private ClaimOutcome apply(Claimed claimed) {
     // Step 1: Lock the claimed row. A lost lease or a finished row is left alone.
     InboxRow row = lock(claimed.id());
     if (row == null || !claimed.tenantId().equals(row.tenantId())) {
-      return;
+      return ClaimOutcome.NOOP;
     }
     if (!"RECEIVED".equals(row.status()) && !"FAILED".equals(row.status())) {
-      return;
+      return ClaimOutcome.NOOP;
     }
     if (!leaseMatches(row.nextAttemptAt(), claimed.leaseUntil())) {
-      return;
+      return ClaimOutcome.NOOP;
     }
     // Step 2: A claim past the ladder means an earlier attempt never recorded DEAD.
     if (row.attempts() > BACKOFF.length + 1) {
       markDead(row, MAX_ATTEMPTS_ERROR);
-      return;
+      return ClaimOutcome.HANDLED;
     }
     // Step 3: Suspended and expired shops keep the event. membership.changed still runs.
     // The marker is what a later ACTIVE/GRACE membership wakes. A normal failure backoff is not.
     if (policy.defer(row.entitlementStatus(), row.expiresAt(), row.eventType())) {
       pushBack(row, properties.getSuspendDefer(), ENTITLEMENT_DEFERRED);
-      return;
+      return ClaimOutcome.HANDLED;
     }
     InboxHandler handler = registry.find(row.eventType());
     if (handler == null) {
@@ -328,7 +356,7 @@ public class InboxWorker {
           UNKNOWN_DEFER);
       unknownTypes.increment();
       pushBack(row, UNKNOWN_DEFER);
-      return;
+      return ClaimOutcome.HANDLED;
     }
     // Step 5: One aggregate at a time, then drop a version that is already applied.
     // Events ordered by ent_ver are not part of this history, and do not use it.
@@ -352,7 +380,8 @@ public class InboxWorker {
         !stale
             && row.aggregateVersion() > 0
             && lastAggregate != null
-            && row.aggregateVersion() > lastAggregate + 1;
+            && row.aggregateVersion() > lastAggregate + 1
+            && !"order.updated".equals(row.eventType());
     if (gap) {
       String shopId = row.payload().path("tsf_shop_id").asString(null);
       String orderId = row.payload().path("data").path("order_id").asString(null);
@@ -377,9 +406,10 @@ public class InboxWorker {
       handler.handle(row.message(false));
     }
     markProcessed(row);
+    return ClaimOutcome.PROCESSED;
   }
 
-  private void handleGapRefetch(Claimed claimed, InboxGapRefetchRequired gap) {
+  private ClaimOutcome handleGapRefetch(Claimed claimed, InboxGapRefetchRequired gap) {
     try {
       boolean applied =
           gapRefetch.refetchAndApply(
@@ -402,6 +432,7 @@ public class InboxWorker {
             }
             markProcessed(row);
           });
+      return ClaimOutcome.PROCESSED;
     } catch (com.thaishopfun.oms.order.backfill.GapSnapshotNotReadyException notReady) {
       failureTx.executeWithoutResult(
           status -> {
@@ -412,8 +443,10 @@ public class InboxWorker {
             // REST is behind the inbox version; retry soon without burning the failure ladder.
             pushBack(row, Duration.ofMillis(1), sanitize(notReady));
           });
+      return ClaimOutcome.GAP_RETRY;
     } catch (RuntimeException ex) {
       recordFailure(claimed, ex);
+      return ClaimOutcome.HANDLED;
     }
   }
 
