@@ -73,7 +73,7 @@ ACTIVE `ORDER` reservations on non-terminal orders are allowed; terminal statuse
 ## Test integration
 
 - `@VerifyInvariants` on `StockTestBase`, `OrderIntegrationTest` (all `OrderApi*Test`, `OrderHoldRecheckApiTest`, `ChannelListingApiTest`), checkout/order mock-acceptance classes (`OrderCancelApiTest` inherits via `OrderIntegrationTest`), `StockDocumentApiTest`, `StockTenantLeakTest`.
-- Tenants are registered in `StockFixture.shop()`, `CatalogHttp.shop()`, and `OrderFixture.shopFor()`; `VerifyInvariantsExtension` clears the per-thread registry before each test and drains after each test (including when the checker bean is absent or checks are skipped).
+- Tenants are registered in `StockFixture.shop()`, `CatalogHttp.shop()`, and `OrderFixture.shopFor()`; `InvariantTestTenants` is a global set (safe under sequential Surefire) so `@Timeout(threadMode = SEPARATE_THREAD)` tests still get checked. `VerifyInvariantsExtension` clears before each test and drains after each test (including when the checker bean is absent or checks are skipped). See `InvariantTestTenantsSeparateThreadTest`.
 - `@SkipInvariantCheck("reason")` for deliberate corruption (`InvariantCheckerBreakTest`, `InvariantJobTest`) and perf fixtures (`OrderApiPerfTest`).
 - `StockFixture.assertInvariants(shop)` delegates to `InvariantChecker` when injected.
 

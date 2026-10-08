@@ -42,6 +42,7 @@ public class InvariantJob {
     UUID previousTenant = TenantContext.tenantId();
     UUID previousUser = TenantContext.userId();
     int violationCount = 0;
+    int checkFailed = 0;
     try {
       TenantContext.clear();
       List<Violation> schema = checker.checkSchema();
@@ -54,17 +55,21 @@ public class InvariantJob {
         try {
           violationCount += emit(checker.checkTenant(tenantId));
         } catch (Exception ex) {
+          checkFailed++;
           log.error("invariant check failed tenant_id={}", tenantId, ex);
           meters
               .counter(VIOLATIONS_METRIC, List.of(Tag.of("code", InvariantCodes.CHECK_FAILED)))
               .increment();
         }
       }
-      if (violationCount == 0) {
-        log.info("invariant check complete violations=0 tenants={}", tenants.size());
+      if (violationCount == 0 && checkFailed == 0) {
+        log.info("invariant check complete violations=0 check_failed=0 tenants={}", tenants.size());
       } else {
         log.error(
-            "invariant check complete violations={} tenants={}", violationCount, tenants.size());
+            "invariant check complete violations={} check_failed={} tenants={}",
+            violationCount,
+            checkFailed,
+            tenants.size());
       }
       return violationCount;
     } finally {

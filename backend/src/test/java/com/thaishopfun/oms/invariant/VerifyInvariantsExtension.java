@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.lang.reflect.Method;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import org.junit.jupiter.api.extension.AfterEachCallback;
 import org.junit.jupiter.api.extension.BeforeEachCallback;
@@ -12,9 +13,12 @@ import org.springframework.test.context.junit.jupiter.SpringExtension;
 
 public class VerifyInvariantsExtension implements BeforeEachCallback, AfterEachCallback {
 
+  /** Test-only hook to observe which tenants were checked after a test. */
+  static volatile java.util.function.Consumer<Set<UUID>> drainObserver;
+
   @Override
   public void beforeEach(ExtensionContext context) {
-    InvariantTestTenants.drain();
+    InvariantTestTenants.clear();
   }
 
   @Override
@@ -36,13 +40,22 @@ public class VerifyInvariantsExtension implements BeforeEachCallback, AfterEachC
     InvariantChecker checker = applicationContext.getBean(InvariantChecker.class);
     VerifyInvariants.Scope scope = annotation.scope();
     List<Violation> violations = new java.util.ArrayList<>(checker.checkSchema());
-    for (UUID tenantId : InvariantTestTenants.drain()) {
+    Set<UUID> tenants = InvariantTestTenants.drain();
+    notifyDrainObserver(tenants);
+    for (UUID tenantId : tenants) {
       violations.addAll(
           scope == VerifyInvariants.Scope.STOCK_ONLY
               ? checker.checkTenantStock(tenantId)
               : checker.checkTenant(tenantId));
     }
     assertThat(violations).as(InvariantChecker.formatFailures(violations)).isEmpty();
+  }
+
+  private static void notifyDrainObserver(Set<UUID> drained) {
+    var observer = drainObserver;
+    if (observer != null) {
+      observer.accept(drained);
+    }
   }
 
   private static VerifyInvariants findAnnotation(Class<?> type) {

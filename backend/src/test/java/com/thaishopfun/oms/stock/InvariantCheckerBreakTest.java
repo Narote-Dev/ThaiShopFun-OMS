@@ -64,10 +64,10 @@ class InvariantCheckerBreakTest extends StockTestBase {
                   shop.tenant(),
                   sku,
                   shop.warehouse()));
-      try (Connection admin = AuthTestSupport.admin();
-          Statement st = admin.createStatement()) {
-        st.execute(INVENTORY_QUANTITY_CHECK);
-      }
+    }
+    try (Connection admin = AuthTestSupport.admin();
+        Statement st = admin.createStatement()) {
+      st.execute(INVENTORY_QUANTITY_CHECK);
     }
   }
 

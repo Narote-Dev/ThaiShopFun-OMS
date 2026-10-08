@@ -8,6 +8,8 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -22,7 +24,12 @@ import org.springframework.transaction.support.TransactionTemplate;
 @Component
 public class InvariantChecker {
 
+  private static final Logger log = LoggerFactory.getLogger(InvariantChecker.class);
+
   private static final int ENTITY_LIMIT = 20;
+
+  private static final String ORDER_OWNER_UUID_PATTERN =
+      "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$";
 
   private final JdbcTemplate jdbc;
   private final TransactionTemplate tenantReadTx;
@@ -128,6 +135,7 @@ public class InvariantChecker {
     violations.addAll(stockLedgerMismatch(tenantId));
     violations.addAll(stockReservationOwnerSplit(tenantId));
     if (includeOrders) {
+      logMalformedOrderOwnerRefs(tenantId);
       violations.addAll(orderReservationOrphan(tenantId));
       violations.addAll(orderCancelledActiveReservation(tenantId));
       violations.addAll(orderTerminalActiveReservation(tenantId));
@@ -214,6 +222,30 @@ public class InvariantChecker {
         : List.of(Violation.of(InvariantCodes.STOCK_RESERVATION_OWNER_SPLIT, tenantId, ids));
   }
 
+  private void logMalformedOrderOwnerRefs(UUID tenantId) {
+    List<String> refs =
+        jdbc.query(
+            """
+            SELECT sr.id::text || ':' || sr.owner_ref AS ref
+            FROM stock_reservation sr
+            WHERE sr.status = 'ACTIVE'
+              AND sr.owner_type = 'ORDER'
+              AND btrim(sr.owner_ref) <> ''
+              AND lower(sr.owner_ref) !~ ?
+              AND sr.owner_ref !~ '^ord-'
+            LIMIT ?
+            """,
+            (rs, row) -> rs.getString("ref"),
+            ORDER_OWNER_UUID_PATTERN,
+            ENTITY_LIMIT);
+    for (String ref : refs) {
+      log.warn(
+          "invariant skipped orphan check for malformed ORDER owner_ref tenant_id={} {}",
+          tenantId,
+          ref);
+    }
+  }
+
   private List<Violation> orderReservationOrphan(UUID tenantId) {
     List<UUID> ids =
         jdbc.query(
@@ -222,14 +254,16 @@ public class InvariantChecker {
             FROM stock_reservation sr
             WHERE sr.status = 'ACTIVE'
               AND sr.owner_type = 'ORDER'
-              AND lower(sr.owner_ref) ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+              AND lower(sr.owner_ref) ~ ?
               AND NOT EXISTS (
                 SELECT 1 FROM sales_order o
                 WHERE o.tenant_id = sr.tenant_id AND o.id::text = lower(sr.owner_ref)
               )
             LIMIT ?
             """,
-            (rs, row) -> rs.getObject("id", UUID.class), ENTITY_LIMIT);
+            (rs, row) -> rs.getObject("id", UUID.class),
+            ORDER_OWNER_UUID_PATTERN,
+            ENTITY_LIMIT);
     return ids.isEmpty()
         ? List.of()
         : List.of(Violation.of(InvariantCodes.ORDER_RESERVATION_ORPHAN, tenantId, ids));

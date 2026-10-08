@@ -136,6 +136,13 @@ class InboxHandlerIdempotencyTest {
           counts.put(
               "channel_listing",
               jdbc.queryForObject("SELECT count(*) FROM channel_listing", Long.class));
+          counts.put(
+              "audit_log", jdbc.queryForObject("SELECT count(*) FROM audit_log", Long.class));
+          counts.put(
+              "outbox_event", jdbc.queryForObject("SELECT count(*) FROM outbox_event", Long.class));
+          counts.put(
+              "order_status_history",
+              jdbc.queryForObject("SELECT count(*) FROM order_status_history", Long.class));
           return counts;
         });
   }
