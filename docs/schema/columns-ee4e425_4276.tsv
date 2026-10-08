@@ -1,0 +1,341 @@
+table_name	ordinal_position	column_name	data_type	is_nullable	column_default	description
+app_user	1	id	uuid	NO		
+app_user	2	tsf_user_id	text	NO		
+app_user	3	email	text	YES		
+app_user	4	display_name	text	YES		
+app_user	5	last_login_at	timestamp with time zone	YES		
+audit_log	1	id	uuid	NO		
+audit_log	2	tenant_id	uuid	NO		
+audit_log	3	actor_type	text	NO		
+audit_log	4	actor_id	text	YES		
+audit_log	5	action	text	NO		
+audit_log	6	entity_type	text	NO		
+audit_log	7	entity_id	text	YES		
+audit_log	8	before	jsonb	YES		
+audit_log	9	after	jsonb	YES		
+audit_log	10	ip	inet	YES		
+audit_log	11	created_at	timestamp with time zone	NO	now()	
+channel_account	1	id	uuid	NO		
+channel_account	2	tenant_id	uuid	NO		
+channel_account	3	channel	text	NO		
+channel_account	4	external_shop_id	text	NO		
+channel_account	5	mode	text	NO	'OBSERVE'::text	
+channel_account	6	stock_sync_paused	boolean	NO	false	
+channel_account	7	status	text	NO		
+channel_account	8	credentials_ref	text	YES		Name of a secret in the secret manager. Never a token or secret value.
+channel_account	9	token_expires_at	timestamp with time zone	YES		
+channel_account	10	last_synced_at	timestamp with time zone	YES		
+channel_account	11	created_at	timestamp with time zone	NO	now()	
+channel_account	12	updated_at	timestamp with time zone	NO	now()	
+channel_listing	1	id	uuid	NO		
+channel_listing	2	tenant_id	uuid	NO		
+channel_listing	3	channel_account_id	uuid	NO		
+channel_listing	4	sku_id	uuid	YES		
+channel_listing	5	external_item_id	text	YES		
+channel_listing	6	external_sku_id	text	NO		
+channel_listing	7	stock_control	boolean	NO	false	
+channel_listing	8	safety_buffer	integer	NO	0	
+channel_listing	9	last_exposed_qty	integer	YES		
+channel_listing	10	last_pushed_version	bigint	YES		
+channel_listing	11	last_seen_channel_qty	integer	YES		
+channel_listing	12	created_at	timestamp with time zone	NO	now()	
+channel_listing	13	updated_at	timestamp with time zone	NO	now()	
+channel_listing	14	seller_sku	text	YES		
+channel_listing	15	name	text	YES		
+channel_listing	16	mapping_source	text	YES		
+channel_listing	17	mapped_at	timestamp with time zone	YES		
+channel_listing	18	removed_at	timestamp with time zone	YES		
+flyway_schema_history	1	installed_rank	integer	NO		
+flyway_schema_history	2	version	character varying	YES		
+flyway_schema_history	3	description	character varying	NO		
+flyway_schema_history	4	type	character varying	NO		
+flyway_schema_history	5	script	character varying	NO		
+flyway_schema_history	6	checksum	integer	YES		
+flyway_schema_history	7	installed_by	character varying	NO		
+flyway_schema_history	8	installed_on	timestamp without time zone	NO	now()	
+flyway_schema_history	9	execution_time	integer	NO		
+flyway_schema_history	10	success	boolean	NO		
+idempotency_key	1	tenant_id	uuid	NO		
+idempotency_key	2	scope	text	NO		
+idempotency_key	3	key	text	NO		
+idempotency_key	4	request_hash	text	NO		
+idempotency_key	5	response_status	integer	YES		
+idempotency_key	6	response_body	jsonb	YES		
+idempotency_key	7	created_at	timestamp with time zone	NO	now()	
+inbox_event	1	id	uuid	NO		
+inbox_event	2	tenant_id	uuid	NO		
+inbox_event	3	source	text	NO		
+inbox_event	4	event_id	text	NO		
+inbox_event	5	event_type	text	NO		
+inbox_event	6	aggregate_id	text	NO		
+inbox_event	7	payload	jsonb	NO		
+inbox_event	8	status	text	NO		
+inbox_event	9	attempts	integer	NO	0	
+inbox_event	10	next_attempt_at	timestamp with time zone	YES		
+inbox_event	11	last_error	text	YES		
+inbox_event	12	received_at	timestamp with time zone	NO	now()	
+inbox_event	13	processed_at	timestamp with time zone	YES		
+inbox_event	14	aggregate_version	bigint	NO	0	Envelope aggregate_version. 0 means the sender omitted it. A version at or below the latest PROCESSED version for the same aggregate is stored and not handled again.
+inbox_event	15	payload_sha256	bytea	NO	'\x'::bytea	SHA-256 of the raw body stored on the first insert. A later delivery with the same event id and a different hash is still a duplicate.
+inbox_event	16	orphan_recorded_at	timestamp with time zone	YES		
+inventory	1	id	uuid	NO		
+inventory	2	tenant_id	uuid	NO		
+inventory	3	sku_id	uuid	NO		
+inventory	4	warehouse_id	uuid	NO		
+inventory	5	on_hand	integer	NO	0	
+inventory	6	reserved	integer	NO	0	
+inventory	7	stock_version	bigint	NO	0	
+inventory	8	created_at	timestamp with time zone	NO	now()	
+inventory	9	updated_at	timestamp with time zone	NO	now()	
+inventory	10	ledger_seq	bigint	NO	0	Count of ledger rows committed for this stock row. Incremented under row lock on write.
+inventory_ledger	1	id	uuid	NO		
+inventory_ledger	2	tenant_id	uuid	NO		
+inventory_ledger	3	sku_id	uuid	NO		
+inventory_ledger	4	warehouse_id	uuid	NO		
+inventory_ledger	5	delta_on_hand	integer	NO		
+inventory_ledger	6	delta_reserved	integer	NO		
+inventory_ledger	7	reason	text	NO		
+inventory_ledger	8	ref_type	text	YES		
+inventory_ledger	9	ref_id	uuid	YES		
+inventory_ledger	10	actor	text	YES		
+inventory_ledger	11	created_at	timestamp with time zone	NO	now()	
+inventory_ledger	12	ledger_seq	bigint	NO		Monotonic per (tenant, sku, warehouse); history and running totals order by this, not created_at.
+order_hold_retry	1	tenant_id	uuid	NO		
+order_hold_retry	2	order_id	uuid	NO		
+order_hold_retry	3	attempts	integer	NO	0	
+order_hold_retry	4	next_attempt_at	timestamp with time zone	NO		
+order_hold_retry	5	last_error	text	YES		
+order_hold_retry	6	updated_at	timestamp with time zone	NO	now()	
+order_line	1	id	uuid	NO		
+order_line	2	tenant_id	uuid	NO		
+order_line	3	order_id	uuid	NO		
+order_line	4	sku_id	uuid	YES		
+order_line	5	external_line_id	text	YES		
+order_line	6	external_sku_id	text	YES		
+order_line	7	name	text	NO		
+order_line	8	qty	integer	NO		
+order_line	9	unit_price	numeric	NO	0	
+order_line	10	discount	numeric	NO	0	
+order_line	11	line_total	numeric	NO	0	
+order_line	12	created_at	timestamp with time zone	NO	now()	
+order_line	13	updated_at	timestamp with time zone	NO	now()	
+order_recipient	1	order_id	uuid	NO		
+order_recipient	2	tenant_id	uuid	NO		
+order_recipient	3	name_enc	bytea	YES		
+order_recipient	4	phone_enc	bytea	YES		
+order_recipient	5	phone_hash	bytea	YES		
+order_recipient	6	phone_last4	text	YES		
+order_recipient	7	address_enc	bytea	YES		
+order_recipient	8	province	text	YES		
+order_recipient	9	postcode	text	YES		
+order_recipient	10	pii_status	text	NO	'ACTIVE'::text	
+order_recipient	11	redact_after	timestamp with time zone	YES		
+order_recipient	12	created_at	timestamp with time zone	NO	now()	
+order_recipient	13	updated_at	timestamp with time zone	NO	now()	
+order_status_history	1	id	uuid	NO		
+order_status_history	2	tenant_id	uuid	NO		
+order_status_history	3	order_id	uuid	NO		
+order_status_history	4	dimension	text	NO		
+order_status_history	5	from_value	text	YES		
+order_status_history	6	to_value	text	NO		
+order_status_history	7	reason	text	YES		
+order_status_history	8	actor	text	YES		
+order_status_history	9	created_at	timestamp with time zone	NO	now()	
+outbox_event	1	id	uuid	NO		
+outbox_event	2	tenant_id	uuid	NO		
+outbox_event	3	aggregate_type	text	NO		
+outbox_event	4	aggregate_id	text	NO		
+outbox_event	5	event_type	text	NO		
+outbox_event	6	payload	jsonb	NO		
+outbox_event	7	status	text	NO		
+outbox_event	8	attempts	integer	NO	0	
+outbox_event	9	next_attempt_at	timestamp with time zone	YES		
+outbox_event	10	lease_until	timestamp with time zone	YES		
+outbox_event	11	created_at	timestamp with time zone	NO	now()	
+outbox_event	12	sent_at	timestamp with time zone	YES		
+payment_status_snapshot	1	id	uuid	NO		
+payment_status_snapshot	2	tenant_id	uuid	NO		
+payment_status_snapshot	3	order_id	uuid	NO		
+payment_status_snapshot	4	provider	text	NO		
+payment_status_snapshot	5	provider_ref	text	YES		
+payment_status_snapshot	6	status	text	NO		
+payment_status_snapshot	7	amount	numeric	NO		
+payment_status_snapshot	8	refunded_amount	numeric	NO	0	
+payment_status_snapshot	9	currency	text	NO	'THB'::text	
+payment_status_snapshot	10	paid_at	timestamp with time zone	YES		
+payment_status_snapshot	11	observed_at	timestamp with time zone	NO		
+payment_status_snapshot	12	source_event_id	text	NO		
+payment_status_snapshot	13	created_at	timestamp with time zone	NO	now()	
+product	1	id	uuid	NO		
+product	2	tenant_id	uuid	NO		
+product	3	name	text	NO		
+product	4	status	text	NO		
+product	5	created_at	timestamp with time zone	NO	now()	
+product	6	updated_at	timestamp with time zone	NO	now()	
+reconciliation_issue	1	id	uuid	NO		
+reconciliation_issue	2	tenant_id	uuid	NO		
+reconciliation_issue	3	run_id	uuid	NO		
+reconciliation_issue	4	rule	text	NO		
+reconciliation_issue	5	order_id	uuid	YES		
+reconciliation_issue	6	details	jsonb	YES		
+reconciliation_issue	7	status	text	NO	'OPEN'::text	
+reconciliation_issue	8	created_at	timestamp with time zone	NO	now()	
+reconciliation_issue	9	updated_at	timestamp with time zone	NO	now()	
+refund	1	id	uuid	NO		
+refund	2	tenant_id	uuid	NO		
+refund	3	order_id	uuid	NO		
+refund	4	return_id	uuid	YES		
+refund	5	provider_ref	text	YES		
+refund	6	amount	numeric	NO		
+refund	7	currency	text	NO	'THB'::text	
+refund	8	status	text	NO		
+refund	9	observed_at	timestamp with time zone	NO		
+refund	10	source_event_id	text	NO		
+refund	11	created_at	timestamp with time zone	NO	now()	
+refund	12	updated_at	timestamp with time zone	NO	now()	
+return_line	1	id	uuid	NO		
+return_line	2	tenant_id	uuid	NO		
+return_line	3	order_id	uuid	NO		
+return_line	4	return_id	uuid	NO		
+return_line	5	order_line_id	uuid	NO		
+return_line	6	qty	integer	NO		
+return_line	7	condition	text	YES		
+return_line	8	restocked_qty	integer	NO	0	
+return_line	9	created_at	timestamp with time zone	NO	now()	
+return_line	10	updated_at	timestamp with time zone	NO	now()	
+return_request	1	id	uuid	NO		
+return_request	2	tenant_id	uuid	NO		
+return_request	3	order_id	uuid	NO		
+return_request	4	external_return_id	text	YES		
+return_request	5	type	text	NO		
+return_request	6	status	text	NO	'REQUESTED'::text	
+return_request	7	rejected	boolean	NO	false	Sticky: set when status becomes REJECTED, never cleared. Rejected requests only move to CLOSED and never count toward the return qty limit.
+return_request	8	reason	text	YES		
+return_request	9	requested_at	timestamp with time zone	NO	now()	
+return_request	10	received_at	timestamp with time zone	YES		
+return_request	11	created_at	timestamp with time zone	NO	now()	
+return_request	12	updated_at	timestamp with time zone	NO	now()	
+sales_order	1	id	uuid	NO		
+sales_order	2	tenant_id	uuid	NO		
+sales_order	3	channel_account_id	uuid	NO		
+sales_order	4	external_order_id	text	NO		
+sales_order	5	order_status	text	NO	'ACTIVE'::text	
+sales_order	6	payment_status	text	NO		
+sales_order	7	fulfillment_status	text	NO	'UNFULFILLED'::text	
+sales_order	8	hold_reason	text	NO	'NONE'::text	
+sales_order	9	hold_note	text	YES		
+sales_order	10	channel_status	text	YES		
+sales_order	11	payment_method	text	NO		
+sales_order	12	currency	text	NO	'THB'::text	
+sales_order	13	subtotal	numeric	NO	0	
+sales_order	14	shipping_fee	numeric	NO	0	
+sales_order	15	discount	numeric	NO	0	
+sales_order	16	grand_total	numeric	NO	0	
+sales_order	17	ordered_at	timestamp with time zone	NO		
+sales_order	18	paid_at	timestamp with time zone	YES		
+sales_order	19	ship_by	timestamp with time zone	YES		
+sales_order	20	completed_at	timestamp with time zone	YES		
+sales_order	21	external_version	bigint	YES		
+sales_order	22	version	bigint	NO	0	
+sales_order	23	created_at	timestamp with time zone	NO	now()	
+sales_order	24	updated_at	timestamp with time zone	NO	now()	
+shadow_diff	1	id	uuid	NO		
+shadow_diff	2	tenant_id	uuid	NO		
+shadow_diff	3	channel_account_id	uuid	NO		
+shadow_diff	4	kind	text	NO		
+shadow_diff	5	ref	text	NO		
+shadow_diff	6	oms_value	jsonb	YES		
+shadow_diff	7	channel_value	jsonb	YES		
+shadow_diff	8	observed_at	timestamp with time zone	NO		
+shadow_diff	9	created_at	timestamp with time zone	NO	now()	
+shipment	1	id	uuid	NO		
+shipment	2	tenant_id	uuid	NO		
+shipment	3	order_id	uuid	NO		
+shipment	4	warehouse_id	uuid	NO		
+shipment	5	carrier	text	YES		
+shipment	6	tracking_no	text	YES		
+shipment	7	external_shipment_id	text	YES		
+shipment	8	label_cached_until	timestamp with time zone	YES		
+shipment	9	status	text	NO	'PENDING'::text	
+shipment	10	shipped_at	timestamp with time zone	YES		
+shipment	11	delivered_at	timestamp with time zone	YES		
+shipment	12	created_at	timestamp with time zone	NO	now()	
+shipment	13	updated_at	timestamp with time zone	NO	now()	
+sku	1	id	uuid	NO		
+sku	2	tenant_id	uuid	NO		
+sku	3	product_id	uuid	NO		
+sku	4	sku_code	text	NO		
+sku	5	name	text	NO		
+sku	6	barcode	text	YES		
+sku	7	weight_g	integer	YES		
+sku	8	is_bundle	boolean	NO	false	
+sku	9	created_at	timestamp with time zone	NO	now()	
+sku	10	updated_at	timestamp with time zone	NO	now()	
+sku_bundle_component	1	tenant_id	uuid	NO		
+sku_bundle_component	2	bundle_sku_id	uuid	NO		
+sku_bundle_component	3	component_sku_id	uuid	NO		
+sku_bundle_component	4	qty	integer	NO		
+sku_bundle_component	5	created_at	timestamp with time zone	NO	now()	
+sku_bundle_component	6	updated_at	timestamp with time zone	NO	now()	
+stock_document	1	id	uuid	NO		
+stock_document	2	tenant_id	uuid	NO		
+stock_document	3	type	text	NO		
+stock_document	4	status	text	NO		
+stock_document	5	reference_no	text	YES		
+stock_document	6	note	text	YES		
+stock_document	7	count_started_at	timestamp with time zone	YES		
+stock_document	8	posted_at	timestamp with time zone	YES		
+stock_document	9	posted_by	uuid	YES		
+stock_document	10	created_at	timestamp with time zone	NO	now()	
+stock_document	11	updated_at	timestamp with time zone	NO	now()	
+stock_document_line	1	id	uuid	NO		
+stock_document_line	2	tenant_id	uuid	NO		
+stock_document_line	3	document_id	uuid	NO		
+stock_document_line	4	sku_id	uuid	NO		
+stock_document_line	5	warehouse_id	uuid	NO		
+stock_document_line	6	qty	integer	NO		
+stock_document_line	7	system_qty_at_start	integer	YES		
+stock_document_line	8	counted_qty	integer	YES		
+stock_document_line	9	reason_code	text	YES		
+stock_document_line	10	created_at	timestamp with time zone	NO	now()	
+stock_document_line	11	updated_at	timestamp with time zone	NO	now()	
+stock_reservation	1	id	uuid	NO		
+stock_reservation	2	tenant_id	uuid	NO		
+stock_reservation	3	owner_type	text	NO		
+stock_reservation	4	owner_ref	text	NO		
+stock_reservation	5	sku_id	uuid	NO		
+stock_reservation	6	warehouse_id	uuid	NO		
+stock_reservation	7	qty	integer	NO		
+stock_reservation	8	status	text	NO		
+stock_reservation	9	expires_at	timestamp with time zone	YES		
+stock_reservation	10	reservation_group_id	uuid	NO		
+stock_reservation	11	created_at	timestamp with time zone	NO	now()	
+stock_reservation	12	updated_at	timestamp with time zone	NO	now()	
+sync_cursor	1	tenant_id	uuid	NO		
+sync_cursor	2	channel_account_id	uuid	NO		
+sync_cursor	3	resource	text	NO		
+sync_cursor	4	cursor	text	YES		
+sync_cursor	5	last_success_at	timestamp with time zone	YES		
+sync_cursor	6	created_at	timestamp with time zone	NO	now()	
+sync_cursor	7	updated_at	timestamp with time zone	NO	now()	
+tenant	1	id	uuid	NO		
+tenant	2	name	text	NO		
+tenant	3	tsf_shop_id	text	NO		
+tenant	4	membership_tier	text	NO		
+tenant	5	entitlement_status	text	NO		
+tenant	6	entitlement_expires_at	timestamp with time zone	YES		
+tenant	7	ent_ver	bigint	NO		
+tenant_membership	1	id	uuid	NO		
+tenant_membership	2	tenant_id	uuid	NO		
+tenant_membership	3	user_id	uuid	NO		
+tenant_membership	4	role	text	NO		
+tenant_membership	5	status	text	NO		
+warehouse	1	id	uuid	NO		
+warehouse	2	tenant_id	uuid	NO		
+warehouse	3	code	text	NO		
+warehouse	4	name	text	NO		
+warehouse	5	address	jsonb	YES		
+warehouse	6	is_default	boolean	NO	false	
+warehouse	7	created_at	timestamp with time zone	NO	now()	
+warehouse	8	updated_at	timestamp with time zone	NO	now()	
+(339 rows)
