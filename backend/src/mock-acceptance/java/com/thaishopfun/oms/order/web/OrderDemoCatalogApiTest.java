@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.thaishopfun.oms.auth.AuthTestSupport;
 import com.thaishopfun.oms.catalog.CatalogHttp;
+import com.thaishopfun.oms.invariant.InvariantChecker;
 import com.thaishopfun.oms.order.demo.OrderDemoCatalogService;
 import com.thaishopfun.oms.tenant.TenantContext;
 import java.net.URI;
@@ -29,6 +30,7 @@ class OrderDemoCatalogApiTest extends OrderIntegrationTest {
       HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
 
   @Autowired OrderDemoCatalogService catalog;
+  @Autowired InvariantChecker invariantChecker;
 
   @AfterEach
   void clearTenant() throws Exception {
@@ -103,5 +105,6 @@ class OrderDemoCatalogApiTest extends OrderIntegrationTest {
         assertThat(rs.getLong(1)).isZero();
       }
     }
+    assertThat(invariantChecker.checkTenant(shop.tenantId())).isEmpty();
   }
 }

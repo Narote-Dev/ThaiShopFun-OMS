@@ -11,6 +11,7 @@ import com.thaishopfun.mocktsf.idp.TokenIssuer;
 import com.thaishopfun.oms.auth.AuthTestSupport;
 import com.thaishopfun.oms.auth.UuidV7;
 import com.thaishopfun.oms.inbox.InboxWorker;
+import com.thaishopfun.oms.invariant.VerifyInvariants;
 import com.thaishopfun.oms.order.intake.OrderIntakeSupport;
 import com.thaishopfun.oms.outbox.OutboxPublisher;
 import com.thaishopfun.oms.stock.OrderIntakeFaultTestConfig;
@@ -83,6 +84,7 @@ import tools.jackson.databind.node.ObjectNode;
     properties = {"spring.main.allow-bean-definition-overriding=true"})
 @Import(OrderIntakeT12ScenariosAcceptanceTest.IntakeTestConfig.class)
 @Timeout(value = 5, unit = TimeUnit.MINUTES, threadMode = ThreadMode.SEPARATE_THREAD)
+@VerifyInvariants
 class OrderIntakeT12ScenariosAcceptanceTest {
 
   private static final String ISSUER = OrderIntakeMockRuntime.issuer();

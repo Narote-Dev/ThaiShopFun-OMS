@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.thaishopfun.oms.auth.AuthTestSupport;
 import com.thaishopfun.oms.auth.UuidV7;
 import com.thaishopfun.oms.catalog.CatalogHttp;
+import com.thaishopfun.oms.invariant.SkipInvariantCheck;
 import com.thaishopfun.oms.pii.PiiCipher;
 import com.thaishopfun.oms.pii.PiiColumn;
 import java.net.URLEncoder;
@@ -19,6 +20,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 
 /** Plan AC: 10k orders list/search under one second after warm-up. */
+@SkipInvariantCheck("Perf fixture inserts raw sales_order rows without full invariant shape")
 class OrderApiPerfTest extends OrderIntegrationTest {
 
   private static final Logger log = LoggerFactory.getLogger(OrderApiPerfTest.class);

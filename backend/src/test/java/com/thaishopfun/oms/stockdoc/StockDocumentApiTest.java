@@ -7,6 +7,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.thaishopfun.oms.catalog.CatalogHttp;
 import com.thaishopfun.oms.catalog.CatalogIntegrationTest;
+import com.thaishopfun.oms.invariant.VerifyInvariants;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -23,6 +24,7 @@ import org.junit.jupiter.api.Test;
 import tools.jackson.databind.JsonNode;
 
 /** T08A stock documents and stock history over HTTP, as {@code oms_app} under FORCE RLS. */
+@VerifyInvariants
 class StockDocumentApiTest extends CatalogIntegrationTest {
 
   private static final String DOCS = "/api/v1/stock-documents";

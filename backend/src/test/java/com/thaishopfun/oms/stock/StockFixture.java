@@ -3,6 +3,7 @@ package com.thaishopfun.oms.stock;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.thaishopfun.oms.auth.UuidV7;
+import com.thaishopfun.oms.invariant.InvariantChecker;
 import com.thaishopfun.oms.tenant.TenantContext;
 import java.time.Instant;
 import java.time.OffsetDateTime;
@@ -48,6 +49,11 @@ public final class StockFixture {
           work.run();
           return null;
         });
+  }
+
+  /** Runs JDBC work as {@code oms_app} under the tenant (for tests outside this package). */
+  public void runInTenant(UUID tenantId, Runnable work) {
+    inTenant(tenantId, work);
   }
 
   /** A tenant with one product and a default warehouse. */
@@ -373,6 +379,16 @@ public final class StockFixture {
    * {@code reserved}.
    */
   public void assertInvariants(Shop shop) {
+    assertInvariants(shop, null);
+  }
+
+  /** Delegates to {@link InvariantChecker} when a checker is wired; otherwise uses inline SQL. */
+  public void assertInvariants(Shop shop, InvariantChecker checker) {
+    if (checker != null) {
+      var violations = checker.checkTenant(shop.tenant());
+      assertThat(violations).as(InvariantChecker.formatFailures(violations)).isEmpty();
+      return;
+    }
     inTenant(
         shop.tenant(),
         () -> {

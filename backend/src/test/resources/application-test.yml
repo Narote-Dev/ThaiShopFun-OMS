@@ -20,7 +20,12 @@ oms:
   stock:
     expiry:
       enabled: false
+<<<<<<< HEAD
   order:
     hold-resolver:
       # T12B ac06: immediate retry on the next sweeper batch in tests (backoff suite overrides).
       backoff-base: 0s
+=======
+  invariant:
+    enabled: false
+>>>>>>> e375c4c (T00: InvariantChecker, nightly job, docs, and test hooks)

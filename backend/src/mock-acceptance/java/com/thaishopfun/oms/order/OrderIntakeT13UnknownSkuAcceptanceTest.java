@@ -7,6 +7,7 @@ import com.thaishopfun.mocktsf.idp.TokenIssuer;
 import com.thaishopfun.oms.auth.AuthTestSupport;
 import com.thaishopfun.oms.auth.UuidV7;
 import com.thaishopfun.oms.inbox.InboxWorker;
+import com.thaishopfun.oms.invariant.VerifyInvariants;
 import com.thaishopfun.oms.stock.ReservationEngine;
 import com.thaishopfun.oms.stock.ReserveItem;
 import com.thaishopfun.oms.stock.StockFixture;
@@ -47,6 +48,7 @@ import tools.jackson.databind.node.ObjectNode;
   OrderIntakeT12ScenariosAcceptanceTest.IntakeTestConfig.class,
   StockRepositorySkuOmitTestConfiguration.class
 })
+@VerifyInvariants
 class OrderIntakeT13UnknownSkuAcceptanceTest {
 
   private static final String INBOX_SECRET = "dev-inbox-hmac-secret";

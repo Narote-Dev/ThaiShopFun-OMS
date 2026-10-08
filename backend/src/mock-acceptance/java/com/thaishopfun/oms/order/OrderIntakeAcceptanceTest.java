@@ -6,8 +6,10 @@ import com.thaishopfun.mocktsf.MockTsfApplication;
 import com.thaishopfun.mocktsf.OmsEndpoint;
 import com.thaishopfun.mocktsf.contract.ContractValidator;
 import com.thaishopfun.oms.auth.AuthTestSupport;
+import com.thaishopfun.oms.invariant.PiiLogAssertions;
 import com.thaishopfun.oms.auth.UuidV7;
 import com.thaishopfun.oms.inbox.InboxWorker;
+import com.thaishopfun.oms.invariant.VerifyInvariants;
 import com.thaishopfun.oms.outbox.OutboxPublisher;
 import com.thaishopfun.oms.stock.StockFixture;
 import com.thaishopfun.oms.tenant.TenantContext;
@@ -58,6 +60,7 @@ import tools.jackson.databind.node.ObjectNode;
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
     properties = {"spring.main.allow-bean-definition-overriding=true"})
 @Import(OrderIntakeAcceptanceTest.IntakeTestConfig.class)
+@VerifyInvariants
 class OrderIntakeAcceptanceTest {
 
   private static final String ISSUER = "http://mock-tsf.test/tsf-idp";
@@ -127,6 +130,13 @@ class OrderIntakeAcceptanceTest {
 
   @Test
   void codOrderGoesReadyToPickAndPublishesStatusChanged() throws Exception {
+    try (PiiLogAssertions logs = PiiLogAssertions.attach("com.thaishopfun.oms.order.intake")) {
+      codOrderGoesReadyToPickAndPublishesStatusChangedBody();
+      logs.assertNoPii();
+    }
+  }
+
+  private void codOrderGoesReadyToPickAndPublishesStatusChangedBody() throws Exception {
     StockFixture.Shop shop = fixture.shop("ACTIVE");
     String shopId = fixture.tsfShopId(shop);
     UUID account = fixture.tsfChannelAccount(shop, "ACTIVE", "CONNECTED");

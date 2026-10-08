@@ -9,6 +9,7 @@ import com.thaishopfun.mocktsf.idp.TokenIssuer;
 import com.thaishopfun.oms.auth.AuthTestSupport;
 import com.thaishopfun.oms.auth.UuidV7;
 import com.thaishopfun.oms.inbox.InboxWorker;
+import com.thaishopfun.oms.invariant.VerifyInvariants;
 import com.thaishopfun.oms.order.hold.OrderHoldResolverJob;
 import com.thaishopfun.oms.stock.OrderIntakeFaultTestConfig;
 import com.thaishopfun.oms.stock.StockFixture;
@@ -68,6 +69,7 @@ import tools.jackson.databind.node.ObjectNode;
   StockRepositorySkuOmitTestConfiguration.class
 })
 @Timeout(value = 5, unit = TimeUnit.MINUTES, threadMode = ThreadMode.SEPARATE_THREAD)
+@VerifyInvariants
 class OrderHoldResolverT12BRound3AcceptanceTest {
 
   private static final String INBOX_SECRET = "dev-inbox-hmac-secret";

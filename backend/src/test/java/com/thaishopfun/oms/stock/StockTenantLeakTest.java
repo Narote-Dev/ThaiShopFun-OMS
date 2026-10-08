@@ -3,6 +3,7 @@ package com.thaishopfun.oms.stock;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.thaishopfun.oms.auth.AuthTestSupport;
+import com.thaishopfun.oms.invariant.VerifyInvariants;
 import com.thaishopfun.oms.stock.StockFixture.Shop;
 import com.thaishopfun.oms.stock.StockTestConfig.Fault;
 import com.thaishopfun.oms.stock.StockTestConfig.FaultHooks;
@@ -45,6 +46,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 @Import(StockTestConfig.class)
 // Closed after the class: every cached context holds a pool on the shared Postgres.
 @DirtiesContext
+@VerifyInvariants
 class StockTenantLeakTest {
 
   private static final int ITERATIONS = 1000;
