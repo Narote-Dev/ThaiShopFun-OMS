@@ -349,13 +349,11 @@ public class InboxWorker {
     // Step 5: One aggregate at a time, then drop a version that is already applied.
     // Events ordered by ent_ver are not part of this history, and do not use it.
     lockAggregate(row);
-    if (shouldWaitForOrderBootstrap(row)) {
-      pushBack(row, NEWER_PENDING_DEFER);
-      return ClaimOutcome.HANDLED;
+    if (waitingForOrderBootstrap(row)) {
+      throw new InboxDeferException(properties.getDeferDelay());
     }
-    if (blockedByNewerPending(row)) {
-      pushBack(row, NEWER_PENDING_DEFER);
-      return ClaimOutcome.HANDLED;
+    if ("order.updated".equals(row.eventType()) && blockedByNewerPending(row)) {
+      throw new InboxDeferException(NEWER_PENDING_DEFER);
     }
     Long lastForStale = lastProcessedVersionForStale(row);
     Long lastAggregate = lastProcessedVersionAggregate(row);
@@ -473,7 +471,7 @@ public class InboxWorker {
     aggregateLock.lock(jdbc, row.tenantId(), row.source(), row.aggregateId());
   }
 
-  private boolean shouldWaitForOrderBootstrap(InboxRow row) {
+  private boolean waitingForOrderBootstrap(InboxRow row) {
     if ("order.created".equals(row.eventType())
         || InboxEntitlementPolicy.ordersByEntVer(row.eventType())) {
       return false;
@@ -503,10 +501,7 @@ public class InboxWorker {
   }
 
   private boolean blockedByNewerPending(InboxRow row) {
-    if (InboxEntitlementPolicy.ordersByEntVer(row.eventType()) || row.aggregateVersion() <= 0) {
-      return false;
-    }
-    if (!InboxAggregateVersionPolicy.versionByEventType(row.eventType())) {
+    if (row.aggregateVersion() <= 0) {
       return false;
     }
     Boolean blocked =
