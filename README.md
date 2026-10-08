@@ -71,6 +71,7 @@ The backend waits up to 60 seconds for Postgres to accept connections. Flyway V1
 | `contracts/` | OpenAPI 3.1 and JSON Schema for sections 4.3–4.7. Stand-in for `tsf-oms-contracts` until that repo exists. |
 | `docker-compose.yml` | Postgres 16 and mock-tsf for local development. |
 | `docs/plan/` | Plan v2 (process map, scope, data model, API contract, task list, NFR). |
+| `docs/README.md` | Thai index of reference docs (data dictionary, backend modules, frontend pages). |
 | `.github/workflows/ci.yml` | Backend `./mvnw verify`, frontend `npm ci && npm run lint && npm run build && npm test`, Playwright SSO e2e, mock-tsf `./mvnw verify`, the delivery chaos suite, and contract example validation. |
 | `.railway/railway.ts` | Staging infrastructure. Dockerfiles are in each service directory. |
 
