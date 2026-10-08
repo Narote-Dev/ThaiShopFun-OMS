@@ -24,6 +24,10 @@ public class MutableClock extends Clock {
     offset = offset.plus(duration);
   }
 
+  public void resetOffset() {
+    offset = Duration.ZERO;
+  }
+
   @Override
   public Instant instant() {
     return base.instant().plus(offset);

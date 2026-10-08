@@ -156,6 +156,7 @@ class ListingLifecycleT12BFUAcceptanceTest {
   @BeforeEach
   void setup() throws Exception {
     listingAggregateVersion.set(0);
+    clock.resetOffset();
     OrderIntakeMockRuntime.mock().getBean(OmsEndpoint.class).setBaseUrl("http://127.0.0.1:" + port);
     fixture = new StockFixture(jdbc, transactions);
     try (Connection admin = AuthTestSupport.admin();
