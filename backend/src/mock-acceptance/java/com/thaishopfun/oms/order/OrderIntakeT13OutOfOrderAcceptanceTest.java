@@ -342,9 +342,23 @@ class OrderIntakeT13OutOfOrderAcceptanceTest {
       if ("PROCESSED".equals(text("SELECT status FROM inbox_event WHERE event_id = ?", eventId))) {
         return;
       }
+      wakeInboxRetries();
       worker.processAvailable(10);
     }
     throw new AssertionError("inbox event was not processed: " + eventId);
+  }
+
+  private void wakeInboxRetries() throws Exception {
+    try (java.sql.Connection admin = AuthTestSupport.admin();
+        var statement = admin.createStatement()) {
+      statement.execute(
+          """
+          UPDATE inbox_event
+          SET next_attempt_at = pg_catalog.now() - interval '1 millisecond'
+          WHERE status IN ('RECEIVED', 'FAILED')
+            AND next_attempt_at > pg_catalog.now()
+          """);
+    }
   }
 
   private void ingest(ObjectNode event) throws Exception {

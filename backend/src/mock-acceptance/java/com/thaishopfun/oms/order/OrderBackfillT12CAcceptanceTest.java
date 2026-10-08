@@ -79,6 +79,9 @@ class OrderBackfillT12CAcceptanceTest {
     registry.add("oms.tsf.client-id", () -> "oms-service");
     registry.add("oms.tsf.client-secret", () -> "dev-oms-service-secret");
     registry.add("oms.tsf.audience", () -> "tsf-internal");
+    registry.add("oms.channel.tsf.retry-max-attempts", () -> "1");
+    registry.add("oms.channel.tsf.retry-wait-base", () -> "10ms");
+    registry.add("oms.channel.tsf.retry-wait-max", () -> "20ms");
   }
 
   @LocalServerPort private int port;

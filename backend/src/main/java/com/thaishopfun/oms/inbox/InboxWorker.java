@@ -472,12 +472,7 @@ public class InboxWorker {
   }
 
   private boolean waitingForOrderBootstrap(InboxRow row) {
-    if ("order.created".equals(row.eventType())
-        || "order.paid".equals(row.eventType())
-        || InboxEntitlementPolicy.ordersByEntVer(row.eventType())) {
-      return false;
-    }
-    if (!InboxAggregateVersionPolicy.versionByEventType(row.eventType())) {
+    if (!"order.cancelled".equals(row.eventType())) {
       return false;
     }
     String orderId = row.payload().path("data").path("order_id").asString(null);
@@ -569,7 +564,7 @@ public class InboxWorker {
             }
             return;
           }
-          recordFailure(claimed, notReady);
+          pushBack(row, properties.getDeferDelay());
         });
     return outcome[0];
   }

@@ -87,20 +87,19 @@ public class OrderGapRefetchService implements OrderGapRefetch {
       OrderDetail detail = adapter.getOrder(ref, externalOrderId);
       PaymentStatus payment = adapter.getPaymentStatus(ref, externalOrderId);
       long snapshotVersion = detail.aggregateVersion();
-      if ("order.paid".equals(inboxEventType)
+      if ("order.updated".equals(inboxEventType)
           && inboxPayload != null
           && !inboxPayload.isNull()
           && snapshotVersion < inboxAggregateVersion
           && orderExists(tenantId, externalOrderId)) {
-        Outcome inboxPaid =
+        Outcome updatedInbox =
             applyTx.execute(
                 status -> {
                   aggregateLock.lockOrder(jdbc, tenantId, externalOrderId);
                   return applier.applyGapInboxEvent(
                       tenantId, shopId, inboxEventType, inboxPayload, prefix);
                 });
-        if (inboxPaid == Outcome.APPLIED) {
-          applyTx.executeWithoutResult(status -> applier.retryReadyToPick(shopId, externalOrderId));
+        if (updatedInbox == Outcome.APPLIED) {
           gapRefetches.increment();
           return true;
         }
