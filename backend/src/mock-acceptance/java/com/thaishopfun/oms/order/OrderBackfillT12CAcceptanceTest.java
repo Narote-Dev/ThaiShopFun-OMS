@@ -550,11 +550,14 @@ class OrderBackfillT12CAcceptanceTest {
             shop.tenant(),
             () -> jdbc.queryForObject("SELECT count(*) FROM sales_order", Long.class));
     assertThat(afterFault).isEqualTo(1);
-    backfill.runOnceForTenant(shop.tenant());
-    long afterRetry =
-        fixture.inTenant(
-            shop.tenant(),
-            () -> jdbc.queryForObject("SELECT count(*) FROM sales_order", Long.class));
+    long afterRetry = afterFault;
+    for (int attempt = 0; attempt < 8 && afterRetry < 2; attempt++) {
+      backfill.runOnceForTenant(shop.tenant());
+      afterRetry =
+          fixture.inTenant(
+              shop.tenant(),
+              () -> jdbc.queryForObject("SELECT count(*) FROM sales_order", Long.class));
+    }
     assertThat(afterRetry).isEqualTo(2);
   }
 

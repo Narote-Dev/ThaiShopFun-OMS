@@ -473,6 +473,7 @@ public class InboxWorker {
 
   private boolean waitingForOrderBootstrap(InboxRow row) {
     if ("order.created".equals(row.eventType())
+        || "order.paid".equals(row.eventType())
         || InboxEntitlementPolicy.ordersByEntVer(row.eventType())) {
       return false;
     }

@@ -88,6 +88,24 @@ public class OrderGapRefetchService implements OrderGapRefetch {
       PaymentStatus payment = adapter.getPaymentStatus(ref, externalOrderId);
       long snapshotVersion = detail.aggregateVersion();
       if ("order.paid".equals(inboxEventType)
+          && inboxPayload != null
+          && !inboxPayload.isNull()
+          && snapshotVersion < inboxAggregateVersion
+          && orderExists(tenantId, externalOrderId)) {
+        Outcome inboxPaid =
+            applyTx.execute(
+                status -> {
+                  aggregateLock.lockOrder(jdbc, tenantId, externalOrderId);
+                  return applier.applyGapInboxEvent(
+                      tenantId, shopId, inboxEventType, inboxPayload, prefix);
+                });
+        if (inboxPaid == Outcome.APPLIED) {
+          applyTx.executeWithoutResult(status -> applier.retryReadyToPick(shopId, externalOrderId));
+          gapRefetches.increment();
+          return true;
+        }
+      }
+      if ("order.paid".equals(inboxEventType)
           && !GapPaymentSnapshot.indicatesPaidHappened(payment)) {
         if (snapshotVersion >= inboxAggregateVersion
             && inboxPayload != null
@@ -226,6 +244,23 @@ public class OrderGapRefetchService implements OrderGapRefetch {
     } finally {
       restoreTenant(previousTenant, previousUser);
     }
+  }
+
+  private boolean orderExists(UUID tenantId, String externalOrderId) {
+    Boolean exists =
+        tenantReadTx.execute(
+            status ->
+                jdbc.queryForObject(
+                    """
+                    SELECT EXISTS (
+                      SELECT 1 FROM sales_order
+                      WHERE tenant_id = ? AND external_order_id = ?
+                    )
+                    """,
+                    Boolean.class,
+                    tenantId,
+                    externalOrderId));
+    return Boolean.TRUE.equals(exists);
   }
 
   public static String shopId(JsonNode payload) {

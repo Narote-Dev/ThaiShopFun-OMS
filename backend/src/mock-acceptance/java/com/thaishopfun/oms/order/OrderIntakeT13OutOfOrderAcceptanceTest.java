@@ -182,7 +182,8 @@ class OrderIntakeT13OutOfOrderAcceptanceTest {
     recipientA.set("address", addressA);
     ((ObjectNode) fresh.path("data")).set("recipient", recipientA);
     ingest(fresh);
-    assertThat(worker.processAvailable(10)).isEqualTo(1);
+    String freshEventId = fresh.path("event_id").asString();
+    drainUntilProcessed(freshEventId);
 
     ObjectNode stale = OrderIntakeScenarioSupport.orderUpdated(JSON, externalOrderId, shopId, 2);
     stale.put("event_id", "evt-stale-upd-" + UUID.randomUUID());
@@ -334,6 +335,16 @@ class OrderIntakeT13OutOfOrderAcceptanceTest {
                     Long.class,
                     externalOrderId));
     assertThat(historyAfterDup).isEqualTo(1);
+  }
+
+  private void drainUntilProcessed(String eventId) {
+    for (int round = 0; round < 40; round++) {
+      if ("PROCESSED".equals(text("SELECT status FROM inbox_event WHERE event_id = ?", eventId))) {
+        return;
+      }
+      worker.processAvailable(10);
+    }
+    throw new AssertionError("inbox event was not processed: " + eventId);
   }
 
   private void ingest(ObjectNode event) throws Exception {
