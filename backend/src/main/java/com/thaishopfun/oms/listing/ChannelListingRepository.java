@@ -384,7 +384,7 @@ public class ChannelListingRepository {
         limit);
   }
 
-  public List<UUID> findResolvableSkuNotMappedOrderIds(UUID tenantId, int limit) {
+  public List<UUID> findResolvableSkuNotMappedOrderIds(UUID tenantId, int limit, Instant asOf) {
     return jdbc.query(
         """
         SELECT so.id
@@ -407,13 +407,14 @@ public class ChannelListingRepository {
             SELECT 1 FROM order_hold_retry r
             WHERE r.tenant_id = so.tenant_id
               AND r.order_id = so.id
-              AND r.next_attempt_at > now()
+              AND r.next_attempt_at > ?
           )
         ORDER BY so.ordered_at, so.id
         LIMIT ?
         """,
         (rs, row) -> rs.getObject("id", UUID.class),
         tenantId,
+        OffsetDateTime.ofInstant(asOf, java.time.ZoneOffset.UTC),
         limit);
   }
 

@@ -8,7 +8,6 @@ CREATE TABLE order_hold_retry (
   last_error text NULL,
   updated_at timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT order_hold_retry_pkey PRIMARY KEY (tenant_id, order_id),
-  CONSTRAINT order_hold_retry_tenant_id_order_id_key UNIQUE (tenant_id, order_id),
   CONSTRAINT order_hold_retry_sales_order_fkey FOREIGN KEY (tenant_id, order_id)
     REFERENCES sales_order (tenant_id, id) ON DELETE CASCADE
 );

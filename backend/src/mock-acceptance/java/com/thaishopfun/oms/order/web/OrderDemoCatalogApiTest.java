@@ -72,47 +72,6 @@ class OrderDemoCatalogApiTest extends OrderIntegrationTest {
   }
 
   @Test
-  void listingSyncAfterDemoCatalogDoesNotRemoveDemoListings() throws Exception {
-    CatalogHttp.Shop httpShop = http.catalog().shop();
-    OrderFixture.Shop shop = OrderFixture.shopFor(httpShop);
-    TenantContext.set(shop.tenantId(), null);
-    var result = catalog.ensureDemoCatalog();
-    UUID accountId = UUID.fromString(result.get("channel_account_id").toString());
-    String owner = httpShop.owner();
-    HttpResponse<String> sync =
-        HTTP.send(
-            HttpRequest.newBuilder(
-                    URI.create(
-                        "http://127.0.0.1:"
-                            + port
-                            + "/api/v1/channel-accounts/"
-                            + accountId
-                            + "/listing-syncs"))
-                .header("Authorization", "Bearer " + owner)
-                .POST(HttpRequest.BodyPublishers.ofString("{}"))
-                .timeout(Duration.ofSeconds(30))
-                .build(),
-            HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-    assertThat(sync.statusCode()).isEqualTo(202);
-    var body = JSON.readTree(sync.body());
-    assertThat(body.path("removed").asInt()).isZero();
-    assertThat(body.path("removal_skipped").asBoolean()).isFalse();
-    try (Connection admin = AuthTestSupport.admin();
-        PreparedStatement ps =
-            admin.prepareStatement(
-                """
-                SELECT count(*) FROM channel_listing
-                WHERE tenant_id = ? AND external_sku_id LIKE 'L-demo-%' AND removed_at IS NULL
-                """)) {
-      ps.setObject(1, shop.tenantId());
-      try (ResultSet rs = ps.executeQuery()) {
-        rs.next();
-        assertThat(rs.getLong(1)).isGreaterThanOrEqualTo(5);
-      }
-    }
-  }
-
-  @Test
   void ensureDemoCatalogCreatesListingsForShopActive() throws Exception {
     CatalogHttp.Shop httpShop = http.catalog().shop();
     OrderFixture.Shop shop = OrderFixture.shopFor(httpShop);

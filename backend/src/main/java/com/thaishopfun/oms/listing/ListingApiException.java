@@ -46,7 +46,7 @@ public class ListingApiException extends RuntimeException {
 
   private static ListingApiException fieldError(String field, String message) {
     return new ListingApiException(
-        400, "VALIDATION_FAILED", message, List.of(Map.of("field", field, "message", message)));
+        422, "VALIDATION_FAILED", message, List.of(Map.of("field", field, "message", message)));
   }
 
   public int status() {

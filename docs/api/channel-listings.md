@@ -11,7 +11,7 @@ User JWT (`aud=oms`). Paths under `/api/v1`. JSON snake_case. `Cache-Control: no
 
 `GET /channel-listings?channel_account_id=&mapped=&removed=&q=&limit=&offset=`
 
-`channel_account_id` is **required**. Missing or blank → `400 VALIDATION_FAILED` with `errors[].field = channel_account_id` and `trace_id`. Unknown account id for the caller’s tenant → empty page (`200`, `items: []`).
+`channel_account_id` is **required**. Missing, blank, or invalid → `422 VALIDATION_FAILED` with `errors[].field = channel_account_id` and `trace_id`. Unknown account id for the caller’s tenant → empty page (`200`, `items: []`).
 
 `removed=true` returns only listings with `removed_at` set (TSF removed).
 

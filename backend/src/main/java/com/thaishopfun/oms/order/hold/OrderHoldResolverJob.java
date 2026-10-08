@@ -166,14 +166,13 @@ public class OrderHoldResolverJob {
     UUID attemptId = UUID.randomUUID();
     RuntimeException lastError = null;
     for (int attempt = 1; attempt <= attempts; attempt++) {
+      Outcome outcome;
       try {
-        Outcome outcome =
+        outcome =
             tenantWriteTx.execute(
                 status ->
                     resolver.resolveHeldOrder(
                         orderId, keyPrefix, recheckIdempotencyKey, attemptId));
-        persistRetryState(tenantId, orderId, outcome, applyBackoff, null);
-        return outcome;
       } catch (RuntimeException ex) {
         lastError = ex;
         if (OrderHoldResolver.retryableLock(ex) && attempt < attempts) {
@@ -191,6 +190,8 @@ public class OrderHoldResolverJob {
         deferredCounter.increment();
         return Outcome.DEFERRED;
       }
+      persistRetryState(tenantId, orderId, outcome, applyBackoff, null);
+      return outcome;
     }
     persistRetryState(tenantId, orderId, Outcome.DEFERRED, applyBackoff, lastError);
     deferredCounter.increment();

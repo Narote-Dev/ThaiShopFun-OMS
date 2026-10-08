@@ -20,3 +20,7 @@ oms:
   stock:
     expiry:
       enabled: false
+  order:
+    hold-resolver:
+      # T12B ac06: immediate retry on the next sweeper batch in tests (backoff suite overrides).
+      backoff-base: 0s

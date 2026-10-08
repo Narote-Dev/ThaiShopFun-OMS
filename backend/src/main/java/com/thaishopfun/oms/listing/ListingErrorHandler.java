@@ -57,7 +57,7 @@ class ListingErrorHandler {
     if ("channel_account_id".equals(ex.getParameterName())) {
       return body(
           request,
-          400,
+          422,
           "VALIDATION_FAILED",
           "channel_account_id is required",
           List.of(

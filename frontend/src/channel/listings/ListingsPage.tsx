@@ -408,7 +408,7 @@ export default function ListingsPage({ me }: { me: Me }) {
                 <DataTableCell>{row.mapping_source ?? '—'}</DataTableCell>
                 <DataTableCell>{row.held_orders}</DataTableCell>
                 <DataTableCell>
-                  {access.canWrite ? (
+                  {access.canWrite && !row.removed_at ? (
                     <div className="flex flex-wrap gap-2">
                       <Button type="button" size="sm" onClick={() => openMapPicker(row)}>
                         Map

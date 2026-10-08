@@ -182,7 +182,9 @@ public class ChannelListingSyncService {
     int remainingCap = holdProperties.getReevalCap();
     for (String externalSkuId : written.reevalSkus()) {
       if (remainingCap <= 0) {
-        deferred += listings.countHeldOrdersForListing(channelAccountId, externalSkuId);
+        deferred +=
+            tx.read(
+                () -> listings.countHeldOrdersForListing(channelAccountId, externalSkuId));
         continue;
       }
       ReevalSummary summary =

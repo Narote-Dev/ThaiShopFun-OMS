@@ -87,6 +87,7 @@ test('owner sync listings shows removed zero for demo catalog', async ({ page, r
   test.setTimeout(180_000)
   await page.goto('/')
   await page.getByRole('link', { name: /^Active Shop/ }).click()
+  await expect(page.getByRole('heading', { name: 'Active Shop' })).toBeVisible()
   const seed = await request.post('http://127.0.0.1:8090/control/demo/orders-seed')
   expect(seed.ok()).toBeTruthy()
   const catalog = await request.post('http://127.0.0.1:8080/control/demo/order-catalog')
@@ -105,6 +106,7 @@ test('owner maps unmapped listing via listings UI and order becomes ready to pic
   const token = await ownerToken(request)
   await page.goto('/')
   await page.getByRole('link', { name: /^Active Shop/ }).click()
+  await expect(page.getByRole('heading', { name: 'Active Shop' })).toBeVisible()
 
   const seed = await request.post('http://127.0.0.1:8090/control/demo/orders-seed')
   expect(seed.ok()).toBeTruthy()
