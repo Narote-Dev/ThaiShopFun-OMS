@@ -160,19 +160,26 @@ class ListingLifecycleBackoffAcceptanceTest {
     UUID account = fixture.tsfChannelAccount(shop, "ACTIVE", "CONNECTED");
     UUID sku = fixture.sku(shop, 10);
     String listingSku = "L-backoff-fault";
-    fixture.channelListing(shop, account, listingSku, sku, true);
+    fixture.channelListing(shop, account, listingSku, null, true, false);
 
     String externalOrderId = "TSF-LC-BO-1-" + UUID.randomUUID();
     ingest(
         OrderIntakeScenarioSupport.orderCreated(
             JSON, externalOrderId, shopId, null, "COD", listingSku, 1, 1));
     worker.processAvailable(10);
+    assertThat(holdReason(shop, externalOrderId)).isEqualTo("SKU_NOT_MAPPED");
     fixture.inTenant(
         shop.tenant(),
         () ->
             jdbc.update(
-                "UPDATE sales_order SET hold_reason = 'SKU_NOT_MAPPED' WHERE external_order_id = ?",
-                externalOrderId));
+                """
+                UPDATE channel_listing
+                SET sku_id = ?, mapping_source = 'MANUAL', mapped_at = now()
+                WHERE channel_account_id = ? AND external_sku_id = ?
+                """,
+                sku,
+                account,
+                listingSku));
     UUID orderId = orderId(shop, externalOrderId);
 
     faults.failNext(Fault.THROW);
@@ -222,17 +229,25 @@ class ListingLifecycleBackoffAcceptanceTest {
     assertThat(retryRowCount(shop, orderId)).isZero();
 
     String recheckOrderId = "TSF-LC-BO-2B-" + UUID.randomUUID();
-    fixture.channelListing(shop, account, "L-backoff-recheck", sku, true);
+    String recheckListing = "L-backoff-recheck";
+    fixture.channelListing(shop, account, recheckListing, null, true, false);
     ingest(
         OrderIntakeScenarioSupport.orderCreated(
-            JSON, recheckOrderId, shopId, null, "COD", "L-backoff-recheck", 1, 1));
+            JSON, recheckOrderId, shopId, null, "COD", recheckListing, 1, 1));
     worker.processAvailable(10);
+    assertThat(holdReason(shop, recheckOrderId)).isEqualTo("SKU_NOT_MAPPED");
     fixture.inTenant(
         shop.tenant(),
         () ->
             jdbc.update(
-                "UPDATE sales_order SET hold_reason = 'SKU_NOT_MAPPED' WHERE external_order_id = ?",
-                recheckOrderId));
+                """
+                UPDATE channel_listing
+                SET sku_id = ?, mapping_source = 'MANUAL', mapped_at = now()
+                WHERE channel_account_id = ? AND external_sku_id = ?
+                """,
+                sku,
+                account,
+                recheckListing));
     UUID recheckId = orderId(shop, recheckOrderId);
     seedBackoff(shop, recheckId);
     assertThat(httpHoldRecheck(token, recheckId, "bo-recheck-" + UuidV7.generate()).statusCode())
@@ -262,19 +277,25 @@ class ListingLifecycleBackoffAcceptanceTest {
     UUID account = fixture.tsfChannelAccount(shop, "ACTIVE", "CONNECTED");
     UUID sku = fixture.sku(shop, 5);
     String listingSku = "L-backoff-still";
-    fixture.channelListing(shop, account, listingSku, sku, true);
-
+    fixture.channelListing(shop, account, listingSku, null, true, false);
     String externalOrderId = "TSF-LC-BO-3-" + UUID.randomUUID();
     ingest(
         OrderIntakeScenarioSupport.orderCreated(
             JSON, externalOrderId, shopId, null, "COD", listingSku, 1, 1));
     worker.processAvailable(10);
+    assertThat(holdReason(shop, externalOrderId)).isEqualTo("SKU_NOT_MAPPED");
     fixture.inTenant(
         shop.tenant(),
         () ->
             jdbc.update(
-                "UPDATE sales_order SET hold_reason = 'SKU_NOT_MAPPED' WHERE external_order_id = ?",
-                externalOrderId));
+                """
+                UPDATE channel_listing
+                SET sku_id = ?, mapping_source = 'MANUAL', mapped_at = now()
+                WHERE channel_account_id = ? AND external_sku_id = ?
+                """,
+                sku,
+                account,
+                listingSku));
     UUID orderId = orderId(shop, externalOrderId);
     StockSkuLookupTestSupport.omitSkuFromCatalogLookup(sku);
 
@@ -304,18 +325,26 @@ class ListingLifecycleBackoffAcceptanceTest {
     String shopId = fixture.tsfShopId(shop);
     UUID account = fixture.tsfChannelAccount(shop, "ACTIVE", "CONNECTED");
     UUID sku = fixture.sku(shop, 4);
-    fixture.channelListing(shop, account, "L-backoff-metric", sku, true);
+    String listingSku = "L-backoff-metric";
+    fixture.channelListing(shop, account, listingSku, null, true, false);
     String externalOrderId = "TSF-LC-BO-4-" + UUID.randomUUID();
     ingest(
         OrderIntakeScenarioSupport.orderCreated(
-            JSON, externalOrderId, shopId, null, "COD", "L-backoff-metric", 1, 1));
+            JSON, externalOrderId, shopId, null, "COD", listingSku, 1, 1));
     worker.processAvailable(10);
+    assertThat(holdReason(shop, externalOrderId)).isEqualTo("SKU_NOT_MAPPED");
     fixture.inTenant(
         shop.tenant(),
         () ->
             jdbc.update(
-                "UPDATE sales_order SET hold_reason = 'SKU_NOT_MAPPED' WHERE external_order_id = ?",
-                externalOrderId));
+                """
+                UPDATE channel_listing
+                SET sku_id = ?, mapping_source = 'MANUAL', mapped_at = now()
+                WHERE channel_account_id = ? AND external_sku_id = ?
+                """,
+                sku,
+                account,
+                listingSku));
     faults.failNext(Fault.THROW);
     resolverJob.runScheduledBatch();
     double after = meters.get(OrderHoldResolverJob.DEFERRED_COUNTER).counter().count();
@@ -371,8 +400,8 @@ class ListingLifecycleBackoffAcceptanceTest {
                 """
                 INSERT INTO sales_order (
                   id, tenant_id, channel_account_id, external_order_id, order_status,
-                  fulfillment_status, hold_reason, ordered_at
-                ) VALUES (?, ?, ?, ?, 'ACTIVE', 'UNFULFILLED', 'SKU_NOT_MAPPED', now())
+                  fulfillment_status, payment_status, hold_reason, ordered_at
+                ) VALUES (?, ?, ?, ?, 'ACTIVE', 'UNFULFILLED', 'UNPAID', 'SKU_NOT_MAPPED', now())
                 """,
                 orderId,
                 shop.tenant(),

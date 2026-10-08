@@ -205,8 +205,19 @@ class ListingLifecycleT12BFUAcceptanceTest {
     String shopId = "shop_active";
     UUID account = fixture.channelAccount(shop, shopId, "ACTIVE", "CONNECTED");
     UUID sku = fixture.sku(shop, 12);
-    String listingSku = "L-revive-sync";
-    fixture.channelListing(shop, account, listingSku, null, true, false);
+    String listingSku = "tsf_sku_7781";
+    assertThat(postListingSync(shopId, account).statusCode()).isEqualTo(202);
+    fixture.inTenant(
+        shop.tenant(),
+        () ->
+            jdbc.update(
+                """
+                UPDATE channel_listing
+                SET sku_id = NULL, mapping_source = NULL, mapped_at = NULL
+                WHERE channel_account_id = ? AND external_sku_id = ?
+                """,
+                account,
+                listingSku));
 
     String externalOrderId = "TSF-LC-AC02-" + UUID.randomUUID();
     ingest(
@@ -239,9 +250,9 @@ class ListingLifecycleT12BFUAcceptanceTest {
 
   @Test
   void ac03_listingChangedReviveSweeperEngineFree() throws Exception {
-    StockFixture.Shop shop = fixture.shop("ACTIVE");
-    String shopId = fixture.tsfShopId(shop);
-    UUID account = fixture.tsfChannelAccount(shop, "ACTIVE", "CONNECTED");
+    StockFixture.Shop shop = ensureShopActive();
+    String shopId = "shop_active";
+    UUID account = fixture.channelAccount(shop, shopId, "ACTIVE", "CONNECTED");
     UUID sku = fixture.sku(shop, 8);
     String listingSku = "L-lc-sweeper";
     fixture.channelListing(shop, account, listingSku, sku, true);
@@ -406,6 +417,8 @@ class ListingLifecycleT12BFUAcceptanceTest {
       String shopId = "shop_active";
       UUID account = fixture.channelAccount(shop, shopId, "ACTIVE", "CONNECTED");
       assertThat(postListingSync(shopId, account).statusCode()).isEqualTo(202);
+      ensureSellerSku(shop, "TSHIRT-BLK-M", 50);
+      ensureSellerSku(shop, "MUG-WHT", 50);
       fixture.inTenant(
           shop.tenant(),
           () ->
@@ -650,6 +663,12 @@ class ListingLifecycleT12BFUAcceptanceTest {
   }
 
   private String userToken(String shopId) throws Exception {
+    if ("shop_active".equals(shopId)) {
+      SeedData seeds = OrderIntakeMockRuntime.mock().getBean(SeedData.class);
+      TokenIssuer issuer = OrderIntakeMockRuntime.mock().getBean(TokenIssuer.class);
+      ShopUser owner = seeds.find("owner-active").orElseThrow();
+      return issuer.userAccessToken(owner);
+    }
     TokenIssuer issuer = OrderIntakeMockRuntime.mock().getBean(TokenIssuer.class);
     SeedData.ShopUser user =
         new SeedData.ShopUser(
@@ -672,6 +691,39 @@ class ListingLifecycleT12BFUAcceptanceTest {
             HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
     assertThat(me.statusCode()).isEqualTo(200);
     return token;
+  }
+
+  private void ensureSellerSku(StockFixture.Shop shop, String sellerSku, int onHand) {
+    fixture.inTenant(
+        shop.tenant(),
+        () -> {
+          List<UUID> ids =
+              jdbc.query(
+                  "SELECT id FROM sku WHERE tenant_id = ? AND sku_code = ?",
+                  (rs, row) -> rs.getObject("id", UUID.class),
+                  shop.tenant(),
+                  sellerSku);
+          if (!ids.isEmpty()) {
+            return;
+          }
+          UUID sku = UuidV7.generate();
+          jdbc.update(
+              "INSERT INTO sku (id, tenant_id, product_id, sku_code, name, is_bundle) "
+                  + "VALUES (?, ?, ?, ?, ?, false)",
+              sku,
+              shop.tenant(),
+              shop.product(),
+              sellerSku,
+              sellerSku);
+          jdbc.update(
+              "INSERT INTO inventory (id, tenant_id, sku_id, warehouse_id, on_hand, reserved) "
+                  + "VALUES (?, ?, ?, ?, ?, 0)",
+              UuidV7.generate(),
+              shop.tenant(),
+              sku,
+              shop.warehouse(),
+              onHand);
+        });
   }
 
   private static String sign(String secret, String timestamp, byte[] body) throws Exception {
