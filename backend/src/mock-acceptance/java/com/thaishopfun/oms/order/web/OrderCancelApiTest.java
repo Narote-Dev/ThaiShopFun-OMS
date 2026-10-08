@@ -15,6 +15,7 @@ import com.thaishopfun.oms.order.OrderStatusHistoryRepository;
 import com.thaishopfun.oms.order.SalesOrder;
 import com.thaishopfun.oms.order.SalesOrderRepository;
 import com.thaishopfun.oms.order.demo.OrderDemoCatalogService;
+import com.thaishopfun.oms.order.hold.OrderHoldResolverJob;
 import com.thaishopfun.oms.tenant.TenantContext;
 import java.io.IOException;
 import java.io.InputStream;
@@ -69,6 +70,7 @@ class OrderCancelApiTest extends OrderIntegrationTest {
   @Autowired PlatformTransactionManager transactions;
   @Autowired JdbcTemplate jdbc;
   @Autowired OrderDemoCatalogService demoCatalog;
+  @Autowired OrderHoldResolverJob holdResolverJob;
   private OrderFixture fixture;
   private static final HttpClient HTTP =
       HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
@@ -372,6 +374,7 @@ class OrderCancelApiTest extends OrderIntegrationTest {
       rounds++;
     } while (processed > 0 && rounds < 50);
     assertThat(rounds).isLessThan(50);
+    holdResolverJob.runScheduledBatch();
 
     assertDemoOrder("DEMO-READY", "READY_TO_PICK", "PAID", "NONE", null);
     assertDemoOrder("DEMO-COD", "READY_TO_PICK", "COD_PENDING", "NONE", null);
