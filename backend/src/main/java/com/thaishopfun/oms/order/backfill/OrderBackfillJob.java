@@ -219,9 +219,10 @@ public class OrderBackfillJob {
       }
     }
     if (!failedThisRun) {
+      boolean advancedWatermark = appliedThisRun;
       tenantWriteTx.executeWithoutResult(
           status -> {
-            if (appliedThisRun) {
+            if (advancedWatermark) {
               cursors.commitSuccess(tenantId, account.id(), runStart);
             } else {
               cursors.touchSuccess(tenantId, account.id(), runStart);
