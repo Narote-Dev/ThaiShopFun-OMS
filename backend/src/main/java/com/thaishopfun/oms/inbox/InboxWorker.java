@@ -155,15 +155,21 @@ public class InboxWorker {
   }
 
   public int processAvailable(int limit) {
-    // Step 1: Claim with an empty tenant context. The definer returns id, tenant, and the lease.
-    List<Claimed> claimed = claim(limit);
+    // Claim one row at a time so a gap defer can unblock a lower-version sibling in the same call.
+    int bounded = Math.min(Math.max(limit, 1), 1000);
     int handled = 0;
-    for (Claimed row : claimed) {
-      try {
-        processClaim(row);
-        handled++;
-      } catch (RuntimeException ex) {
-        log.error("inbox event {} was not completed", row.id(), ex);
+    for (int i = 0; i < bounded; i++) {
+      List<Claimed> claimed = claim(1);
+      if (claimed.isEmpty()) {
+        break;
+      }
+      for (Claimed row : claimed) {
+        try {
+          processClaim(row);
+          handled++;
+        } catch (RuntimeException ex) {
+          log.error("inbox event {} was not completed", row.id(), ex);
+        }
       }
     }
     return handled;
