@@ -1,16 +1,14 @@
 package com.thaishopfun.oms.channel.api;
 
-import com.fasterxml.jackson.annotation.JsonProperty;
 import java.math.BigDecimal;
 import java.util.List;
+import tools.jackson.databind.PropertyNamingStrategies;
+import tools.jackson.databind.annotation.JsonNaming;
 
-public record PaymentStatus(
-    @JsonProperty("order_id") String orderId, String status, List<Refund> refunds) {
+@JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
+public record PaymentStatus(String orderId, String status, List<Refund> refunds) {
 
+  @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
   public record Refund(
-      @JsonProperty("refund_id") String refundId,
-      @JsonProperty("return_id") String returnId,
-      String status,
-      BigDecimal amount,
-      String currency) {}
+      String refundId, String returnId, String status, BigDecimal amount, String currency) {}
 }

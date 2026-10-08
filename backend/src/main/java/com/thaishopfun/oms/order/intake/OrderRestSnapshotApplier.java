@@ -12,6 +12,9 @@ import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ObjectNode;
@@ -29,16 +32,20 @@ public class OrderRestSnapshotApplier {
   private final ChannelAccountLookup channels;
   private final SalesOrderRepository orders;
   private final JsonMapper json;
+  private final TransactionTemplate paidCatchUpTx;
 
   public OrderRestSnapshotApplier(
       OrderIntakeSupport support,
       ChannelAccountLookup channels,
       SalesOrderRepository orders,
-      JsonMapper json) {
+      JsonMapper json,
+      PlatformTransactionManager transactions) {
     this.support = support;
     this.channels = channels;
     this.orders = orders;
     this.json = json;
+    this.paidCatchUpTx = new TransactionTemplate(transactions);
+    this.paidCatchUpTx.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
   }
 
   public Outcome apply(
@@ -61,6 +68,7 @@ public class OrderRestSnapshotApplier {
       return Outcome.SKIPPED;
     }
     // Step 2: Create when missing.
+    boolean createdInThisApply = false;
     if (existing.isEmpty()) {
       InboxMessage created =
           message(
@@ -76,6 +84,7 @@ public class OrderRestSnapshotApplier {
                   "order.created",
                   detailData(detail)));
       support.handleCreated(created);
+      createdInThisApply = true;
       existing = orders.findByExternalId(account.id(), detail.orderId());
     }
     // Step 3: Cancellation from optional REST status (unknown when absent).
@@ -120,7 +129,12 @@ public class OrderRestSnapshotApplier {
                   detail.aggregateVersion(),
                   "order.paid",
                   json.createObjectNode().put("order_id", detail.orderId())));
-      support.handlePaid(paid);
+      // Change: stock.adopt and ensure_order_hold cannot share one transaction.
+      if (createdInThisApply) {
+        paidCatchUpTx.executeWithoutResult(status -> support.handlePaid(paid));
+      } else {
+        support.handlePaid(paid);
+      }
     }
     // Step 5: Apply REST recipient snapshot when aggregate moved ahead of OMS.
     SalesOrder afterPayment = orders.findByExternalId(account.id(), detail.orderId()).orElse(null);

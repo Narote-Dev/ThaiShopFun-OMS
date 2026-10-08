@@ -1,9 +1,8 @@
 package com.thaishopfun.oms.channel.api;
 
-import com.fasterxml.jackson.annotation.JsonProperty;
 import java.time.Instant;
+import tools.jackson.databind.PropertyNamingStrategies;
+import tools.jackson.databind.annotation.JsonNaming;
 
-public record OrderSummary(
-    @JsonProperty("order_id") String orderId,
-    @JsonProperty("updated_at") Instant updatedAt,
-    @JsonProperty("aggregate_version") long aggregateVersion) {}
+@JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
+public record OrderSummary(String orderId, Instant updatedAt, long aggregateVersion) {}
