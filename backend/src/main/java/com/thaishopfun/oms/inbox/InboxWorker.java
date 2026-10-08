@@ -375,14 +375,19 @@ public class InboxWorker {
 
   private void handleGapRefetch(Claimed claimed, InboxGapRefetchRequired gap) {
     try {
-      gapRefetch.refetchAndApply(
-          gap.tenantId(),
-          gap.shopId(),
-          gap.externalOrderId(),
-          gap.aggregateVersion(),
-          "gap:" + gap.inboxId(),
-          gap.eventType(),
-          gap.payload());
+      boolean applied =
+          gapRefetch.refetchAndApply(
+              gap.tenantId(),
+              gap.shopId(),
+              gap.externalOrderId(),
+              gap.aggregateVersion(),
+              "gap:" + gap.inboxId(),
+              gap.eventType(),
+              gap.payload());
+      if (!applied) {
+        throw new com.thaishopfun.oms.order.backfill.GapSnapshotNotReadyException(
+            0, gap.aggregateVersion());
+      }
       applyTx.executeWithoutResult(
           status -> {
             InboxRow row = lock(claimed.id());

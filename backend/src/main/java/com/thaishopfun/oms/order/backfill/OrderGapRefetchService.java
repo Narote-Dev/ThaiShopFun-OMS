@@ -63,7 +63,7 @@ public class OrderGapRefetchService implements OrderGapRefetch {
   }
 
   @Override
-  public void refetchAndApply(
+  public boolean refetchAndApply(
       UUID tenantId,
       String shopId,
       String externalOrderId,
@@ -112,22 +112,11 @@ public class OrderGapRefetchService implements OrderGapRefetch {
           outcome = Outcome.APPLIED;
         }
       }
-      if (outcome == Outcome.SKIPPED && inboxAggregateVersion > 0) {
-        long stored =
-            tenantReadTx.execute(
-                status ->
-                    channels
-                        .tsfByExternalShopId(shopId)
-                        .flatMap(account -> orders.findByExternalId(account.id(), externalOrderId))
-                        .map(o -> o.externalVersion() == null ? 0L : o.externalVersion())
-                        .orElse(0L));
-        if (stored < inboxAggregateVersion) {
-          throw new GapSnapshotNotReadyException(snapshotVersion, inboxAggregateVersion);
-        }
-      }
       if (outcome == Outcome.APPLIED) {
         gapRefetches.increment();
+        return true;
       }
+      return false;
     } finally {
       restoreTenant(previousTenant, previousUser);
     }

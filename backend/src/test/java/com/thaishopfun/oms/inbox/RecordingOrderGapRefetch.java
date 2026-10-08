@@ -20,7 +20,7 @@ public class RecordingOrderGapRefetch implements OrderGapRefetch {
   private final List<Call> calls = new ArrayList<>();
 
   @Override
-  public void refetchAndApply(
+  public boolean refetchAndApply(
       UUID tenantId,
       String shopId,
       String externalOrderId,
@@ -29,6 +29,7 @@ public class RecordingOrderGapRefetch implements OrderGapRefetch {
       String inboxEventType,
       JsonNode inboxPayload) {
     calls.add(new Call(tenantId, shopId, externalOrderId, inboxAggregateVersion));
+    return true;
   }
 
   public List<Call> calls() {
