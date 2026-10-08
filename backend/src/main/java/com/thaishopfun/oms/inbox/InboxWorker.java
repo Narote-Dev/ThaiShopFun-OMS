@@ -265,7 +265,6 @@ public class InboxWorker {
     } finally {
       TenantContext.clear();
     }
-    return ClaimOutcome.NOOP;
   }
 
   private void handleDefer(Claimed claimed, InboxDeferException defer) {
