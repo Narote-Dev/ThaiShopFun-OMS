@@ -101,10 +101,12 @@ public class OrderGapRefetchService implements OrderGapRefetch {
         outcome =
             finalizeDeferred(tenantId, externalOrderId, shopId, detail, payment, prefix, outcome);
       }
-      if (outcome != Outcome.APPLIED
-          && inboxPayload != null
+      boolean inboxAuthoritative =
+          "order.paid".equals(inboxEventType) || "order.cancelled".equals(inboxEventType);
+      if (inboxPayload != null
           && !inboxPayload.isNull()
-          && snapshotVersion >= inboxAggregateVersion) {
+          && snapshotVersion >= inboxAggregateVersion
+          && (outcome != Outcome.APPLIED || inboxAuthoritative)) {
         Outcome inboxOutcome =
             applyTx.execute(
                 status -> {
