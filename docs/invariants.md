@@ -54,7 +54,7 @@ WHERE coalesce(l.on_hand, 0) <> i.on_hand OR coalesce(l.reserved, 0) <> i.reserv
 | `order.terminal_active_reservation` | `COMPLETED` orders have no `ACTIVE` `ORDER` reservations | Terminal orders release holds | Checker + engine |
 | `order.ready_to_pick_hold` | `READY_TO_PICK` ⇒ `hold_reason = NONE` and `order_status = ACTIVE` | PO picking gate | Checker |
 | `order.ready_to_pick_coverage` | `READY_TO_PICK` on `channel_account.mode = ACTIVE` with mapped lines has ORDER reservation coverage | Stock-enforced pick path | Checker (uses `OrderReservationCoverage`) |
-| `order.status_history_missing` | Orders with `version > 0` have ≥1 `order_status` history row | Audit trail (best-effort) | Checker |
+| `order.status_history_missing` | Status transitions should append `ORDER` dimension history | Audit trail (best-effort) | State machine (checker deferred — intake can start `ACTIVE` without an `ORDER` row) |
 
 ACTIVE `ORDER` reservations on non-terminal orders are allowed; terminal statuses must not retain ACTIVE reservations.
 

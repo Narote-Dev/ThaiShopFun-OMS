@@ -298,29 +298,6 @@ public class InvariantChecker {
         : List.of(Violation.of(InvariantCodes.ORDER_READY_TO_PICK_HOLD, tenantId, ids));
   }
 
-  /** Best-effort: every order should have at least one order_status history row. */
-  private List<Violation> orderStatusHistoryMissing(UUID tenantId) {
-    List<UUID> ids =
-        jdbc.query(
-            """
-            SELECT o.id
-            FROM sales_order o
-            WHERE o.version > 0
-              AND NOT EXISTS (
-              SELECT 1 FROM order_status_history h
-              WHERE h.tenant_id = o.tenant_id
-                AND h.order_id = o.id
-                AND h.dimension = 'ORDER'
-            )
-            LIMIT ?
-            """,
-            (rs, row) -> rs.getObject("id", UUID.class),
-            ENTITY_LIMIT);
-    return ids.isEmpty()
-        ? List.of()
-        : List.of(Violation.of(InvariantCodes.ORDER_STATUS_HISTORY_MISSING, tenantId, ids));
-  }
-
   private List<Violation> orderReadyToPickCoverage(UUID tenantId) {
     Instant now = clock.instant();
     List<UUID> orderIds =

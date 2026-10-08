@@ -230,7 +230,7 @@ public final class StockFixture {
                 "SELECT tsf_shop_id FROM tenant WHERE id = ?", String.class, shop.tenant()));
   }
 
-  void setTsfShopId(Shop shop, String tsfShopId) {
+  public void setTsfShopId(Shop shop, String tsfShopId) {
     inTenant(
         shop.tenant(),
         () ->
