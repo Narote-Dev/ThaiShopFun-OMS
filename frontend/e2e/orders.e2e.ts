@@ -85,7 +85,6 @@ test('owner browses orders, opens detail with masked phone, requests cancel', as
 
 test('owner sync listings shows removed zero for demo catalog', async ({ page, request }) => {
   test.setTimeout(180_000)
-  const token = await ownerToken(request)
   await page.goto('/')
   await page.getByRole('link', { name: /^Active Shop/ }).click()
   const seed = await request.post('http://127.0.0.1:8090/control/demo/orders-seed')
