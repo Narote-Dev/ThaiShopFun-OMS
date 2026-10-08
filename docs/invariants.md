@@ -52,7 +52,7 @@ WHERE coalesce(l.on_hand, 0) <> i.on_hand OR coalesce(l.reserved, 0) <> i.reserv
 | `order.reservation_orphan` | Every `ACTIVE` `ORDER` reservation references an existing `sales_order` | No ghost holds | Checker |
 | `order.cancelled_active_reservation` | `CANCELLED` orders have no `ACTIVE` `ORDER` reservations | Cancel releases stock | Checker + engine |
 | `order.terminal_active_reservation` | `COMPLETED` orders have no `ACTIVE` `ORDER` reservations | Terminal orders release holds | Checker + engine |
-| `order.ready_to_pick_hold` | `READY_TO_PICK` ⇒ `hold_reason = NONE` and `order_status = ACTIVE` | PO picking gate | Checker |
+| `order.ready_to_pick_hold` | `READY_TO_PICK` and `order_status = ACTIVE` ⇒ `hold_reason` in (`NONE`, `CHANNEL_CANCEL_PENDING`) | PO picking gate (cancelled orders may keep stale fulfillment) | Checker |
 | `order.ready_to_pick_coverage` | `READY_TO_PICK` on `channel_account.mode = ACTIVE` with mapped lines has ORDER reservation coverage | Stock-enforced pick path | Checker (uses `OrderReservationCoverage`) |
 | `order.status_history_missing` | Status transitions should append `ORDER` dimension history | Audit trail (best-effort) | State machine (checker deferred — intake can start `ACTIVE` without an `ORDER` row) |
 

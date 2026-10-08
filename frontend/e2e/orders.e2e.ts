@@ -134,8 +134,12 @@ test('owner maps unmapped listing via listings UI and order becomes ready to pic
     )
     .toBeGreaterThan(0)
 
-  await page.goto(
-    `/#/channel/listings?channel_account_id=${channelAccountId}&mapped=false&q=L-demo-missing`,
+  // Stay in the SPA session (full page.goto drops OIDC state and stalls on authorize).
+  await page.evaluate(
+    ({ channelAccountId }) => {
+      window.location.hash = `/channel/listings?channel_account_id=${encodeURIComponent(channelAccountId)}&mapped=false&q=L-demo-missing`
+    },
+    { channelAccountId },
   )
   await expect(page.getByRole('heading', { name: 'Channel listings' })).toBeVisible()
   await expect(page.getByText('L-demo-missing')).toBeVisible({ timeout: 60_000 })

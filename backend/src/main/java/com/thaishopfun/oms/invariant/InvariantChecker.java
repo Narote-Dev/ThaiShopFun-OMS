@@ -285,10 +285,8 @@ public class InvariantChecker {
             """
             SELECT id FROM sales_order
             WHERE fulfillment_status = 'READY_TO_PICK'
-              AND (
-                hold_reason NOT IN ('NONE', 'CHANNEL_CANCEL_PENDING')
-                OR order_status <> 'ACTIVE'
-              )
+              AND order_status = 'ACTIVE'
+              AND hold_reason NOT IN ('NONE', 'CHANNEL_CANCEL_PENDING')
             LIMIT ?
             """,
             (rs, row) -> rs.getObject("id", UUID.class),

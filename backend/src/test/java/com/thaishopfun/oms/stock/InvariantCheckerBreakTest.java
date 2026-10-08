@@ -33,8 +33,8 @@ class InvariantCheckerBreakTest extends StockTestBase {
   void orphanLedgerDelta() {
     StockFixture.Shop shop = fixture.shop("ACTIVE");
     UUID sku = fixture.sku(shop, 3);
-    as(
-        shop,
+    fixture.inTenant(
+        shop.tenant(),
         () -> {
           long seq =
               jdbc.queryForObject(
@@ -59,7 +59,6 @@ class InvariantCheckerBreakTest extends StockTestBase {
               sku,
               shop.warehouse(),
               seq);
-          return null;
         });
     assertStockCode(shop.tenant(), InvariantCodes.STOCK_LEDGER_MISMATCH);
   }
@@ -68,19 +67,17 @@ class InvariantCheckerBreakTest extends StockTestBase {
   void activeReservationMismatch() {
     StockFixture.Shop shop = fixture.shop("ACTIVE");
     UUID sku = fixture.sku(shop, 10);
-    as(
-        shop,
-        () -> {
-          jdbc.update(
-              """
-              UPDATE inventory SET reserved = 3
-              WHERE tenant_id = ? AND sku_id = ? AND warehouse_id = ?
-              """,
-              shop.tenant(),
-              sku,
-              shop.warehouse());
-          return null;
-        });
+    fixture.inTenant(
+        shop.tenant(),
+        () ->
+            jdbc.update(
+                """
+                UPDATE inventory SET reserved = 3
+                WHERE tenant_id = ? AND sku_id = ? AND warehouse_id = ?
+                """,
+                shop.tenant(),
+                sku,
+                shop.warehouse()));
     assertStockCode(shop.tenant(), InvariantCodes.STOCK_ACTIVE_RESERVATION_MISMATCH);
   }
 
@@ -110,8 +107,8 @@ class InvariantCheckerBreakTest extends StockTestBase {
     UUID sku = fixture.sku(shop, 5);
     UUID orderId = UuidV7.generate();
     UUID channel = fixture.channelAccount(shop, "ACTIVE", "CONNECTED");
-    as(
-        shop,
+    fixture.inTenant(
+        shop.tenant(),
         () -> {
           jdbc.update(
               """
@@ -139,7 +136,6 @@ class InvariantCheckerBreakTest extends StockTestBase {
               shop.warehouse(),
               orderId.toString(),
               reservation);
-          return null;
         });
     assertCode(shop.tenant(), InvariantCodes.ORDER_CANCELLED_ACTIVE_RESERVATION);
   }
