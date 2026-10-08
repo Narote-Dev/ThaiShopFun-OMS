@@ -85,6 +85,7 @@ public class DemoOrdersController {
     if (orderId != null && orderId.startsWith("DEMO-")) {
       catalog.ensureDemoOrder(orderId);
     }
+    catalog.noteOrderEvent(event);
     byte[] raw = json.writeValueAsBytes(event);
     String eventId = event.path("event_id").asString();
     String signature = oms.signInbox(OmsCaller.now(), raw);

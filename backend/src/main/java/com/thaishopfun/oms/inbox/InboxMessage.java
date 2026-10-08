@@ -5,7 +5,7 @@ import tools.jackson.databind.JsonNode;
 
 /**
  * One claimed inbox row. {@code gap} is true when {@code aggregateVersion} skips ahead of the last
- * PROCESSED version. Filling that gap over REST is a later task; the handler still runs.
+ * PROCESSED version. The worker refetches the REST snapshot instead of applying the webhook delta.
  */
 public record InboxMessage(
     UUID id,

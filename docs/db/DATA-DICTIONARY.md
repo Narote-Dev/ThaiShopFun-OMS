@@ -1,6 +1,6 @@
 # OMS Data Dictionary
 
-อ้างอิง main @ ee4e425 (Flyway V13)
+อ้างอิง main @ f642c69 (Flyway V14)
 
 > **Generated** — แก้ usage ที่ `docs/tools/generate_field_usage.py` (OVERRIDES) + meanings ที่ `docs/tools/field_meta/all_fields.py`; รัน `python docs/tools/generate_field_usage.py` แล้ว `python docs/tools/build_reference_docs.py`. หน้า PAGES/MODULES แก้ที่ `pages_body.md` / `modules_body.md`.
 
@@ -351,7 +351,7 @@ erDiagram
 | field | type | null | default | ความหมาย | ใช้ทำอะไร / ใครเขียน-ใครอ่าน | หมายเหตุ |
 |---|---|---|---|---|---|---|
 | `id` | `uuid` | NO | — | รหัสประจำร้าน (tenant) หนึ่งแถวต่อ TSF shop | INSERT `provision_tenant` (V2); อ่าน `MeService`, RLS | — |
-| `name` | `text` | NO | — | ชื่อร้านที่แสดงใน OMS | INSERT/UPDATE `provision_tenant`, `MembershipChangedHandler`; อ่าน `MeService` | — |
+| `name` | `text` | NO | — | ชื่อร้านที่แสดงใน OMS | INSERT/UPDATE `provision_tenant`; อ่าน `MeService` | — |
 | `tsf_shop_id` | `text` | NO | — | รหัสร้านบน TSF (ไม่ซ้ำทั้งระบบ) | INSERT `provision_tenant`; อ่าน `MeService`, `CheckoutRepository`, `OutboxAppender` | — |
 | `membership_tier` | `text` | NO | — | แพ็กเกจ membership จาก TSF | อัปเดต `MembershipChangedHandler`; อ่าน `MeService` | — |
 | `entitlement_status` | `text` | NO | — | สิทธิ์ใช้งาน OMS ของร้าน | อัปเดต `MembershipChangedHandler`; อ่าน `MeService`, `TenantSessionService`, `InboxWorker` | enum: ACTIVE, GRACE, SUSPENDED เท่านั้น |
@@ -1270,13 +1270,13 @@ erDiagram
 
 | field | type | null | default | ความหมาย | ใช้ทำอะไร / ใครเขียน-ใครอ่าน | หมายเหตุ |
 |---|---|---|---|---|---|---|
-| `tenant_id` | `uuid` | NO | — | รหัสร้านที่แถวนี้สังกัด ใช้กรองด้วย RLS | reserved — ไม่มี writer/reader บน main ([T12C](../plan/05-task-list.md#L212)) | reserved [T12C](../plan/05-task-list.md#L212) |
-| `channel_account_id` | `uuid` | NO | — | บัญชีช่องทางที่ cursor นี้ผูก | reserved — ไม่มี writer/reader บน main ([T12C](../plan/05-task-list.md#L212)) | reserved [T12C](../plan/05-task-list.md#L212) |
-| `resource` | `text` | NO | — | ทรัพยากรที่ sync | reserved — ไม่มี writer/reader บน main ([T12C](../plan/05-task-list.md#L212)) | enum: ORDERS, LISTINGS; reserved [T12C](../plan/05-task-list.md#L212) |
-| `cursor` | `text` | YES | — | ตำแหน่ง cursor ล่าสุด | reserved — ไม่มี writer/reader บน main ([T12C](../plan/05-task-list.md#L212)) | reserved [T12C](../plan/05-task-list.md#L212) |
-| `last_success_at` | `timestamp with time zone` | YES | — | เวลา sync สำเร็จล่าสุด (UTC) | reserved — ไม่มี writer/reader บน main ([T12C](../plan/05-task-list.md#L212)) | reserved [T12C](../plan/05-task-list.md#L212) |
-| `created_at` | `timestamp with time zone` | NO | `now()` | เวลาที่แถวถูกสร้าง (timestamptz UTC) | reserved — ไม่มี writer/reader บน main ([T12C](../plan/05-task-list.md#L212)) | reserved [T12C](../plan/05-task-list.md#L212) |
-| `updated_at` | `timestamp with time zone` | NO | `now()` | เวลาที่แถวถูกแก้ไขล่าสุด (timestamptz UTC) | reserved — ไม่มี writer/reader บน main ([T12C](../plan/05-task-list.md#L212)) | reserved [T12C](../plan/05-task-list.md#L212) |
+| `tenant_id` | `uuid` | NO | — | รหัสร้านที่แถวนี้สังกัด ใช้กรองด้วย RLS | INSERT/UPDATE `OrderSyncCursorRepository`; อ่าน `OrderSyncCursorRepository` | — |
+| `channel_account_id` | `uuid` | NO | — | บัญชีช่องทางที่ cursor นี้ผูก | INSERT/UPDATE `OrderSyncCursorRepository`; อ่าน `OrderSyncCursorRepository` | — |
+| `resource` | `text` | NO | — | ทรัพยากรที่ sync | INSERT `OrderSyncCursorRepository` (ORDERS); อ่าน `OrderSyncCursorRepository` | enum: ORDERS, LISTINGS |
+| `cursor` | `text` | YES | — | ตำแหน่ง cursor ล่าสุด (JSON updated_since/page_cursor) | INSERT/UPDATE `OrderSyncCursorRepository`; อ่าน `OrderSyncCursorRepository` | — |
+| `last_success_at` | `timestamp with time zone` | YES | — | เวลา sync สำเร็จล่าสุด (UTC) | UPDATE `OrderSyncCursorRepository`; อ่าน `OrderSyncCursorRepository` | — |
+| `created_at` | `timestamp with time zone` | NO | `now()` | เวลาที่แถวถูกสร้าง (timestamptz UTC) | INSERT default; อ่าน ops | — |
+| `updated_at` | `timestamp with time zone` | NO | `now()` | เวลาที่แถวถูกแก้ไขล่าสุด (timestamptz UTC) | trigger/default on upsert; อ่าน ops | — |
 
 ### `idempotency_key`
 

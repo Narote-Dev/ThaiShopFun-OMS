@@ -32,5 +32,6 @@
     }
   ],
   "updated_at": "2026-09-29T08:15:02Z",
-  "aggregate_version": 3
+  "aggregate_version": 3,
+  "status": "ACTIVE"
 }

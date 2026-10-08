@@ -62,6 +62,11 @@ class OrderIntakeT13OutOfOrderAcceptanceTest {
     registry.add("oms.inbox.hmac-secrets", () -> INBOX_SECRET);
     registry.add("oms.inbox.jitter-ratio", () -> "0");
     registry.add("oms.outbox.publisher-enabled", () -> "false");
+    registry.add("oms.tsf.base-url", () -> "http://127.0.0.1:" + mockPort);
+    registry.add("oms.tsf.token-uri", () -> "http://127.0.0.1:" + mockPort + "/tsf-idp/token");
+    registry.add("oms.tsf.client-id", () -> "oms-service");
+    registry.add("oms.tsf.client-secret", () -> "dev-oms-service-secret");
+    registry.add("oms.tsf.audience", () -> "tsf-internal");
   }
 
   @LocalServerPort private int port;
@@ -177,7 +182,8 @@ class OrderIntakeT13OutOfOrderAcceptanceTest {
     recipientA.set("address", addressA);
     ((ObjectNode) fresh.path("data")).set("recipient", recipientA);
     ingest(fresh);
-    assertThat(worker.processAvailable(10)).isEqualTo(1);
+    String freshEventId = fresh.path("event_id").asString();
+    drainUntilProcessed(freshEventId);
 
     ObjectNode stale = OrderIntakeScenarioSupport.orderUpdated(JSON, externalOrderId, shopId, 2);
     stale.put("event_id", "evt-stale-upd-" + UUID.randomUUID());
@@ -208,6 +214,72 @@ class OrderIntakeT13OutOfOrderAcceptanceTest {
                     String.class,
                     externalOrderId));
     assertThat(province).isEqualTo("Province-A");
+  }
+
+  @Test
+  void updatedRecipientAppliedWhenPaidArrivesWithHigherVersion() throws Exception {
+    StockFixture.Shop shop = fixture.shop("ACTIVE");
+    String shopId = fixture.tsfShopId(shop);
+    UUID account = fixture.tsfChannelAccount(shop, "ACTIVE", "CONNECTED");
+    UUID sku = fixture.sku(shop, 11);
+    fixture.channelListing(shop, account, "L-t13-upd-paid", sku, true);
+    String externalOrderId = "TSF-T13-UPD-PAID-" + UUID.randomUUID();
+    ingest(
+        OrderIntakeScenarioSupport.orderCreated(
+            JSON,
+            externalOrderId,
+            shopId,
+            UUID.randomUUID().toString(),
+            "PREPAID",
+            "L-t13-upd-paid",
+            1,
+            1));
+    assertThat(worker.processAvailable(10)).isEqualTo(1);
+
+    ObjectNode updated = OrderIntakeScenarioSupport.orderUpdated(JSON, externalOrderId, shopId, 2);
+    ObjectNode recipient = JSON.createObjectNode();
+    recipient.put("name", "Recipient V2");
+    recipient.put("phone", "0833333333");
+    ObjectNode address = JSON.createObjectNode();
+    address.put("line1", "line v2");
+    address.put("district", "district");
+    address.put("province", "Province-V2");
+    address.put("postcode", "10110");
+    recipient.set("address", address);
+    ((ObjectNode) updated.path("data")).set("recipient", recipient);
+    ingest(updated);
+
+    ObjectNode paid = OrderIntakeScenarioSupport.orderPaid(JSON, externalOrderId, shopId, 3);
+    paid.put("event_id", "evt-paid-after-upd-" + UUID.randomUUID());
+    ingest(paid);
+
+    int handled = 0;
+    for (int round = 0; round < 10 && handled < 2; round++) {
+      handled += worker.processAvailable(10);
+    }
+    assertThat(handled).isGreaterThanOrEqualTo(2);
+
+    String province =
+        fixture.inTenant(
+            shop.tenant(),
+            () ->
+                jdbc.queryForObject(
+                    """
+                    SELECT province FROM order_recipient
+                    WHERE order_id = (SELECT id FROM sales_order WHERE external_order_id = ?)
+                    """,
+                    String.class,
+                    externalOrderId));
+    assertThat(province).isEqualTo("Province-V2");
+    String payment =
+        fixture.inTenant(
+            shop.tenant(),
+            () ->
+                jdbc.queryForObject(
+                    "SELECT payment_status FROM sales_order WHERE external_order_id = ?",
+                    String.class,
+                    externalOrderId));
+    assertThat(payment).isEqualTo("PAID");
   }
 
   @Test
@@ -265,7 +337,32 @@ class OrderIntakeT13OutOfOrderAcceptanceTest {
     assertThat(historyAfterDup).isEqualTo(1);
   }
 
+  private void drainUntilProcessed(String eventId) throws Exception {
+    for (int round = 0; round < 40; round++) {
+      if ("PROCESSED".equals(text("SELECT status FROM inbox_event WHERE event_id = ?", eventId))) {
+        return;
+      }
+      wakeInboxRetries();
+      worker.processAvailable(10);
+    }
+    throw new AssertionError("inbox event was not processed: " + eventId);
+  }
+
+  private void wakeInboxRetries() throws Exception {
+    try (java.sql.Connection admin = AuthTestSupport.admin();
+        var statement = admin.createStatement()) {
+      statement.execute(
+          """
+          UPDATE inbox_event
+          SET next_attempt_at = pg_catalog.now() - interval '1 millisecond'
+          WHERE status IN ('RECEIVED', 'FAILED')
+            AND next_attempt_at > pg_catalog.now()
+          """);
+    }
+  }
+
   private void ingest(ObjectNode event) throws Exception {
+    MockTsfCatalogSync.note(event);
     byte[] body = JSON.writeValueAsBytes(event);
     String eventId = event.path("event_id").asString();
     HttpRequest request =

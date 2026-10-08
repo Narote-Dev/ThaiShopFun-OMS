@@ -1,0 +1,54 @@
+# Order backfill and gap refetch
+
+OMS pulls TSF orders on a schedule and refetches full snapshots when inbox `aggregate_version` gaps are detected.
+
+## Scheduled backfill
+
+- Config prefix: `oms.order.backfill`
+- Default interval: **15 minutes** (`PT15M`)
+- Disabled in tests via `oms.order.backfill.enabled=false` (call `OrderBackfillJob.runOnce()` directly)
+- Tenants: `list_tenants_for_order_backfill()` (ACTIVE + unexpired GRACE with a connected TSF account)
+- Per tenant: each non-`DISCONNECTED` TSF `channel_account`, one watermark per account in `sync_cursor` (`resource=ORDERS`)
+
+### Cursor JSON (`sync_cursor.cursor`)
+
+```json
+{"updated_since":"2026-10-08T12:00:00Z","page_cursor":"Mg=="}
+```
+
+- `updated_since`: watermark for `GET /shops/{shopId}/orders?updated_since=` (minus a 2-minute overlap for clock skew)
+- `page_cursor`: paging token while a run is in progress
+- `last_success_at`: committed watermark time after a full successful run
+
+HTTP list/get runs **outside** DB transactions. Each applied order runs in a new tenant transaction with `InboxAggregateLock.lockOrder`.
+
+## Gap refetch
+
+When `aggregate_version` skips ahead of the last PROCESSED version on the aggregate (any order event type, including `order.updated`), `InboxWorker` does not apply the webhook delta alone. It refetches `GET /orders/{id}` (+ payment status) outside the inbox transaction, then applies the REST snapshot through the same intake handlers as webhooks.
+
+`order.updated` deltas are **not** dropped when a newer inbox row exists for another event type on the same order; stale skipping is per `event_type` only.
+
+If REST is behind the inbox version, the gap row uses the normal inbox failure backoff ladder (with jitter) until `oms.inbox.max-defer` age or max attempts. After that budget, OMS applies the gap inbox payload for `order.paid` / `order.cancelled` / `order.updated`, or marks the row `DEAD` with reconciliation rule `GAP_SNAPSHOT_STALE`.
+
+REST payment `PAID`, `PARTIALLY_REFUNDED`, and `REFUNDED` count as “paid happened” for catch-up. When REST payment is `UNPAID`/`FAILED` but `aggregate_version` is already at or past the inbox version, gap refetch applies the inbox `order.paid` payload instead of polling forever.
+
+## Cancellation via REST
+
+`order.json` includes optional `status` (`ACTIVE` | `CANCELLED`). When present, backfill/gap apply issues `order.cancelled` through intake when OMS is not already cancelled. Missing `status` is treated as unknown (no cancel inference).
+
+## Metrics
+
+- `oms.order.backfill.fetched|applied|skipped|failed`
+- `oms.order.backfill.lag_seconds` (gauge, tag `tenant_id`: watermark lag per tenant after a successful run)
+- `oms.order.backfill.lag_seconds_max` (gauge: max lag across tenants on this instance)
+- `oms.order.gap_refetch`
+
+Logs include order ids only (no recipient PII).
+
+## Local trigger
+
+```bash
+# mock-tsf: disable webhooks, seed orders, then invoke backfill (tests call OrderBackfillJob.runOnce())
+curl -s -X POST localhost:8090/control/webhooks -H 'content-type: application/json' -d '{"enabled":false}'
+curl -s -X POST localhost:8090/control/orders/bulk -H 'content-type: application/json' -d '{"count":5,"payment":"COD"}'
+```

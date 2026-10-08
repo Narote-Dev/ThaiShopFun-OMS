@@ -81,6 +81,7 @@ class InboxApiTest {
   @Autowired private PlatformTransactionManager transactions;
   @Autowired private MeterRegistry meters;
   @Autowired private InboxProperties inboxProperties;
+  @Autowired private RecordingOrderGapRefetch gapRefetch;
 
   @Autowired
   @Qualifier("orderCreated")
@@ -116,6 +117,7 @@ class InboxApiTest {
             "oms-internal",
             Instant.now().plusSeconds(600),
             List.of("oms"));
+    gapRefetch.reset();
     orderCreated.reset();
     orderFail.reset();
     orderPaid.reset();
@@ -627,8 +629,8 @@ class InboxApiTest {
     stampReceived(base, 2);
     stampReceived(skipped, 1);
     worker.processAvailable();
-    assertThat(orderCreated.calls.get()).isEqualTo(2);
-    assertThat(orderCreated.gaps).containsExactly(false, true);
+    assertThat(orderCreated.calls.get()).isEqualTo(1);
+    assertThat(gapRefetch.calls()).hasSize(1);
   }
 
   @Test
@@ -674,8 +676,8 @@ class InboxApiTest {
     String paidId = id();
     postBusinessEvent(shop, paidId, aggregate, "order.paid", 3);
     worker.processAvailable();
-    assertThat(orderPaid.calls.get()).isEqualTo(1);
-    assertThat(orderPaid.gaps).containsExactly(true);
+    assertThat(orderPaid.calls.get()).isZero();
+    assertThat(gapRefetch.calls()).hasSize(1);
   }
 
   @Test

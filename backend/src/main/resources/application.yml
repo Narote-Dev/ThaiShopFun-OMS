@@ -85,6 +85,11 @@ oms:
     zone: ${OMS_INVARIANT_ZONE:Asia/Bangkok}
   order:
     unpaid-hold-grace: 10m
+    backfill:
+      enabled: ${OMS_ORDER_BACKFILL_ENABLED:true}
+      interval: ${OMS_ORDER_BACKFILL_INTERVAL:PT15M}
+      overlap: PT2M
+      page-limit: 100
   order-intake:
     enabled: true
   # T10 recipient PII (AES-256-GCM key ring + HMAC key for phone_hash). No default in any

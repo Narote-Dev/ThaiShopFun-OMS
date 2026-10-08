@@ -74,6 +74,20 @@ public class SalesOrderRepository {
             externalOrderId));
   }
 
+  public void updateExternalVersion(
+      UUID channelAccountId, String externalOrderId, long externalVersion) {
+    jdbc.update(
+        """
+        UPDATE sales_order
+        SET external_version = GREATEST(COALESCE(external_version, 0), ?),
+            updated_at = pg_catalog.now()
+        WHERE channel_account_id = ? AND external_order_id = ?
+        """,
+        externalVersion,
+        channelAccountId,
+        externalOrderId);
+  }
+
   public boolean existsByExternalId(UUID channelAccountId, String externalOrderId) {
     return Boolean.TRUE.equals(
         jdbc.queryForObject(

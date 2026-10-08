@@ -13,6 +13,7 @@ SQL_FUNCTIONS = frozenset(
         "provision_tenant",
         "upsert_app_user",
         "claim_inbox_batch",
+        "list_tenants_for_order_backfill",
     }
 )
 

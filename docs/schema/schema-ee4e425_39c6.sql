@@ -200,6 +200,45 @@ COMMENT ON FUNCTION public.list_tenants_with_expired_reservations(p_now timestam
 
 
 --
+-- Name: list_tenants_for_order_backfill(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.list_tenants_for_order_backfill() RETURNS TABLE(id uuid)
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public'
+    AS $$
+  SELECT t.id
+  FROM tenant AS t
+  WHERE (
+      t.entitlement_status = 'ACTIVE'
+      OR (
+        t.entitlement_status = 'GRACE'
+        AND (t.entitlement_expires_at IS NULL OR t.entitlement_expires_at > pg_catalog.now())
+      )
+    )
+    AND NOT (
+      t.entitlement_expires_at IS NOT NULL
+      AND t.entitlement_expires_at <= pg_catalog.now()
+      AND t.entitlement_status IN ('ACTIVE', 'GRACE')
+    )
+    AND EXISTS (
+      SELECT 1
+      FROM channel_account AS ca
+      WHERE ca.tenant_id = t.id
+        AND ca.channel = 'TSF'
+        AND ca.status <> 'DISCONNECTED'
+    );
+$$;
+
+
+--
+-- Name: FUNCTION list_tenants_for_order_backfill(); Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON FUNCTION public.list_tenants_for_order_backfill() IS 'Cross-tenant. Returns id only for ACTIVE/unexpired GRACE tenants with a connected TSF account.';
+
+
+--
 -- Name: lookup_login(text, text); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -3734,6 +3773,14 @@ REVOKE ALL ON FUNCTION public.inventory_ledger_reject_mutation() FROM PUBLIC;
 
 REVOKE ALL ON FUNCTION public.list_active_tenant_ids() FROM PUBLIC;
 GRANT ALL ON FUNCTION public.list_active_tenant_ids() TO oms_app;
+
+
+--
+-- Name: FUNCTION list_tenants_for_order_backfill(); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION public.list_tenants_for_order_backfill() FROM PUBLIC;
+GRANT ALL ON FUNCTION public.list_tenants_for_order_backfill() TO oms_app;
 
 
 --

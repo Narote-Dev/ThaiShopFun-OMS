@@ -12,7 +12,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_SCHEMA = ROOT / "docs/schema/schema-ee4e425_39c6.sql"
 DEFAULT_COLS = ROOT / "docs/schema/columns-ee4e425_4276.tsv"
-REF = "อ้างอิง main @ ee4e425 (Flyway V13)"
+REF = "อ้างอิง main @ f642c69 (Flyway V14)"
 GENERATED_NOTE = (
     "> **Generated** — แก้ usage ที่ `docs/tools/generate_field_usage.py` (OVERRIDES) + meanings ที่ "
     "`docs/tools/field_meta/all_fields.py`; รัน `python docs/tools/generate_field_usage.py` แล้ว "

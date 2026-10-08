@@ -166,6 +166,13 @@
     "aggregate_version": {
       "type": "integer",
       "minimum": 0
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "ACTIVE",
+        "CANCELLED"
+      ]
     }
   }
 }
