@@ -130,7 +130,7 @@ class ChannelListingApiTest extends OrderIntegrationTest {
   }
 
   @Test
-  void missingChannelAccountIdReturns400WithFieldError() throws Exception {
+  void missingChannelAccountIdReturns422WithFieldError() throws Exception {
     CatalogHttp.Result response = http.get("/api/v1/channel-listings", shop.owner());
     assertThat(response.status()).isEqualTo(422);
     assertThat(response.body().path("error").asString()).isEqualTo("VALIDATION_FAILED");

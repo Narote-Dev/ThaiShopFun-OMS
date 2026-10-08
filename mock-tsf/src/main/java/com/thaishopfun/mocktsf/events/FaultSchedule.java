@@ -15,14 +15,29 @@ public class FaultSchedule {
   public record Armed(int status, Integer retryAfter) {}
 
   private record Arm(
-      String method, String path, int status, AtomicInteger remaining, Integer retryAfter) {}
+      String method,
+      String path,
+      int status,
+      AtomicInteger remaining,
+      Integer retryAfter,
+      AtomicInteger skipRemaining) {}
 
   private final ConcurrentLinkedQueue<Arm> arms = new ConcurrentLinkedQueue<>();
 
   public void arm(String method, String path, int status, int times, Integer retryAfter) {
+    arm(method, path, status, times, retryAfter, 0);
+  }
+
+  public void arm(
+      String method, String path, int status, int times, Integer retryAfter, int skip) {
     arms.add(
         new Arm(
-            method.toUpperCase(Locale.ROOT), path, status, new AtomicInteger(times), retryAfter));
+            method.toUpperCase(Locale.ROOT),
+            path,
+            status,
+            new AtomicInteger(times),
+            retryAfter,
+            new AtomicInteger(Math.max(0, skip))));
   }
 
   public int pending() {
@@ -35,6 +50,11 @@ public class FaultSchedule {
     for (Arm arm : arms) {
       if (!arm.method.equals(normalized) || !arm.path.equals(path)) {
         continue;
+      }
+      int skipLeft = arm.skipRemaining.get();
+      if (skipLeft > 0) {
+        arm.skipRemaining.decrementAndGet();
+        return null;
       }
       int left = arm.remaining.getAndUpdate(count -> count > 0 ? count - 1 : 0);
       if (left <= 0) {

@@ -10,6 +10,7 @@ import com.thaishopfun.mocktsf.idp.TokenIssuer;
 import com.thaishopfun.oms.auth.AuthTestSupport;
 import com.thaishopfun.oms.auth.UuidV7;
 import com.thaishopfun.oms.inbox.InboxWorker;
+import com.thaishopfun.oms.listing.ListingSyncTestCoordinator;
 import com.thaishopfun.oms.order.demo.OrderDemoCatalogService;
 import com.thaishopfun.oms.order.hold.OrderHoldResolverJob;
 import com.thaishopfun.oms.stock.OrderIntakeFaultTestConfig;
@@ -75,7 +76,8 @@ import tools.jackson.databind.node.ObjectNode;
   OrderIntakeT12ScenariosAcceptanceTest.IntakeTestConfig.class,
   OrderIntakeFaultTestConfig.class,
   StockRepositorySkuOmitTestConfiguration.class,
-  ListingLifecycleT12BFUAcceptanceTest.BackoffClockConfig.class
+  ListingLifecycleT12BFUAcceptanceTest.BackoffClockConfig.class,
+  ListingLifecycleT12BFUAcceptanceTest.ListingSyncLatchConfig.class
 })
 @Timeout(value = 5, unit = TimeUnit.MINUTES, threadMode = ThreadMode.SEPARATE_THREAD)
 class ListingLifecycleT12BFUAcceptanceTest {
@@ -131,6 +133,7 @@ class ListingLifecycleT12BFUAcceptanceTest {
   @Autowired FaultHooks faults;
   @Autowired MutableClock clock;
   @Autowired MeterRegistry meters;
+  @Autowired ListingSyncTestCoordinator listingSyncLatch;
 
   StockFixture fixture;
 
@@ -143,12 +146,22 @@ class ListingLifecycleT12BFUAcceptanceTest {
     }
   }
 
+  @TestConfiguration
+  static class ListingSyncLatchConfig {
+    @Bean
+    @Primary
+    ListingSyncTestCoordinator listingSyncTestCoordinator() {
+      return new ListingSyncTestCoordinator();
+    }
+  }
+
   private final java.util.concurrent.atomic.AtomicLong listingAggregateVersion =
       new java.util.concurrent.atomic.AtomicLong(0);
 
   @AfterEach
   void teardown() throws Exception {
     faults.reset();
+    listingSyncLatch.disarm();
     StockSkuLookupTestSupport.clearOmitSku();
     unhideAllMockListings();
     TenantContext.clear();
@@ -308,6 +321,15 @@ class ListingLifecycleT12BFUAcceptanceTest {
     String shopId = "shop_active";
     UUID account = fixture.channelAccount(shop, shopId, "ACTIVE", "CONNECTED");
     postListingSync(shopId, account);
+    UUID mappedSkuBefore =
+        fixture.inTenant(
+            shop.tenant(),
+            () ->
+                jdbc.queryForObject(
+                    "SELECT sku_id FROM channel_listing WHERE channel_account_id = ? AND external_sku_id = ?",
+                    UUID.class,
+                    account,
+                    "tsf_sku_9001"));
 
     setListingHidden("tsf_sku_9001", true);
     HttpResponse<String> hideSync = postListingSync(shopId, account);
@@ -318,6 +340,18 @@ class ListingLifecycleT12BFUAcceptanceTest {
     HttpResponse<String> unhideSync = postListingSync(shopId, account);
     assertThat(unhideSync.statusCode()).isEqualTo(202);
     assertThat(JSON.readTree(unhideSync.body()).path("revived").asInt()).isEqualTo(1);
+    if (mappedSkuBefore != null) {
+      UUID mappedSkuAfter =
+          fixture.inTenant(
+              shop.tenant(),
+              () ->
+                  jdbc.queryForObject(
+                      "SELECT sku_id FROM channel_listing WHERE channel_account_id = ? AND external_sku_id = ?",
+                      UUID.class,
+                      account,
+                      "tsf_sku_9001"));
+      assertThat(mappedSkuAfter).isEqualTo(mappedSkuBefore);
+    }
   }
 
   @Test
@@ -326,14 +360,14 @@ class ListingLifecycleT12BFUAcceptanceTest {
     String shopId = "shop_active";
     UUID account = fixture.channelAccount(shop, shopId, "ACTIVE", "CONNECTED");
     postListingSync(shopId, account);
-    armFault("GET", "/internal/v1/shops/shop_active/listings", 503, 1);
+    String hiddenListing = "tsf_sku_9001";
+    setListingHidden(hiddenListing, true);
+
+    armFault("GET", "/internal/v1/shops/shop_active/listings", 503, 1, 1);
 
     HttpResponse<String> sync = postListingSync(shopId, account);
-    if (sync.statusCode() == 202) {
-      assertThat(JSON.readTree(sync.body()).path("removed").asInt()).isZero();
-    } else {
-      assertThat(sync.statusCode()).isEqualTo(503);
-    }
+    assertThat(sync.statusCode()).isEqualTo(503);
+    assertThat(removedAt(shop, account, hiddenListing)).isNull();
   }
 
   @Test
@@ -405,18 +439,22 @@ class ListingLifecycleT12BFUAcceptanceTest {
                 account,
                 listingSku));
 
+    listingSyncLatch.armBeforeWriteLatch();
     ExecutorService pool = Executors.newSingleThreadExecutor();
     try {
       Future<HttpResponse<String>> syncFuture = pool.submit(() -> postListingSync(shopId, account));
-      Thread.sleep(80);
+      listingSyncLatch.awaitFetchComplete();
       setListingHidden(listingSku, false);
       listingChanged(shopId, listingSku, "UPSERT", "MUG-WHT", "แก้วขาว");
       worker.processAvailable(10);
+      listingSyncLatch.continueWrite();
       HttpResponse<String> sync = syncFuture.get(60, TimeUnit.SECONDS);
       assertThat(sync.statusCode()).isEqualTo(202);
+      assertThat(JSON.readTree(sync.body()).path("removed").asInt()).isZero();
       assertThat(removedAt(shop, account, listingSku)).isNull();
     } finally {
       pool.shutdownNow();
+      listingSyncLatch.disarm();
     }
   }
 
@@ -443,8 +481,10 @@ class ListingLifecycleT12BFUAcceptanceTest {
                   """,
                   account));
 
+      java.util.ArrayList<String> externalOrderIds = new java.util.ArrayList<>();
       for (int i = 0; i < 3; i++) {
         String externalOrderId = "TSF-LC-AC06-" + i + "-" + UUID.randomUUID();
+        externalOrderIds.add(externalOrderId);
         String listingSku = i < 2 ? "tsf_sku_7781" : "tsf_sku_9001";
         ingest(
             OrderIntakeScenarioSupport.orderCreated(
@@ -458,6 +498,11 @@ class ListingLifecycleT12BFUAcceptanceTest {
       JsonNode body = JSON.readTree(sync.body());
       assertThat(body.path("auto_mapped").asInt()).isGreaterThanOrEqualTo(2);
       assertThat(body.path("deferred").asInt()).isGreaterThanOrEqualTo(2);
+
+      resolverJob.runScheduledBatch();
+      for (String externalOrderId : externalOrderIds) {
+        assertThat(holdReason(shop, externalOrderId)).isEqualTo("NONE");
+      }
     }
   }
 
@@ -511,10 +556,19 @@ class ListingLifecycleT12BFUAcceptanceTest {
                       Integer.class,
                       orderId));
       assertThat(attempts).isEqualTo(1);
+      assertThat(holdReason(shop, externalOrderId)).isEqualTo("SKU_NOT_MAPPED");
 
-      faults.failNext(Fault.THROW);
       resolverJob.runScheduledBatch();
       assertThat(holdReason(shop, externalOrderId)).isEqualTo("SKU_NOT_MAPPED");
+      int attemptsBeforeAdvance =
+          fixture.inTenant(
+              shop.tenant(),
+              () ->
+                  jdbc.queryForObject(
+                      "SELECT attempts FROM order_hold_retry WHERE order_id = ?",
+                      Integer.class,
+                      orderId));
+      assertThat(attemptsBeforeAdvance).isEqualTo(1);
 
       clock.advance(Duration.ofMinutes(61));
       faults.reset();
@@ -615,9 +669,65 @@ class ListingLifecycleT12BFUAcceptanceTest {
       assertThat(holdReason(shop, externalOrderId)).isEqualTo("SKU_NOT_MAPPED");
 
       StockSkuLookupTestSupport.clearOmitSku();
+      resolverJob.runScheduledBatch();
+      assertThat(holdReason(shop, externalOrderId)).isEqualTo("SKU_NOT_MAPPED");
+      int attemptsBeforeAdvance =
+          fixture.inTenant(
+              shop.tenant(),
+              () ->
+                  jdbc.queryForObject(
+                      "SELECT attempts FROM order_hold_retry WHERE order_id = ?",
+                      Integer.class,
+                      orderId));
+      assertThat(attemptsBeforeAdvance).isEqualTo(1);
+
       clock.advance(Duration.ofMinutes(61));
       resolverJob.runScheduledBatch();
       assertThat(holdReason(shop, externalOrderId)).isEqualTo("NONE");
+    }
+
+    @Test
+    void batchSizeOneSkipsBackedOffOrderAndReleasesOther() throws Exception {
+      StockFixture.Shop shop = fixture.shop("ACTIVE");
+      String shopId = fixture.tsfShopId(shop);
+      UUID account = fixture.tsfChannelAccount(shop, "ACTIVE", "CONNECTED");
+      UUID sku = fixture.sku(shop, 12);
+      String listingBackoff = "L-batch-backoff";
+      String listingReady = "L-batch-ready";
+      fixture.channelListing(shop, account, listingBackoff, null, true, false);
+      fixture.channelListing(shop, account, listingReady, null, true, false);
+
+      String orderBackoff = "TSF-LC-BO-BATCH-1-" + UUID.randomUUID();
+      String orderReady = "TSF-LC-BO-BATCH-2-" + UUID.randomUUID();
+      ingest(
+          OrderIntakeScenarioSupport.orderCreated(
+              JSON, orderBackoff, shopId, null, "COD", listingBackoff, 1, 1));
+      ingest(
+          OrderIntakeScenarioSupport.orderCreated(
+              JSON, orderReady, shopId, null, "COD", listingReady, 1, 1));
+      worker.processAvailable(10);
+      assertThat(holdReason(shop, orderBackoff)).isEqualTo("SKU_NOT_MAPPED");
+      assertThat(holdReason(shop, orderReady)).isEqualTo("SKU_NOT_MAPPED");
+
+      fixture.inTenant(
+          shop.tenant(),
+          () ->
+              jdbc.update(
+                  """
+                  UPDATE channel_listing
+                  SET sku_id = ?, mapping_source = 'MANUAL', mapped_at = now()
+                  WHERE channel_account_id = ? AND external_sku_id IN (?, ?)
+                  """,
+                  sku,
+                  account,
+                  listingBackoff,
+                  listingReady));
+      UUID orderBackoffId = orderId(shop, orderBackoff);
+      seedBackoff(shop, orderBackoffId);
+
+      resolverJob.runScheduledBatch();
+      assertThat(holdReason(shop, orderBackoff)).isEqualTo("SKU_NOT_MAPPED");
+      assertThat(holdReason(shop, orderReady)).isEqualTo("NONE");
     }
 
     @Test
@@ -818,11 +928,19 @@ class ListingLifecycleT12BFUAcceptanceTest {
   }
 
   private void armFault(String method, String path, int status, int times) throws Exception {
+    armFault(method, path, status, times, 0);
+  }
+
+  private void armFault(String method, String path, int status, int times, int skip)
+      throws Exception {
     ObjectNode body = JSON.createObjectNode();
     body.put("method", method);
     body.put("path", path);
     body.put("status", status);
     body.put("times", times);
+    if (skip > 0) {
+      body.put("skip", skip);
+    }
     HttpResponse<String> response =
         HTTP.send(
             HttpRequest.newBuilder(

@@ -44,7 +44,8 @@ function parseHash(): {
   }
   const params = new URLSearchParams(query)
   const mappedParam = params.get('mapped')
-  const mapped =
+  const removedOnly = params.get('removed') === 'true'
+  let mapped =
     mappedParam === 'true'
       ? 'mapped'
       : mappedParam === 'false'
@@ -52,11 +53,14 @@ function parseHash(): {
         : mappedParam === 'all'
           ? 'all'
           : 'unmapped'
+  if (removedOnly && mapped === 'unmapped') {
+    mapped = 'all'
+  }
   const offset = Number.parseInt(params.get('offset') ?? '0', 10)
   return {
     channelAccountId: params.get('channel_account_id') ?? '',
     mapped,
-    removedOnly: params.get('removed') === 'true',
+    removedOnly,
     q: params.get('q') ?? '',
     offset: Number.isFinite(offset) && offset >= 0 ? offset : 0,
   }
@@ -356,11 +360,16 @@ export default function ListingsPage({ me }: { me: Me }) {
           type="button"
           size="sm"
           variant={removedOnly ? 'primary' : 'secondary'}
+          aria-pressed={removedOnly}
           onClick={() => {
             const next = !removedOnly
+            const mappedForHash = next ? 'all' : mappedFilter
             setRemovedOnly(next)
+            if (next) {
+              setMappedFilter('all')
+            }
             setOffset(0)
-            writeHash(channelAccountId, mappedFilter, next, searchDraft, 0)
+            writeHash(channelAccountId, mappedForHash, next, searchDraft, 0)
           }}
         >
           ถูกลบจาก TSF

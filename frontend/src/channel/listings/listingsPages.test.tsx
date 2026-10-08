@@ -261,19 +261,63 @@ describe('ListingsPage', () => {
     expect(screen.getByText(/ไม่ได้ลบรายการจาก TSF/)).toBeTruthy()
   })
 
-  it('maps removed filter chip to query string', async () => {
+  it('maps removed filter chip to query string and includes mapped listings', async () => {
     const { fetchImpl, calls } = stubFetch(({ url }) => {
       if (url.includes('/channel-accounts') && !url.includes('listing-syncs')) {
         return { body: { items: [{ id: 'ca-1', channel: 'TSF', external_shop_id: 'shop', status: 'CONNECTED' }] } }
+      }
+      if (url.includes('removed=true')) {
+        return {
+          body: {
+            items: [
+              {
+                id: 'l-removed-mapped',
+                channel_account_id: 'ca-1',
+                external_sku_id: 'L-removed-mapped',
+                seller_sku: 'MAP-GONE',
+                name: 'Mapped removed',
+                sku_id: 'sku-9',
+                sku_code: 'MAP9',
+                sku_name: 'Mapped SKU',
+                mapping_source: 'MANUAL',
+                mapped_at: '2026-01-01T00:00:00Z',
+                removed_at: '2026-01-02T00:00:00Z',
+                stock_control: false,
+                held_orders: 0,
+              },
+            ],
+            total: 1,
+            limit: 25,
+            offset: 0,
+          },
+        }
       }
       return { body: { items: [], total: 0, limit: 25, offset: 0 } }
     })
     configureApi({ getAccessToken: () => 't', fetchImpl })
     render(<ListingsPage me={owner} />)
-    await screen.findByRole('button', { name: 'ถูกลบจาก TSF' })
-    fireEvent.click(screen.getByRole('button', { name: 'ถูกลบจาก TSF' }))
+    const chip = await screen.findByRole('button', { name: 'ถูกลบจาก TSF' })
+    expect(chip.getAttribute('aria-pressed')).toBe('false')
+    fireEvent.click(chip)
     await waitFor(() => expect(window.location.hash).toContain('removed=true'))
-    await waitFor(() => expect(calls.some((c) => c.url.includes('removed=true'))).toBe(true))
+    await waitFor(() => expect(window.location.hash).toContain('mapped=all'))
+    await waitFor(() =>
+      expect(
+        calls.some((c) => c.url.includes('/channel-listings') && c.url.includes('removed=true')),
+      ).toBe(true),
+    )
+    const listingCall = calls.find(
+      (c) => c.url.includes('/channel-listings') && c.url.includes('removed=true'),
+    )
+    expect(listingCall?.url.includes('mapped=false')).toBe(false)
+    expect(
+      listingCall?.url.includes('mapped=all') || !listingCall?.url.includes('mapped='),
+    ).toBe(true)
+    await screen.findByText('L-removed-mapped')
+    expect(screen.queryByRole('button', { name: 'Map' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'ถูกลบจาก TSF' }).getAttribute('aria-pressed')).toBe(
+      'true',
+    )
   })
 
   it('resets offset on first search after fast account load', async () => {

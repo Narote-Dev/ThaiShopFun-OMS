@@ -61,6 +61,7 @@ public class ChannelListingSyncService {
   private final ListingSyncProperties syncProperties;
   private final JdbcTemplate jdbc;
   private final Clock clock;
+  private final ListingSyncCoordinator syncCoordinator;
 
   public ChannelListingSyncService(
       ChannelListingAccess access,
@@ -71,7 +72,8 @@ public class ChannelListingSyncService {
       OrderHoldProperties holdProperties,
       ListingSyncProperties syncProperties,
       JdbcTemplate jdbc,
-      Clock clock) {
+      Clock clock,
+      ListingSyncCoordinator syncCoordinator) {
     this.access = access;
     this.tx = tx;
     this.listings = listings;
@@ -81,6 +83,7 @@ public class ChannelListingSyncService {
     this.syncProperties = syncProperties;
     this.jdbc = jdbc;
     this.clock = clock;
+    this.syncCoordinator = syncCoordinator;
   }
 
   public SyncResult sync(UUID channelAccountId) {
@@ -113,6 +116,7 @@ public class ChannelListingSyncService {
     for (ListingPage.Listing listing : fetched) {
       fetchedIds.add(listing.listingSkuId());
     }
+    syncCoordinator.afterListingsFetchedBeforeWrite();
     Written written =
         tx.write(
             () -> {

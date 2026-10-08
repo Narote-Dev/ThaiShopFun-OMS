@@ -263,6 +263,10 @@ public class ControlController {
     if (times < 1 || times > 20) {
       throw ApiException.badRequest("BAD_REQUEST", "times must be between 1 and 20");
     }
+    int skip = body.path("skip").asInt(0);
+    if (skip < 0 || skip > 50) {
+      throw ApiException.badRequest("BAD_REQUEST", "skip must be between 0 and 50");
+    }
     Integer retryAfter = null;
     if (status == 429) {
       if (!body.path("retry_after").isIntegralNumber() || body.path("retry_after").asInt() < 1) {
@@ -270,12 +274,15 @@ public class ControlController {
       }
       retryAfter = body.path("retry_after").asInt();
     }
-    faults.arm(method, path, status, times, retryAfter);
+    faults.arm(method, path, status, times, retryAfter, skip);
     Map<String, Object> armed = new LinkedHashMap<>();
     armed.put("method", method);
     armed.put("path", path);
     armed.put("status", status);
     armed.put("times", times);
+    if (skip > 0) {
+      armed.put("skip", skip);
+    }
     if (retryAfter != null) {
       armed.put("retry_after", retryAfter);
     }
