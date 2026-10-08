@@ -90,16 +90,17 @@ public class OrderGapRefetchService implements OrderGapRefetch {
       OrderDetail detail = adapter.getOrder(ref, externalOrderId);
       PaymentStatus payment = adapter.getPaymentStatus(ref, externalOrderId);
       long snapshotVersion = detail.aggregateVersion();
-      if (inboxAggregateVersion > 0 && snapshotVersion < inboxAggregateVersion) {
-        throw new GapSnapshotNotReadyException(snapshotVersion, inboxAggregateVersion);
+      Outcome outcome = Outcome.SKIPPED;
+      if (inboxAggregateVersion <= 0 || snapshotVersion >= inboxAggregateVersion) {
+        outcome =
+            applyTx.execute(
+                status -> {
+                  aggregateLock.lockOrder(jdbc, tenantId, externalOrderId);
+                  return applier.apply(tenantId, shopId, detail, payment, prefix);
+                });
+        outcome =
+            finalizeDeferred(tenantId, externalOrderId, shopId, detail, payment, prefix, outcome);
       }
-      Outcome outcome =
-          applyTx.execute(
-              status -> {
-                aggregateLock.lockOrder(jdbc, tenantId, externalOrderId);
-                return applier.apply(tenantId, shopId, detail, payment, prefix);
-              });
-      outcome = finalizeDeferred(tenantId, externalOrderId, shopId, detail, payment, prefix, outcome);
       if (outcome != Outcome.APPLIED && inboxPayload != null && !inboxPayload.isNull()) {
         Outcome inboxOutcome =
             applyTx.execute(
@@ -115,6 +116,9 @@ public class OrderGapRefetchService implements OrderGapRefetch {
       if (outcome == Outcome.APPLIED) {
         gapRefetches.increment();
         return true;
+      }
+      if (inboxAggregateVersion > 0 && snapshotVersion < inboxAggregateVersion) {
+        throw new GapSnapshotNotReadyException(snapshotVersion, inboxAggregateVersion);
       }
       return false;
     } finally {
