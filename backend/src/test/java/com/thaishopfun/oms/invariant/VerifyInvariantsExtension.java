@@ -14,6 +14,7 @@ public class VerifyInvariantsExtension implements AfterEachCallback {
   @Override
   public void afterEach(ExtensionContext context) {
     if (skip(context)) {
+      InvariantTestTenants.drain();
       return;
     }
     var applicationContext = SpringExtension.getApplicationContext(context);
