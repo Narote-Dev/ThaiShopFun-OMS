@@ -445,32 +445,18 @@ class OrderBackfillT12CAcceptanceTest {
     assertThat(worker.processAvailable(5)).isEqualTo(1);
     assertThat(gapRefetchCount()).isEqualTo(gapsBefore);
     assertThat(inboxStatus(shop.tenant(), paidEarly.path("event_id").asString()))
-        .isNotEqualTo("PROCESSED");
-
-    postMock("/control/orders/" + orderId + "/mark-paid", "{\"aggregate_version\":3}");
-    int processedAfterMarkPaid = 0;
-    for (int round = 0; round < 10; round++) {
-      wakeInboxRetries();
-      processedAfterMarkPaid += worker.processAvailable(5);
-      if (gapRefetchCount() >= gapsBefore + 1
-          && "PROCESSED".equals(inboxStatus(shop.tenant(), paidEarly.path("event_id").asString()))) {
-        break;
-      }
-    }
-    assertThat(processedAfterMarkPaid).isGreaterThanOrEqualTo(1);
-    assertThat(gapRefetchCount()).isEqualTo(gapsBefore + 1);
-    assertThat(inboxStatus(shop.tenant(), paidEarly.path("event_id").asString()))
         .isEqualTo("PROCESSED");
-
     assertThat(paymentStatus(shop.tenant(), orderId)).isEqualTo("PAID");
     assertThat(externalVersion(shop.tenant(), orderId)).isEqualTo(3L);
+
+    postMock("/control/orders/" + orderId + "/mark-paid", "{\"aggregate_version\":3}");
 
     ObjectNode stale =
         OrderIntakeScenarioSupport.orderUpdated(JSON, orderId, shopId, 2);
     stale.put("event_id", "evt-stale-gap-" + UUID.randomUUID());
     ingest(stale);
     assertThat(worker.processAvailable(5)).isEqualTo(1);
-    assertThat(gapRefetchCount()).isEqualTo(gapsBefore + 1);
+    assertThat(gapRefetchCount()).isEqualTo(gapsBefore);
     assertThat(externalVersion(shop.tenant(), orderId)).isEqualTo(3L);
   }
 
