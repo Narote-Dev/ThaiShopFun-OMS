@@ -44,6 +44,7 @@ public class ControlController {
   private final TokenIssuer tokens;
   private final ReceivedEventStore received;
   private final FaultSchedule faults;
+  private final WebhookDeliveryGate webhooks;
   private final TsfCatalog catalog;
 
   public ControlController(
@@ -55,6 +56,7 @@ public class ControlController {
       TokenIssuer tokens,
       ReceivedEventStore received,
       FaultSchedule faults,
+      WebhookDeliveryGate webhooks,
       TsfCatalog catalog) {
     this.json = json;
     this.responses = responses;
@@ -64,6 +66,7 @@ public class ControlController {
     this.tokens = tokens;
     this.received = received;
     this.faults = faults;
+    this.webhooks = webhooks;
     this.catalog = catalog;
   }
 
@@ -77,6 +80,71 @@ public class ControlController {
     result.put("listing_sku_id", listingSkuId);
     result.put("hidden", hidden);
     return responses.outbound(200, "listing-hidden", result);
+  }
+
+  @PostMapping("/orders/register")
+  public ResponseEntity<String> registerOrder(HttpServletRequest request) throws IOException {
+    JsonNode body = readObject(request);
+    String shopId = text(body, "shop_id");
+    String orderId = text(body, "order_id");
+    catalog.registerOrder(shopId, orderId);
+    return ResponseEntity.ok()
+        .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+        .body(json.writeValueAsString(Map.of("order_id", orderId)));
+  }
+
+  @PostMapping("/orders/{orderId}/mark-paid")
+  public ResponseEntity<String> markPaid(
+      @PathVariable String orderId, HttpServletRequest request) throws IOException {
+    JsonNode body = readObject(request);
+    long version = body.path("aggregate_version").asLong(2);
+    catalog.markPaid(orderId, version);
+    return ResponseEntity.ok()
+        .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+        .body(json.writeValueAsString(Map.of("order_id", orderId, "aggregate_version", version)));
+  }
+
+  @PostMapping("/webhooks")
+  public ResponseEntity<String> webhooks(HttpServletRequest request) throws IOException {
+    JsonNode body = readObject(request);
+    boolean enabled = body.path("enabled").asBoolean(true);
+    webhooks.setEnabled(enabled);
+    return ResponseEntity.ok()
+        .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+        .body(json.writeValueAsString(Map.of("enabled", enabled)));
+  }
+
+  @PostMapping("/orders/bulk")
+  public ResponseEntity<String> bulkOrders(HttpServletRequest request) throws IOException {
+    JsonNode body = readObject(request);
+    int count = body.path("count").asInt(0);
+    if (count < 1 || count > 200) {
+      throw ApiException.badRequest("BAD_REQUEST", "count must be between 1 and 200");
+    }
+    String payment = text(body, "payment");
+    if (!payment.equals("PREPAID") && !payment.equals("COD")) {
+      throw ApiException.badRequest("BAD_REQUEST", "payment must be PREPAID or COD");
+    }
+    boolean paid = body.path("paid").asBoolean(false);
+    String shopId = body.has("shop_id") ? text(body, "shop_id") : "shop_active";
+    List<String> created = catalog.createBulkOrders(shopId, count, payment, paid);
+    List<Map<String, Object>> delivered = new ArrayList<>();
+    if (webhooks.enabled()) {
+      for (String orderId : created) {
+        delivered.add(deliverBulkCreated(shopId, orderId, payment, paid));
+        if (paid && "PREPAID".equals(payment)) {
+          delivered.add(deliverBulkPaid(shopId, orderId));
+        }
+      }
+    }
+    Map<String, Object> result = new LinkedHashMap<>();
+    result.put("created", created.size());
+    result.put("order_ids", created);
+    result.put("webhooks_enabled", webhooks.enabled());
+    result.put("delivered", delivered);
+    return ResponseEntity.ok()
+        .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+        .body(json.writeValueAsString(result));
   }
 
   @PostMapping("/user-token")
@@ -318,7 +386,77 @@ public class ControlController {
     return responses.outbound(200, "received-events", body);
   }
 
+  private Map<String, Object> deliverBulkCreated(
+      String shopId, String orderId, String payment, boolean paid) {
+    ObjectNode event = json.createObjectNode();
+    event.put("event_id", "bulk-created-" + orderId);
+    event.put("event_type", "order.created");
+    event.put("schema_version", 1);
+    event.put("occurred_at", Instant.now().toString());
+    event.put("tsf_shop_id", shopId);
+    event.put("aggregate_id", orderId);
+    event.put("aggregate_version", 1);
+    ObjectNode data = json.createObjectNode();
+    data.put("order_id", orderId);
+    data.put("reservation_id", java.util.UUID.randomUUID().toString());
+    data.put("payment_method", payment);
+    if ("PREPAID".equals(payment)) {
+      data.put("payment_expires_at", Instant.now().plusSeconds(3600).toString());
+    }
+    data.put("currency", "THB");
+    ObjectNode totals = json.createObjectNode();
+    totals.put("subtotal", 100);
+    totals.put("shipping_fee", 0);
+    totals.put("discount", 0);
+    totals.put("grand_total", 100);
+    data.set("totals", totals);
+    ObjectNode recipient = json.createObjectNode();
+    recipient.put("name", "Bulk Buyer");
+    recipient.put("phone", "0890000000");
+    ObjectNode address = json.createObjectNode();
+    address.put("line1", "1 Test Road");
+    address.put("district", "Test");
+    address.put("province", "Bangkok");
+    address.put("postcode", "10110");
+    recipient.set("address", address);
+    data.set("recipient", recipient);
+    data.put("ship_by", Instant.now().plusSeconds(86400).toString());
+    ObjectNode line = json.createObjectNode();
+    line.put("line_id", "L1");
+    line.put("listing_sku_id", "tsf_sku_7781");
+    line.put("seller_sku", "TSHIRT-BLK-M");
+    line.put("name", "เสื้อยืดดำ M");
+    line.put("qty", 1);
+    line.put("unit_price", 100);
+    data.set("lines", json.createArrayNode().add(line));
+    event.set("data", data);
+    return deliver(event, OmsCaller.now(), true);
+  }
+
+  private Map<String, Object> deliverBulkPaid(String shopId, String orderId) {
+    ObjectNode event = json.createObjectNode();
+    event.put("event_id", "bulk-paid-" + orderId);
+    event.put("event_type", "order.paid");
+    event.put("schema_version", 1);
+    event.put("occurred_at", Instant.now().toString());
+    event.put("tsf_shop_id", shopId);
+    event.put("aggregate_id", orderId);
+    event.put("aggregate_version", 2);
+    ObjectNode data = json.createObjectNode();
+    data.put("order_id", orderId);
+    event.set("data", data);
+    return deliver(event, OmsCaller.now(), true);
+  }
+
   private Map<String, Object> deliver(ObjectNode event, long timestamp, boolean validSignature) {
+    if (!webhooks.enabled()) {
+      catalog.noteOrderEvent(event);
+      Map<String, Object> row = new LinkedHashMap<>();
+      row.put("event_id", event.path("event_id").asString());
+      row.put("http_status", 0);
+      row.put("body", "webhooks_disabled");
+      return row;
+    }
     byte[] raw = canonical(event);
     String eventId = eventId(raw);
     String signature =

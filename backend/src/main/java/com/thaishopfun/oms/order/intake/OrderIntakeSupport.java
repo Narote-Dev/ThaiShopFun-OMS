@@ -246,6 +246,9 @@ public class OrderIntakeSupport {
     }
     holdEffects.maybeReadyToPick(
         orders.findById(orderId).orElseThrow(), account, reserveItems, now);
+    if (message.aggregateVersion() > 0) {
+      orders.updateExternalVersion(account.id(), payload.orderId(), message.aggregateVersion());
+    }
   }
 
   void handlePaid(InboxMessage message) {
@@ -300,6 +303,7 @@ public class OrderIntakeSupport {
       }
     }
     holdEffects.maybeReadyToPick(orders.findById(order.id()).orElseThrow(), account, items, paidAt);
+    bumpExternalVersion(account, order, message);
   }
 
   void handleCancelled(InboxMessage message) {
@@ -319,6 +323,7 @@ public class OrderIntakeSupport {
     stateMachine.applyOrderStatus(
         order, "CANCELLED", "TSF cancel", "TSF", guard(account, order, List.of()));
     recipients.scheduleRedaction(order.id(), clock.instant().plus(90, ChronoUnit.DAYS));
+    bumpExternalVersion(account, order, message);
     hooks.afterOutbox();
   }
 
@@ -333,7 +338,15 @@ public class OrderIntakeSupport {
     } else if (data.has("note")) {
       log.info("order.updated note ignored for external_order_id={}", externalOrderId);
     }
+    bumpExternalVersion(account, order, message);
     hooks.afterOutbox();
+  }
+
+  private void bumpExternalVersion(TsfAccount account, SalesOrder order, InboxMessage message) {
+    if (message.aggregateVersion() > 0) {
+      orders.updateExternalVersion(
+          account.id(), order.externalOrderId(), message.aggregateVersion());
+    }
   }
 
   private SalesOrder applyPayment(SalesOrder order, String to, Instant paidAt, TsfAccount account) {

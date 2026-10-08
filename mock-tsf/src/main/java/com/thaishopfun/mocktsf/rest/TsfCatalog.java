@@ -67,6 +67,107 @@ public class TsfCatalog {
     return SHOPS.contains(shopId);
   }
 
+  public synchronized List<String> createBulkOrders(
+      String shopId, int count, String paymentMethod, boolean paid) {
+    if (!knownShop(shopId)) {
+      throw new IllegalArgumentException("unknown shop");
+    }
+    List<String> ids = new ArrayList<>();
+    Instant updated = Instant.now();
+    for (int i = 0; i < count; i++) {
+      String orderId = "TSF-BULK-" + sequence.getAndIncrement();
+      long version = paid && "PREPAID".equals(paymentMethod) ? 2L : 1L;
+      Map<String, Object> detail = base(orderId, "rsv_" + orderId, updated, version);
+      detail.put("lines", List.of(line("L1", "tsf_sku_7781", "TSHIRT-BLK-M", "เสื้อยืดดำ M", 1, 100)));
+      detail.put("totals", totals(100, 0, 0, 100));
+      detail.put("payment_method", paymentMethod);
+      detail.put("status", "ACTIVE");
+      if ("PREPAID".equals(paymentMethod)) {
+        detail.put("payment_expires_at", updated.plusSeconds(3600).toString());
+      } else {
+        detail.remove("payment_expires_at");
+      }
+      String payStatus = paid && "PREPAID".equals(paymentMethod) ? "PAID" : "UNPAID";
+      orders.add(new Order(shopId, orderId, updated, version, detail, payment(orderId, payStatus)));
+      ids.add(orderId);
+    }
+    return ids;
+  }
+
+  public synchronized void registerOrder(String shopId, String orderId) {
+    if (order(orderId).isPresent()) {
+      return;
+    }
+    Instant updated = Instant.now();
+    Map<String, Object> detail = base(orderId, "rsv_" + orderId, updated, 1);
+    detail.put("lines", List.of(line("L1", "tsf_sku_7781", "TSHIRT-BLK-M", "เสื้อยืดดำ M", 1, 100)));
+    detail.put("totals", totals(100, 0, 0, 100));
+    detail.put("payment_method", "PREPAID");
+    detail.put("payment_expires_at", updated.plusSeconds(3600).toString());
+    orders.add(new Order(shopId, orderId, updated, 1, detail, payment(orderId, "UNPAID")));
+  }
+
+  public synchronized void markPaid(String orderId, long aggregateVersion) {
+    order(orderId)
+        .ifPresent(
+            current -> {
+              Instant updated = Instant.now();
+              Map<String, Object> detail = new LinkedHashMap<>(current.detail());
+              detail.put("aggregate_version", aggregateVersion);
+              detail.put("updated_at", updated.toString());
+              Map<String, Object> pay = payment(orderId, "PAID");
+              replaceOrder(
+                  new Order(
+                      current.shopId(),
+                      orderId,
+                      updated,
+                      aggregateVersion,
+                      detail,
+                      pay));
+            });
+  }
+
+  public synchronized void noteOrderEvent(tools.jackson.databind.JsonNode event) {
+    String type = event.path("event_type").asString("");
+    String orderId = event.path("data").path("order_id").asString(null);
+    if (orderId == null) {
+      return;
+    }
+    Optional<Order> existing = order(orderId);
+    if ("order.created".equals(type) && existing.isEmpty()) {
+      ensureDemoOrder(orderId);
+      return;
+    }
+    if (existing.isEmpty()) {
+      return;
+    }
+    Order current = existing.get();
+    long version = event.path("aggregate_version").asLong(current.aggregateVersion());
+    Instant updated = Instant.now();
+    Map<String, Object> detail = new LinkedHashMap<>(current.detail());
+    detail.put("aggregate_version", version);
+    detail.put("updated_at", updated.toString());
+    if ("order.cancelled".equals(type)) {
+      detail.put("status", "CANCELLED");
+    }
+    Map<String, Object> pay = new LinkedHashMap<>(current.payment());
+    if ("order.paid".equals(type)) {
+      pay.put("status", "PAID");
+    }
+    replaceOrder(
+        new Order(current.shopId(), orderId, updated, version, detail, pay));
+  }
+
+  private void replaceOrder(Order replacement) {
+    for (int i = 0; i < orders.size(); i++) {
+      if (orders.get(i).orderId().equals(replacement.orderId())) {
+        orders.set(i, replacement);
+        return;
+      }
+    }
+    orders.add(replacement);
+  }
+
   public List<Order> orders(String shopId, Instant updatedSince) {
     List<Order> matched = new ArrayList<>();
     for (Order order : orders) {
@@ -237,6 +338,7 @@ public class TsfCatalog {
     detail.put("ship_by", "2026-10-01T10:59:59Z");
     detail.put("updated_at", updated.toString());
     detail.put("aggregate_version", version);
+    detail.put("status", "ACTIVE");
     return detail;
   }
 

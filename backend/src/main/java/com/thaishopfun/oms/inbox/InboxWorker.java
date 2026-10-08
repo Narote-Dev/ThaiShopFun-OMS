@@ -2,6 +2,7 @@ package com.thaishopfun.oms.inbox;
 
 import com.thaishopfun.oms.order.OrderOptimisticLockException;
 import com.thaishopfun.oms.order.ReconciliationIssueRepository;
+import com.thaishopfun.oms.order.backfill.OrderGapRefetchService;
 import com.thaishopfun.oms.stock.StockBusyException;
 import com.thaishopfun.oms.stock.StockConflictException;
 import com.thaishopfun.oms.stock.StockRetry;
@@ -94,6 +95,7 @@ public class InboxWorker {
   private final InboxEntitlementPolicy policy;
   private final ReconciliationIssueRepository reconciliation;
   private final InboxAggregateLock aggregateLock;
+  private final OrderGapRefetchService gapRefetch;
   private final JdbcTemplate jdbc;
   private final TransactionTemplate claimTx;
   private final TransactionTemplate applyTx;
@@ -108,6 +110,7 @@ public class InboxWorker {
       InboxEntitlementPolicy policy,
       ReconciliationIssueRepository reconciliation,
       InboxAggregateLock aggregateLock,
+      OrderGapRefetchService gapRefetch,
       JdbcTemplate jdbc,
       PlatformTransactionManager transactions,
       JsonMapper json,
@@ -117,6 +120,7 @@ public class InboxWorker {
     this.policy = policy;
     this.reconciliation = reconciliation;
     this.aggregateLock = aggregateLock;
+    this.gapRefetch = gapRefetch;
     this.jdbc = jdbc;
     this.claimTx = new TransactionTemplate(transactions);
     // Step 1: TransactionTemplate takes whole seconds and truncates. Ceil so 1.1s is 2s, not 1s.
@@ -197,6 +201,9 @@ public class InboxWorker {
           break;
         } catch (InboxDeferException defer) {
           handleDefer(claimed, defer);
+          break;
+        } catch (InboxGapRefetchRequired gap) {
+          handleGapRefetch(claimed, gap);
           break;
         } catch (RuntimeException ex) {
           if (attempts < 3 && retryableTransaction(ex)) {
@@ -313,18 +320,47 @@ public class InboxWorker {
             && row.aggregateVersion() > 0
             && lastForStale != null
             && row.aggregateVersion() <= lastForStale;
-    // TODO: Handlers must apply the full snapshot in data until REST refetch exists (T10).
-    // gap=true means aggregate_version skipped at least one version. Do not assume a delta.
+    // gap=true means aggregate_version skipped at least one version. REST refetch applies snapshot.
     boolean gap =
         !stale
             && row.aggregateVersion() > 0
             && lastAggregate != null
             && row.aggregateVersion() > lastAggregate + 1;
+    if (gap) {
+      String shopId = row.payload().path("tsf_shop_id").asString(null);
+      String orderId = row.payload().path("data").path("order_id").asString(null);
+      if (shopId == null || orderId == null) {
+        throw new NonRetryableInboxException("gap event is missing shop or order id");
+      }
+      throw new InboxGapRefetchRequired(
+          row.id(), row.tenantId(), shopId, orderId, row.aggregateVersion(), row.nextAttemptAt());
+    }
     if (!stale) {
       // Step 6: Handler writes and PROCESSED commit together. A throw rolls both back.
-      handler.handle(row.message(gap));
+      handler.handle(row.message(false));
     }
     markProcessed(row);
+  }
+
+  private void handleGapRefetch(Claimed claimed, InboxGapRefetchRequired gap) {
+    try {
+      gapRefetch.refetchAndApply(
+          gap.tenantId(),
+          gap.shopId(),
+          gap.externalOrderId(),
+          gap.aggregateVersion(),
+          "gap:" + gap.inboxId());
+      applyTx.executeWithoutResult(
+          status -> {
+            InboxRow row = lock(claimed.id());
+            if (row == null || !leaseMatches(row.nextAttemptAt(), gap.leaseUntil())) {
+              return;
+            }
+            markProcessed(row);
+          });
+    } catch (RuntimeException ex) {
+      recordFailure(claimed, ex);
+    }
   }
 
   private InboxRow lock(UUID id) {

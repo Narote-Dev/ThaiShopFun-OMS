@@ -16,7 +16,8 @@ public record OrderDetail(
     @JsonProperty("ship_by") Instant shipBy,
     List<Line> lines,
     @JsonProperty("updated_at") Instant updatedAt,
-    @JsonProperty("aggregate_version") long aggregateVersion) {
+    @JsonProperty("aggregate_version") long aggregateVersion,
+    String status) {
 
   public record Totals(
       BigDecimal subtotal,
