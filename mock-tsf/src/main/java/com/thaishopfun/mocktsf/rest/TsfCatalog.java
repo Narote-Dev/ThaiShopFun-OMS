@@ -140,6 +140,7 @@ public class TsfCatalog {
     tools.jackson.databind.JsonNode data = event.path("data");
     Optional<Order> existing = order(orderId);
     if ("order.created".equals(type) && existing.isEmpty()) {
+      registerShop(shopId);
       long version = event.path("aggregate_version").asLong(1);
       Instant updated = Instant.now();
       Map<String, Object> detail = orderDetailFromEvent(data, orderId, updated, version);

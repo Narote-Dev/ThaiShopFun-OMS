@@ -21,6 +21,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.databind.JsonNode;
 
 @Service
+@org.springframework.context.annotation.Profile("!inbox-api-test")
 public class OrderGapRefetchService implements OrderGapRefetch {
 
   public static final String GAP_METRIC = "oms.order.gap_refetch";

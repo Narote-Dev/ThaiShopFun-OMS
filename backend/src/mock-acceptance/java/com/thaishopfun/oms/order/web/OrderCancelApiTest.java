@@ -550,7 +550,7 @@ class OrderCancelApiTest extends OrderIntegrationTest {
   }
 
   private void ingest(ObjectNode event) throws Exception {
-    MockTsfCatalogSync.note(event);
+    MockTsfCatalogSync.note(event, mockPort());
     byte[] body = JSON.writeValueAsBytes(event);
     String eventId = event.path("event_id").asString();
     HttpRequest request =

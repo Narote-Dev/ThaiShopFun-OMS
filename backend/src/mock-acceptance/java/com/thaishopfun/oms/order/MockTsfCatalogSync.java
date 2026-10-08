@@ -21,9 +21,12 @@ public final class MockTsfCatalogSync {
   private MockTsfCatalogSync() {}
 
   public static void note(ObjectNode event) throws Exception {
+    note(event, OrderIntakeMockRuntime.mockPort());
+  }
+
+  public static void note(ObjectNode event, int mockPort) throws Exception {
     ObjectNode body = JSON.createObjectNode();
     body.set("event", event);
-    int mockPort = OrderIntakeMockRuntime.mockPort();
     HttpRequest request =
         HttpRequest.newBuilder(
                 URI.create("http://127.0.0.1:" + mockPort + "/control/catalog/note-event"))

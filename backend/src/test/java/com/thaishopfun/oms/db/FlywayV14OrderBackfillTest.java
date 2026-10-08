@@ -31,9 +31,7 @@ class FlywayV14OrderBackfillTest {
 
   @Test
   void listTenantsForOrderBackfillIsDefinerAndGrantedToApp() throws Exception {
-    try (Connection conn =
-        java.sql.DriverManager.getConnection(
-            postgres.getJdbcUrl(), "oms", postgres.getPassword())) {
+    try (Connection conn = AuthTestSupport.admin()) {
       try (Statement statement = conn.createStatement();
           ResultSet rows =
               statement.executeQuery(

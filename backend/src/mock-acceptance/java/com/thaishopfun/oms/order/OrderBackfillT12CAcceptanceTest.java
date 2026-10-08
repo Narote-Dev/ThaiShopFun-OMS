@@ -106,8 +106,7 @@ class OrderBackfillT12CAcceptanceTest {
   @Test
   void webhooksOffBulkOrdersBackfillCreatesAllWithoutDuplicates() throws Exception {
     StockFixture.Shop shop = fixture.shop("ACTIVE");
-    String shopId = "shop_bf_" + UUID.randomUUID().toString().replace("-", "").substring(0, 12);
-    fixture.setTsfShopId(shop, shopId);
+    String shopId = fixture.tsfShopId(shop);
     UUID account = fixture.tsfChannelAccount(shop, "ACTIVE", "CONNECTED");
     UUID sku = fixture.sku(shop, 500);
     fixture.channelListing(shop, account, "tsf_sku_7781", sku, true);
@@ -131,8 +130,7 @@ class OrderBackfillT12CAcceptanceTest {
   @Test
   void gapRefetchAppliesPaidSnapshot() throws Exception {
     StockFixture.Shop shop = fixture.shop("ACTIVE");
-    String shopId = "shop_bf_" + UUID.randomUUID().toString().replace("-", "").substring(0, 12);
-    fixture.setTsfShopId(shop, shopId);
+    String shopId = fixture.tsfShopId(shop);
     UUID account = fixture.tsfChannelAccount(shop, "ACTIVE", "CONNECTED");
     UUID sku = fixture.sku(shop, 10);
     fixture.channelListing(shop, account, "L-gap", sku, true);
