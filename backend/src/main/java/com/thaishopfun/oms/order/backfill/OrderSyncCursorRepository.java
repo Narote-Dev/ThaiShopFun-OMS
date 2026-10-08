@@ -83,6 +83,21 @@ public class OrderSyncCursorRepository {
     upsert(tenantId, channelAccountId, body.toString(), watermark);
   }
 
+  /** Records a successful scan without moving {@code updated_since} in the cursor JSON. */
+  public void touchSuccess(UUID tenantId, UUID channelAccountId, Instant lastSuccessAt) {
+    jdbc.update(
+        """
+        UPDATE sync_cursor
+        SET last_success_at = ?,
+            updated_at = pg_catalog.now()
+        WHERE tenant_id = ? AND channel_account_id = ? AND resource = ?
+        """,
+        java.sql.Timestamp.from(lastSuccessAt),
+        tenantId,
+        channelAccountId,
+        RESOURCE);
+  }
+
   private void upsert(
       UUID tenantId, UUID channelAccountId, String cursorJson, Instant lastSuccessAt) {
     jdbc.update(

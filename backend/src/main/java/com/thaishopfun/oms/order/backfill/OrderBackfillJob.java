@@ -218,9 +218,15 @@ public class OrderBackfillJob {
         break;
       }
     }
-    if (sawOrders && !failedThisRun) {
+    if (!failedThisRun) {
       tenantWriteTx.executeWithoutResult(
-          status -> cursors.commitSuccess(tenantId, account.id(), runStart));
+          status -> {
+            if (appliedThisRun) {
+              cursors.commitSuccess(tenantId, account.id(), runStart);
+            } else {
+              cursors.touchSuccess(tenantId, account.id(), runStart);
+            }
+          });
       recordLag(watermark, runStart);
     }
     return touched;

@@ -50,6 +50,9 @@ public class InboxWorker {
 
   static final Duration UNKNOWN_DEFER = Duration.ofHours(1);
 
+  /** Yields to a higher aggregate_version inbox row that is still due or retrying. */
+  static final Duration NEWER_PENDING_DEFER = Duration.ofSeconds(1);
+
   static final Duration[] BACKOFF = {
     Duration.ofSeconds(30),
     Duration.ofMinutes(2),
@@ -346,6 +349,10 @@ public class InboxWorker {
     // Step 5: One aggregate at a time, then drop a version that is already applied.
     // Events ordered by ent_ver are not part of this history, and do not use it.
     lockAggregate(row);
+    if (blockedByNewerPending(row)) {
+      pushBack(row, NEWER_PENDING_DEFER);
+      return ClaimOutcome.HANDLED;
+    }
     Long lastForStale = lastProcessedVersionForStale(row);
     Long lastAggregate = lastProcessedVersionAggregate(row);
     boolean entVerOrdered = InboxEntitlementPolicy.ordersByEntVer(row.eventType());
@@ -460,6 +467,33 @@ public class InboxWorker {
 
   private void lockAggregate(InboxRow row) {
     aggregateLock.lock(jdbc, row.tenantId(), row.source(), row.aggregateId());
+  }
+
+  private boolean blockedByNewerPending(InboxRow row) {
+    if (InboxEntitlementPolicy.ordersByEntVer(row.eventType()) || row.aggregateVersion() <= 0) {
+      return false;
+    }
+    Boolean blocked =
+        jdbc.queryForObject(
+            """
+            SELECT EXISTS (
+              SELECT 1
+              FROM inbox_event
+              WHERE tenant_id = ?
+                AND source = ?
+                AND aggregate_id = ?
+                AND status IN ('RECEIVED', 'FAILED')
+                AND aggregate_version > ?
+                AND id <> ?
+            )
+            """,
+            Boolean.class,
+            row.tenantId(),
+            row.source(),
+            row.aggregateId(),
+            row.aggregateVersion(),
+            row.id());
+    return Boolean.TRUE.equals(blocked);
   }
 
   private Long lastProcessedVersionForStale(InboxRow row) {

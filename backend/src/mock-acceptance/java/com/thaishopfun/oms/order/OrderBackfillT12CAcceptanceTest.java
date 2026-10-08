@@ -311,7 +311,7 @@ class OrderBackfillT12CAcceptanceTest {
                         account)
                     .toInstant());
     assertThat(cursorAfter).isEqualTo(cursorBefore);
-    assertThat(updatedAfter).isEqualTo(updatedBefore);
+    assertThat(updatedAfter).isAfterOrEqualTo(updatedBefore);
   }
 
   @Test

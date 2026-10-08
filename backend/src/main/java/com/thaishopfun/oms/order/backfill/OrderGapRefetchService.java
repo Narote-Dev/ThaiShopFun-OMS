@@ -121,10 +121,11 @@ public class OrderGapRefetchService implements OrderGapRefetch {
       }
       boolean inboxAuthoritative =
           "order.paid".equals(inboxEventType) || "order.cancelled".equals(inboxEventType);
+      boolean inboxDelta = "order.updated".equals(inboxEventType);
       if (inboxPayload != null
           && !inboxPayload.isNull()
           && snapshotVersion >= inboxAggregateVersion
-          && (outcome != Outcome.APPLIED || inboxAuthoritative)) {
+          && (outcome != Outcome.APPLIED || inboxAuthoritative || inboxDelta)) {
         Outcome inboxOutcome =
             applyTx.execute(
                 status -> {
@@ -145,6 +146,23 @@ public class OrderGapRefetchService implements OrderGapRefetch {
       }
       if (inboxAggregateVersion > 0 && snapshotVersion < inboxAggregateVersion) {
         throw new GapSnapshotNotReadyException(snapshotVersion, inboxAggregateVersion);
+      }
+      if ("order.paid".equals(inboxEventType)
+          && GapPaymentSnapshot.indicatesPaidHappened(payment)
+          && inboxPayload != null
+          && !inboxPayload.isNull()) {
+        Outcome paidInbox =
+            applyTx.execute(
+                status -> {
+                  aggregateLock.lockOrder(jdbc, tenantId, externalOrderId);
+                  return applier.applyGapInboxEvent(
+                      tenantId, shopId, inboxEventType, inboxPayload, prefix);
+                });
+        if (paidInbox == Outcome.APPLIED) {
+          applyTx.executeWithoutResult(status -> applier.retryReadyToPick(shopId, externalOrderId));
+          gapRefetches.increment();
+          return true;
+        }
       }
       return false;
     } finally {
