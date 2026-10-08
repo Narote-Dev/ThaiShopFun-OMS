@@ -27,6 +27,7 @@ Versions are taken in merge order as the next free number. One migration per PR.
 | V10 | T16 TSF channel_account provisioning + resolve_tenant via channel_account |
 | V11 | T17 orders list keyset index `(tenant_id, ordered_at DESC, id DESC)` |
 | V12 | T12B channel_listing mapping columns + inbox `orphan_recorded_at` |
+| V13 | T12B-FU `order_hold_retry` (hold sweeper backoff) |
 
 ## สรุปจำนวน
 | Phase | Cursor | Codex | รวม |

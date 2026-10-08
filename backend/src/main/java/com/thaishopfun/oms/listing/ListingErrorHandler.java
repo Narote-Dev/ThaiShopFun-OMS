@@ -9,6 +9,7 @@ import com.thaishopfun.oms.channel.exception.ChannelUnavailableException;
 import com.thaishopfun.oms.channel.exception.UnsupportedCapabilityException;
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -27,7 +28,7 @@ class ListingErrorHandler {
 
   @ExceptionHandler(ListingApiException.class)
   ResponseEntity<Map<String, Object>> handle(ListingApiException ex, HttpServletRequest request) {
-    return body(request, ex.status(), ex.code(), ex.getMessage());
+    return body(request, ex.status(), ex.code(), ex.getMessage(), ex.details());
   }
 
   @ExceptionHandler(CatalogApiException.class)
@@ -38,22 +39,31 @@ class ListingErrorHandler {
   @ExceptionHandler(HttpMessageNotReadableException.class)
   ResponseEntity<Map<String, Object>> unreadable(
       HttpMessageNotReadableException ex, HttpServletRequest request) {
-    return body(request, 422, "VALIDATION_FAILED", "Request body is invalid");
+    return body(request, 422, "VALIDATION_FAILED", "Request body is invalid", List.of());
   }
 
   @ExceptionHandler(MethodArgumentTypeMismatchException.class)
   ResponseEntity<Map<String, Object>> mismatch(
       MethodArgumentTypeMismatchException ex, HttpServletRequest request) {
     if (ex.getParameter().hasParameterAnnotation(PathVariable.class)) {
-      return body(request, 404, "NOT_FOUND", "Not found");
+      return body(request, 404, "NOT_FOUND", "Not found", List.of());
     }
-    return body(request, 422, "VALIDATION_FAILED", ex.getName() + " is invalid");
+    return body(request, 422, "VALIDATION_FAILED", ex.getName() + " is invalid", List.of());
   }
 
   @ExceptionHandler(MissingServletRequestParameterException.class)
   ResponseEntity<Map<String, Object>> missing(
       MissingServletRequestParameterException ex, HttpServletRequest request) {
-    return body(request, 422, "VALIDATION_FAILED", "A required parameter is missing");
+    if ("channel_account_id".equals(ex.getParameterName())) {
+      return body(
+          request,
+          422,
+          "VALIDATION_FAILED",
+          "channel_account_id is required",
+          List.of(
+              Map.of("field", "channel_account_id", "message", "channel_account_id is required")));
+    }
+    return body(request, 422, "VALIDATION_FAILED", "A required parameter is missing", List.of());
   }
 
   @ExceptionHandler(UnsupportedCapabilityException.class)
@@ -89,22 +99,30 @@ class ListingErrorHandler {
   @ExceptionHandler({ChannelServerErrorException.class, ChannelUnavailableException.class})
   ResponseEntity<Map<String, Object>> channelUnavailable(
       RuntimeException ex, HttpServletRequest request) {
-    return body(request, 503, "CHANNEL_UNAVAILABLE", ex.getMessage());
+    return body(request, 503, "CHANNEL_UNAVAILABLE", ex.getMessage(), List.of());
   }
 
   @ExceptionHandler(Exception.class)
   ResponseEntity<Map<String, Object>> unexpected(Exception ex, HttpServletRequest request) {
     log.warn("listing request failed: {}", ex.getClass().getSimpleName());
-    return body(request, 500, "INTERNAL_ERROR", "Unexpected error");
+    return body(request, 500, "INTERNAL_ERROR", "Unexpected error", List.of());
   }
 
   private static ResponseEntity<Map<String, Object>> body(
       HttpServletRequest request, int status, String code, String message) {
+    return body(request, status, code, message, List.of());
+  }
+
+  private static ResponseEntity<Map<String, Object>> body(
+      HttpServletRequest request, int status, String code, String message, List<?> details) {
     String traceId = TraceIds.current(request);
     Map<String, Object> body = new LinkedHashMap<>();
     body.put("error", code);
     body.put("message", message);
     body.put("trace_id", traceId);
+    if (!details.isEmpty()) {
+      body.put("errors", details);
+    }
     return ResponseEntity.status(status)
         .header("X-Trace-Id", traceId)
         .header("Cache-Control", "no-store")

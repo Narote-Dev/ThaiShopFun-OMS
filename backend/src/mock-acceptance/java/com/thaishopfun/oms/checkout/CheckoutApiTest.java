@@ -77,6 +77,33 @@ class CheckoutApiTest {
   }
 
   @Test
+  void removedMappedListingIsNotEnforced() throws Exception {
+    StockFixture.Shop shop = fixture.shop("ACTIVE");
+    String shopId = fixture.tsfShopId(shop);
+    UUID account = fixture.channelAccount(shop, "ACTIVE", "CONNECTED");
+    UUID sku = fixture.sku(shop, 10);
+    fixture.channelListing(shop, account, "L-removed", sku, true);
+    fixture.inTenant(
+        shop.tenant(),
+        () ->
+            jdbc.update(
+                "UPDATE channel_listing SET removed_at = now() WHERE channel_account_id = ? AND external_sku_id = ?",
+                account,
+                "L-removed"));
+    HttpResponse<String> response =
+        post("chk-removed", request(shopId, "chk-removed", "L-removed", 1));
+    assertThat(response.statusCode()).isEqualTo(201);
+    JsonNode created = JSON.readTree(response.body());
+    assertThat(created.path("enforced").asBoolean()).isFalse();
+    assertThat(fixture.reserved(shop, sku)).isZero();
+    long reservations =
+        fixture.inTenant(
+            shop.tenant(),
+            () -> jdbc.queryForObject("SELECT count(*) FROM stock_reservation", Long.class));
+    assertThat(reservations).isZero();
+  }
+
+  @Test
   void shadowModeRecordsShadowDiff() throws Exception {
     StockFixture.Shop shop = fixture.shop("ACTIVE");
     String shopId = fixture.tsfShopId(shop);

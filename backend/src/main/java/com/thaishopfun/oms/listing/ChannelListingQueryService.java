@@ -15,14 +15,21 @@ class ChannelListingQueryService {
   }
 
   ChannelListingViews.Page list(
-      UUID channelAccountId, Boolean mapped, String q, Integer limit, Integer offset) {
+      UUID channelAccountId,
+      Boolean mapped,
+      Boolean removedOnly,
+      String q,
+      Integer limit,
+      Integer offset) {
     int pageLimit = limit == null ? 50 : Math.min(Math.max(limit, 1), 200);
     int pageOffset = offset == null ? 0 : Math.max(offset, 0);
     return tx.read(
         () -> {
-          long total = listings.count(channelAccountId, mapped, q);
+          long total = listings.count(channelAccountId, mapped, removedOnly, q);
           var items =
-              listings.list(channelAccountId, mapped, q, pageLimit, pageOffset).stream()
+              listings
+                  .list(channelAccountId, mapped, removedOnly, q, pageLimit, pageOffset)
+                  .stream()
                   .map(ChannelListingViews::from)
                   .toList();
           return new ChannelListingViews.Page(items, total, pageLimit, pageOffset);

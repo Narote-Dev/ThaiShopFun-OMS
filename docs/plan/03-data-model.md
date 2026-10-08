@@ -88,6 +88,7 @@ erDiagram
 | ตาราง | columns สำคัญ | หมายเหตุ |
 |---|---|---|
 | `sales_order` | id, tenant_id, channel_account_id, external_order_id, **order_status**, **payment_status**, **fulfillment_status**, **hold_reason** (default `NONE`), hold_note, channel_status, payment_method (`PREPAID/COD`), currency, subtotal, shipping_fee, discount, grand_total, ordered_at, paid_at, ship_by, completed_at, external_version, version, **UNIQUE(channel_account_id, external_order_id)** | ไม่มี PII ในตารางนี้ |
+| `order_hold_retry` | tenant_id, order_id, attempts, next_attempt_at, last_error, updated_at, PK `(tenant_id, order_id)`, FK → `sales_order` ON DELETE CASCADE | T12B-FU sweeper backoff; no PII |
 | `order_recipient` | order_id PK, tenant_id, name_enc, phone_enc, phone_hash, phone_last4, address_enc, province, postcode, **pii_status** (`ACTIVE/REDACTED`), redact_after | PII แยกตาราง ลบง่าย (ดู PII lifecycle) |
 | `order_line` | id, tenant_id, order_id, sku_id (null ถ้า map ไม่ได้), external_sku_id, name, qty, unit_price, discount, line_total | |
 | `order_status_history` | id, tenant_id, order_id, dimension (`ORDER/PAYMENT/FULFILLMENT/HOLD`), from_value, to_value, reason, actor, created_at | |

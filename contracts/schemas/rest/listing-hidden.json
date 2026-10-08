@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["listing_sku_id", "hidden"],
+  "properties": {
+    "listing_sku_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "hidden": {
+      "type": "boolean"
+    }
+  }
+}

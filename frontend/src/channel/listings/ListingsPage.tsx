@@ -18,24 +18,34 @@ import { PageContent } from '../../ui/PageContent'
 import { PageHeader } from '../../ui/PageHeader'
 import { Select } from '../../ui/Select'
 import { listingsAccess } from './access'
-import { listingsApi, listingsMessage, type ChannelListing, type ReevalSummary } from './api'
+import { AlertBanner } from '../../ui/Alert'
+import { FilterBar } from '../../ui/FilterBar'
+import {
+  listingsApi,
+  listingsMessage,
+  type ChannelListing,
+  type ListingSyncResponse,
+  type ReevalSummary,
+} from './api'
 
 const PAGE_SIZE = 25
 
 function parseHash(): {
   channelAccountId: string
   mapped: 'unmapped' | 'mapped' | 'all'
+  removedOnly: boolean
   q: string
   offset: number
 } {
   const raw = window.location.hash.replace(/^#\/?/, '')
   const [path, query = ''] = raw.split('?')
   if (!path.startsWith('channel/listings')) {
-    return { channelAccountId: '', mapped: 'unmapped', q: '', offset: 0 }
+    return { channelAccountId: '', mapped: 'unmapped', removedOnly: false, q: '', offset: 0 }
   }
   const params = new URLSearchParams(query)
   const mappedParam = params.get('mapped')
-  const mapped =
+  const removedOnly = params.get('removed') === 'true'
+  let mapped: 'unmapped' | 'mapped' | 'all' =
     mappedParam === 'true'
       ? 'mapped'
       : mappedParam === 'false'
@@ -43,21 +53,32 @@ function parseHash(): {
         : mappedParam === 'all'
           ? 'all'
           : 'unmapped'
+  if (removedOnly && mapped === 'unmapped') {
+    mapped = 'all'
+  }
   const offset = Number.parseInt(params.get('offset') ?? '0', 10)
   return {
     channelAccountId: params.get('channel_account_id') ?? '',
     mapped,
+    removedOnly,
     q: params.get('q') ?? '',
     offset: Number.isFinite(offset) && offset >= 0 ? offset : 0,
   }
 }
 
-function writeHash(channelAccountId: string, mapped: string, q: string, offset: number) {
+function writeHash(
+  channelAccountId: string,
+  mapped: string,
+  removedOnly: boolean,
+  q: string,
+  offset: number,
+) {
   const params = new URLSearchParams()
   if (channelAccountId) params.set('channel_account_id', channelAccountId)
   if (mapped === 'mapped') params.set('mapped', 'true')
   else if (mapped === 'unmapped') params.set('mapped', 'false')
   else if (mapped === 'all') params.set('mapped', 'all')
+  if (removedOnly) params.set('removed', 'true')
   if (q) params.set('q', q)
   if (offset > 0) params.set('offset', String(offset))
   const qs = params.toString()
@@ -68,6 +89,7 @@ export default function ListingsPage({ me }: { me: Me }) {
   const access = listingsAccess(me)
   const [channelAccountId, setChannelAccountId] = useState(() => parseHash().channelAccountId)
   const [mappedFilter, setMappedFilter] = useState<'unmapped' | 'mapped' | 'all'>(() => parseHash().mapped)
+  const [removedOnly, setRemovedOnly] = useState(() => parseHash().removedOnly)
   const [q, setQ] = useState(() => parseHash().q)
   const [items, setItems] = useState<ChannelListing[]>([])
   const [total, setTotal] = useState(0)
@@ -76,7 +98,7 @@ export default function ListingsPage({ me }: { me: Me }) {
   const [searchDraft, setSearchDraft] = useState(() => parseHash().q)
   const [error, setError] = useState('')
   const [summary, setSummary] = useState<ReevalSummary | null>(null)
-  const [syncResult, setSyncResult] = useState<string>('')
+  const [syncResult, setSyncResult] = useState<ListingSyncResponse | null>(null)
   const [pickerSku, setPickerSku] = useState<Sku | null>(null)
   const [skuQuery, setSkuQuery] = useState('')
   const [skuHits, setSkuHits] = useState<Sku[]>([])
@@ -113,6 +135,7 @@ export default function ListingsPage({ me }: { me: Me }) {
       const parsed = parseHash()
       setChannelAccountId(parsed.channelAccountId)
       setMappedFilter(parsed.mapped)
+      setRemovedOnly(parsed.removedOnly)
       setQ(parsed.q)
       setSearchDraft(parsed.q)
       setOffset(parsed.offset)
@@ -140,10 +163,10 @@ export default function ListingsPage({ me }: { me: Me }) {
       }
       setQ(searchDraft)
       setOffset(0)
-      writeHash(channelAccountId, mappedFilter, searchDraft, 0)
+      writeHash(channelAccountId, mappedFilter, removedOnly, searchDraft, 0)
     }, 400)
     return () => window.clearTimeout(timer)
-  }, [searchDraft, channelAccountId, mappedFilter, q])
+  }, [searchDraft, channelAccountId, mappedFilter, removedOnly, q])
 
   function openMapPicker(row: ChannelListing) {
     setPickerSku(null)
@@ -161,7 +184,7 @@ export default function ListingsPage({ me }: { me: Me }) {
     if (!channelAccountId) return
     let active = true
     listingsApi
-      .list(channelAccountId, mappedParam, q, PAGE_SIZE, offset)
+      .list(channelAccountId, mappedParam, removedOnly, q, PAGE_SIZE, offset)
       .then((page) => {
         if (!active) return
         setItems(page.items)
@@ -174,11 +197,11 @@ export default function ListingsPage({ me }: { me: Me }) {
     return () => {
       active = false
     }
-  }, [channelAccountId, mappedParam, q, offset])
+  }, [channelAccountId, mappedParam, removedOnly, q, offset])
 
   async function applyFilters() {
     setOffset(0)
-    writeHash(channelAccountId, mappedFilter, searchDraft, 0)
+    writeHash(channelAccountId, mappedFilter, removedOnly, searchDraft, 0)
   }
 
   async function saveMapping() {
@@ -189,7 +212,7 @@ export default function ListingsPage({ me }: { me: Me }) {
       const response = await listingsApi.putMapping(activeListing.id, pickerSku.id)
       setSummary(response.reevaluation)
       closeMapPicker()
-      const page = await listingsApi.list(channelAccountId, mappedParam, q, PAGE_SIZE, offset)
+      const page = await listingsApi.list(channelAccountId, mappedParam, removedOnly, q, PAGE_SIZE, offset)
       setItems(page.items)
       setTotal(page.total)
     } catch (err: unknown) {
@@ -205,7 +228,7 @@ export default function ListingsPage({ me }: { me: Me }) {
     setBusy(true)
     try {
       await listingsApi.deleteMapping(listing.id)
-      const page = await listingsApi.list(channelAccountId, mappedParam, q, PAGE_SIZE, offset)
+      const page = await listingsApi.list(channelAccountId, mappedParam, removedOnly, q, PAGE_SIZE, offset)
       setItems(page.items)
       setTotal(page.total)
     } catch (err: unknown) {
@@ -218,13 +241,11 @@ export default function ListingsPage({ me }: { me: Me }) {
   async function syncListings() {
     if (!channelAccountId) return
     setBusy(true)
-    setSyncResult('')
+    setSyncResult(null)
     try {
       const result = await listingsApi.syncListings(channelAccountId)
-      setSyncResult(
-        `Fetched ${result.fetched}, created ${result.created}, updated ${result.updated}, auto-mapped ${result.auto_mapped}, re-evaluated ${result.reevaluated_orders} orders`,
-      )
-      const page = await listingsApi.list(channelAccountId, mappedParam, q, PAGE_SIZE, offset)
+      setSyncResult(result)
+      const page = await listingsApi.list(channelAccountId, mappedParam, removedOnly, q, PAGE_SIZE, offset)
       setItems(page.items)
       setTotal(page.total)
     } catch (err: unknown) {
@@ -319,7 +340,41 @@ export default function ListingsPage({ me }: { me: Me }) {
           </div>
         </div>
       </Card>
-      {syncResult ? <p role="status" className="mt-4 text-[13px] text-stone-600">{syncResult}</p> : null}
+      {syncResult?.removal_skipped ? (
+        <AlertBanner variant="warning" className="mt-4" title="ไม่ได้ลบรายการจาก TSF">
+          รายการที่หายไปจาก TSF มีจำนวนมากเกินเกณฑ์ความปลอดภัย ระบบจึงไม่ตั้งสถานะถูกลบ — ลองซิงก์อีกครั้งหรือตรวจสอบที่ช่องทาง TSF
+        </AlertBanner>
+      ) : null}
+      {syncResult ? (
+        <Card className="mt-4 p-4" role="status" aria-label="ผลการซิงก์ listings">
+          <p className="text-[13px] text-stone-800">
+            ดึงมา {syncResult.fetched} · สร้างใหม่ {syncResult.created} · อัปเดต {syncResult.updated} · map
+            อัตโนมัติ {syncResult.auto_mapped} · กลับมาขาย {syncResult.revived} · ถูกลบจาก TSF{' '}
+            {syncResult.removed} · ประมวลผล hold {syncResult.reevaluated_orders} · รอคิว{' '}
+            {syncResult.deferred}
+          </p>
+        </Card>
+      ) : null}
+      <FilterBar className="mt-4">
+        <Button
+          type="button"
+          size="sm"
+          variant={removedOnly ? 'primary' : 'secondary'}
+          aria-pressed={removedOnly}
+          onClick={() => {
+            const next = !removedOnly
+            const mappedForHash = next ? 'all' : mappedFilter
+            setRemovedOnly(next)
+            if (next) {
+              setMappedFilter('all')
+            }
+            setOffset(0)
+            writeHash(channelAccountId, mappedForHash, next, searchDraft, 0)
+          }}
+        >
+          ถูกลบจาก TSF
+        </Button>
+      </FilterBar>
       {summary ? (
         <p role="status" className="mt-2 text-[13px] text-stone-600">
           Re-evaluated: released {summary.released}, out of stock {summary.out_of_stock}, still held{' '}
@@ -362,7 +417,7 @@ export default function ListingsPage({ me }: { me: Me }) {
                 <DataTableCell>{row.mapping_source ?? '—'}</DataTableCell>
                 <DataTableCell>{row.held_orders}</DataTableCell>
                 <DataTableCell>
-                  {access.canWrite ? (
+                  {access.canWrite && !row.removed_at ? (
                     <div className="flex flex-wrap gap-2">
                       <Button type="button" size="sm" onClick={() => openMapPicker(row)}>
                         Map
@@ -389,7 +444,7 @@ export default function ListingsPage({ me }: { me: Me }) {
           onClick={() => {
             const next = Math.max(0, offset - PAGE_SIZE)
             setOffset(next)
-            writeHash(channelAccountId, mappedFilter, searchDraft, next)
+            writeHash(channelAccountId, mappedFilter, removedOnly, searchDraft, next)
           }}
         >
           Previous
@@ -401,7 +456,7 @@ export default function ListingsPage({ me }: { me: Me }) {
           onClick={() => {
             const next = offset + PAGE_SIZE
             setOffset(next)
-            writeHash(channelAccountId, mappedFilter, searchDraft, next)
+            writeHash(channelAccountId, mappedFilter, removedOnly, searchDraft, next)
           }}
         >
           Next

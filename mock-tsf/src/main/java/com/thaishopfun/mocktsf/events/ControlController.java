@@ -6,6 +6,7 @@ import com.thaishopfun.mocktsf.MockProperties;
 import com.thaishopfun.mocktsf.SeedData;
 import com.thaishopfun.mocktsf.contract.ContractResponses;
 import com.thaishopfun.mocktsf.idp.TokenIssuer;
+import com.thaishopfun.mocktsf.rest.TsfCatalog;
 import jakarta.servlet.http.HttpServletRequest;
 import java.io.IOException;
 import java.math.BigInteger;
@@ -43,6 +44,7 @@ public class ControlController {
   private final TokenIssuer tokens;
   private final ReceivedEventStore received;
   private final FaultSchedule faults;
+  private final TsfCatalog catalog;
 
   public ControlController(
       JsonMapper json,
@@ -52,7 +54,8 @@ public class ControlController {
       SeedData shops,
       TokenIssuer tokens,
       ReceivedEventStore received,
-      FaultSchedule faults) {
+      FaultSchedule faults,
+      TsfCatalog catalog) {
     this.json = json;
     this.responses = responses;
     this.oms = oms;
@@ -61,6 +64,19 @@ public class ControlController {
     this.tokens = tokens;
     this.received = received;
     this.faults = faults;
+    this.catalog = catalog;
+  }
+
+  @PostMapping("/listings/{listingSkuId}/hidden")
+  public ResponseEntity<String> listingHidden(
+      @PathVariable String listingSkuId, HttpServletRequest request) throws IOException {
+    JsonNode body = readObject(request);
+    boolean hidden = body.path("hidden").asBoolean(false);
+    catalog.setListingHidden(listingSkuId, hidden);
+    Map<String, Object> result = new LinkedHashMap<>();
+    result.put("listing_sku_id", listingSkuId);
+    result.put("hidden", hidden);
+    return responses.outbound(200, "listing-hidden", result);
   }
 
   @PostMapping("/user-token")
@@ -247,6 +263,10 @@ public class ControlController {
     if (times < 1 || times > 20) {
       throw ApiException.badRequest("BAD_REQUEST", "times must be between 1 and 20");
     }
+    int skip = body.path("skip").asInt(0);
+    if (skip < 0 || skip > 50) {
+      throw ApiException.badRequest("BAD_REQUEST", "skip must be between 0 and 50");
+    }
     Integer retryAfter = null;
     if (status == 429) {
       if (!body.path("retry_after").isIntegralNumber() || body.path("retry_after").asInt() < 1) {
@@ -254,12 +274,15 @@ public class ControlController {
       }
       retryAfter = body.path("retry_after").asInt();
     }
-    faults.arm(method, path, status, times, retryAfter);
+    faults.arm(method, path, status, times, retryAfter, skip);
     Map<String, Object> armed = new LinkedHashMap<>();
     armed.put("method", method);
     armed.put("path", path);
     armed.put("status", status);
     armed.put("times", times);
+    if (skip > 0) {
+      armed.put("skip", skip);
+    }
     if (retryAfter != null) {
       armed.put("retry_after", retryAfter);
     }
