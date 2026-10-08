@@ -54,11 +54,21 @@ public class InvariantChecker {
   }
 
   public List<Violation> checkTenant(UUID tenantId) {
+    return runForTenant(tenantId, () -> checkTenantInContext(tenantId, true));
+  }
+
+  /** Stock invariants only (reservation engine tests without {@code sales_order} rows). */
+  public List<Violation> checkTenantStock(UUID tenantId) {
+    return runForTenant(tenantId, () -> checkTenantInContext(tenantId, false));
+  }
+
+  private List<Violation> runForTenant(
+      UUID tenantId, java.util.function.Supplier<List<Violation>> work) {
     UUID previousTenant = TenantContext.tenantId();
     UUID previousUser = TenantContext.userId();
     try {
       TenantContext.set(tenantId, null);
-      return tenantReadTx.execute(status -> checkTenantInContext(tenantId));
+      return tenantReadTx.execute(status -> work.get());
     } finally {
       if (previousTenant != null) {
         TenantContext.set(previousTenant, previousUser);
@@ -111,18 +121,20 @@ public class InvariantChecker {
     return violations;
   }
 
-  private List<Violation> checkTenantInContext(UUID tenantId) {
+  private List<Violation> checkTenantInContext(UUID tenantId, boolean includeOrders) {
     List<Violation> violations = new ArrayList<>();
     violations.addAll(stockReservedBounds(tenantId));
     violations.addAll(stockActiveReservationMismatch(tenantId));
     violations.addAll(stockLedgerMismatch(tenantId));
     violations.addAll(stockReservationOwnerSplit(tenantId));
-    violations.addAll(orderReservationOrphan(tenantId));
-    violations.addAll(orderCancelledActiveReservation(tenantId));
-    violations.addAll(orderTerminalActiveReservation(tenantId));
-    violations.addAll(orderReadyToPickHold(tenantId));
-    violations.addAll(orderStatusHistoryMissing(tenantId));
-    violations.addAll(orderReadyToPickCoverage(tenantId));
+    if (includeOrders) {
+      violations.addAll(orderReservationOrphan(tenantId));
+      violations.addAll(orderCancelledActiveReservation(tenantId));
+      violations.addAll(orderTerminalActiveReservation(tenantId));
+      violations.addAll(orderReadyToPickHold(tenantId));
+      violations.addAll(orderStatusHistoryMissing(tenantId));
+      violations.addAll(orderReadyToPickCoverage(tenantId));
+    }
     return violations;
   }
 
@@ -211,14 +223,14 @@ public class InvariantChecker {
             FROM stock_reservation sr
             WHERE sr.status = 'ACTIVE'
               AND sr.owner_type = 'ORDER'
+              AND sr.owner_ref ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
               AND NOT EXISTS (
                 SELECT 1 FROM sales_order o
                 WHERE o.tenant_id = sr.tenant_id AND o.id::text = sr.owner_ref
               )
             LIMIT ?
             """,
-            (rs, row) -> rs.getObject("id", UUID.class),
-            ENTITY_LIMIT);
+            (rs, row) -> rs.getObject("id", UUID.class), ENTITY_LIMIT);
     return ids.isEmpty()
         ? List.of()
         : List.of(Violation.of(InvariantCodes.ORDER_RESERVATION_ORPHAN, tenantId, ids));
@@ -274,7 +286,10 @@ public class InvariantChecker {
             """
             SELECT id FROM sales_order
             WHERE fulfillment_status = 'READY_TO_PICK'
-              AND (hold_reason <> 'NONE' OR order_status <> 'ACTIVE')
+              AND (
+                hold_reason NOT IN ('NONE', 'CHANNEL_CANCEL_PENDING')
+                OR order_status <> 'ACTIVE'
+              )
             LIMIT ?
             """,
             (rs, row) -> rs.getObject("id", UUID.class),

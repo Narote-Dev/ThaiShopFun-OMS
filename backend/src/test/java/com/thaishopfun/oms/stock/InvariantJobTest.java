@@ -7,6 +7,7 @@ import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import com.thaishopfun.oms.invariant.InvariantCodes;
 import com.thaishopfun.oms.invariant.InvariantJob;
+import com.thaishopfun.oms.invariant.PiiLogAssertions;
 import com.thaishopfun.oms.invariant.SkipInvariantCheck;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.util.List;
@@ -68,7 +69,7 @@ class InvariantJobTest extends StockTestBase {
     assertThat(lines).isNotEmpty();
     for (String line : lines) {
       assertThat(line).doesNotContain("@");
-      assertThat(line).doesNotContain("081");
+      assertThat(line).doesNotContain(PiiLogAssertions.SENTINEL_PHONE);
     }
     appender.stop();
   }

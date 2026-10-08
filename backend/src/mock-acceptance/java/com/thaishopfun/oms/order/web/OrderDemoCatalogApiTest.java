@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.thaishopfun.oms.auth.AuthTestSupport;
 import com.thaishopfun.oms.catalog.CatalogHttp;
 import com.thaishopfun.oms.invariant.InvariantChecker;
+import com.thaishopfun.oms.invariant.VerifyInvariants;
 import com.thaishopfun.oms.order.demo.OrderDemoCatalogService;
 import com.thaishopfun.oms.tenant.TenantContext;
 import java.net.URI;
@@ -23,6 +24,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import tools.jackson.databind.json.JsonMapper;
 
 /** Demo catalog seed for mock-tsf demo orders ({@code local}/{@code e2e} profiles). */
+@VerifyInvariants
 class OrderDemoCatalogApiTest extends OrderIntegrationTest {
 
   private static final JsonMapper JSON = JsonMapper.builder().build();

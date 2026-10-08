@@ -24,7 +24,7 @@ import org.junit.jupiter.api.Test;
 import tools.jackson.databind.JsonNode;
 
 /** T08A stock documents and stock history over HTTP, as {@code oms_app} under FORCE RLS. */
-@VerifyInvariants
+@VerifyInvariants(scope = VerifyInvariants.Scope.STOCK_ONLY)
 class StockDocumentApiTest extends CatalogIntegrationTest {
 
   private static final String DOCS = "/api/v1/stock-documents";

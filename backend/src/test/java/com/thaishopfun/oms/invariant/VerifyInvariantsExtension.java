@@ -21,9 +21,14 @@ public class VerifyInvariantsExtension implements AfterEachCallback {
       return;
     }
     InvariantChecker checker = applicationContext.getBean(InvariantChecker.class);
+    VerifyInvariants.Scope scope =
+        context.getRequiredTestClass().getAnnotation(VerifyInvariants.class).scope();
     List<Violation> violations = new java.util.ArrayList<>(checker.checkSchema());
     for (UUID tenantId : InvariantTestTenants.drain()) {
-      violations.addAll(checker.checkTenant(tenantId));
+      violations.addAll(
+          scope == VerifyInvariants.Scope.STOCK_ONLY
+              ? checker.checkTenantStock(tenantId)
+              : checker.checkTenant(tenantId));
     }
     assertThat(violations).as(InvariantChecker.formatFailures(violations)).isEmpty();
   }

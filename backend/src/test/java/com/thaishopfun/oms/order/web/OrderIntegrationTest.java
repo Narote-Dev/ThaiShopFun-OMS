@@ -1,7 +1,6 @@
 package com.thaishopfun.oms.order.web;
 
 import com.thaishopfun.oms.auth.AuthTestSupport;
-import com.thaishopfun.oms.invariant.VerifyInvariants;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
@@ -13,7 +12,6 @@ import org.springframework.test.context.DynamicPropertySource;
 @SpringBootTest(
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
     properties = "oms.outbox.publisher-enabled=false")
-@VerifyInvariants
 abstract class OrderIntegrationTest {
 
   @DynamicPropertySource

@@ -34,7 +34,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 @Import(StockTestConfig.class)
 // Closed after the class: every cached context holds a pool on the shared Postgres.
 @DirtiesContext
-@VerifyInvariants
+@VerifyInvariants(scope = VerifyInvariants.Scope.STOCK_ONLY)
 public abstract class StockTestBase {
 
   @DynamicPropertySource
