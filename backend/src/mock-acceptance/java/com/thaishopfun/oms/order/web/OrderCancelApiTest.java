@@ -372,6 +372,14 @@ class OrderCancelApiTest extends OrderIntegrationTest {
       rounds++;
     } while (processed > 0 && rounds < 50);
     assertThat(rounds).isLessThan(50);
+    for (int wake = 0; wake < 30; wake++) {
+      jdbc.update(
+          "UPDATE inbox_event SET next_attempt_at = pg_catalog.now() WHERE status IN ('RECEIVED', 'FAILED')");
+      processed = worker.processAvailable(20);
+      if (processed == 0) {
+        break;
+      }
+    }
 
     assertDemoOrder("DEMO-READY", "READY_TO_PICK", "PAID", "NONE", null);
     assertDemoOrder("DEMO-COD", "READY_TO_PICK", "COD_PENDING", "NONE", null);

@@ -380,8 +380,7 @@ public class InboxWorker {
             && row.aggregateVersion() > 0
             && lastAggregate != null
             && row.aggregateVersion() > lastAggregate + 1
-            && !"order.updated".equals(row.eventType())
-            && !"order.paid".equals(row.eventType());
+            && !"order.updated".equals(row.eventType());
     if (gap) {
       String shopId = row.payload().path("tsf_shop_id").asString(null);
       String orderId = row.payload().path("data").path("order_id").asString(null);
