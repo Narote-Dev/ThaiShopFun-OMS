@@ -20,7 +20,7 @@ public final class MockTsfCatalogSync {
 
   private MockTsfCatalogSync() {}
 
-  static void note(ObjectNode event) throws Exception {
+  public static void note(ObjectNode event) throws Exception {
     ObjectNode body = JSON.createObjectNode();
     body.set("event", event);
     int mockPort = OrderIntakeMockRuntime.mockPort();
