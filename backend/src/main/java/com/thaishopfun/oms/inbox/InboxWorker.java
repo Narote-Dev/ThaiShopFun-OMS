@@ -357,7 +357,14 @@ public class InboxWorker {
         throw new NonRetryableInboxException("gap event is missing shop or order id");
       }
       throw new InboxGapRefetchRequired(
-          row.id(), row.tenantId(), shopId, orderId, row.aggregateVersion(), row.nextAttemptAt());
+          row.id(),
+          row.tenantId(),
+          shopId,
+          orderId,
+          row.aggregateVersion(),
+          row.nextAttemptAt(),
+          row.eventType(),
+          row.payload());
     }
     if (!stale) {
       // Step 6: Handler writes and PROCESSED commit together. A throw rolls both back.
@@ -368,18 +375,14 @@ public class InboxWorker {
 
   private void handleGapRefetch(Claimed claimed, InboxGapRefetchRequired gap) {
     try {
-      InboxRow gapRow = lock(claimed.id());
-      if (gapRow == null) {
-        return;
-      }
       gapRefetch.refetchAndApply(
           gap.tenantId(),
           gap.shopId(),
           gap.externalOrderId(),
           gap.aggregateVersion(),
           "gap:" + gap.inboxId(),
-          gapRow.eventType(),
-          gapRow.payload());
+          gap.eventType(),
+          gap.payload());
       applyTx.executeWithoutResult(
           status -> {
             InboxRow row = lock(claimed.id());

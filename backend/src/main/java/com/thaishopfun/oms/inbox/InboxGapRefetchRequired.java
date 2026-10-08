@@ -2,6 +2,7 @@ package com.thaishopfun.oms.inbox;
 
 import java.time.OffsetDateTime;
 import java.util.UUID;
+import tools.jackson.databind.JsonNode;
 
 /** Inbox row has a version gap; apply must use REST snapshot outside the claim transaction. */
 public final class InboxGapRefetchRequired extends RuntimeException {
@@ -12,6 +13,8 @@ public final class InboxGapRefetchRequired extends RuntimeException {
   private final String externalOrderId;
   private final long aggregateVersion;
   private final OffsetDateTime leaseUntil;
+  private final String eventType;
+  private final JsonNode payload;
 
   public InboxGapRefetchRequired(
       UUID inboxId,
@@ -19,7 +22,9 @@ public final class InboxGapRefetchRequired extends RuntimeException {
       String shopId,
       String externalOrderId,
       long aggregateVersion,
-      OffsetDateTime leaseUntil) {
+      OffsetDateTime leaseUntil,
+      String eventType,
+      JsonNode payload) {
     super("gap refetch required for order " + externalOrderId);
     this.inboxId = inboxId;
     this.tenantId = tenantId;
@@ -27,6 +32,8 @@ public final class InboxGapRefetchRequired extends RuntimeException {
     this.externalOrderId = externalOrderId;
     this.aggregateVersion = aggregateVersion;
     this.leaseUntil = leaseUntil;
+    this.eventType = eventType;
+    this.payload = payload;
   }
 
   public UUID inboxId() {
@@ -51,5 +58,13 @@ public final class InboxGapRefetchRequired extends RuntimeException {
 
   public OffsetDateTime leaseUntil() {
     return leaseUntil;
+  }
+
+  public String eventType() {
+    return eventType;
+  }
+
+  public JsonNode payload() {
+    return payload;
   }
 }
