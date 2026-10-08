@@ -310,6 +310,21 @@ public class OrderIntakeSupport {
     bumpExternalVersion(account, order, message);
   }
 
+  /** Re-runs fulfillment promotion after gap REST/inbox paid catch-up. */
+  void retryReadyToPick(String shopId, String externalOrderId) {
+    TsfAccount account =
+        channels
+            .tsfByExternalShopId(shopId)
+            .orElseThrow(() -> new IllegalStateException("TSF account missing for shop"));
+    SalesOrder order =
+        orders
+            .findByExternalId(account.id(), externalOrderId)
+            .orElseThrow(() -> new IllegalStateException("order missing for ready retry"));
+    List<ReserveItem> items = mappedReserveItems(order.id());
+    holdEffects.maybeReadyToPick(
+        orders.findById(order.id()).orElseThrow(), account, items, Instant.now(clock));
+  }
+
   void handleCancelled(InboxMessage message) {
     TsfAccount account = requireTsfAccount(message);
     String orderId = requiredText(message.payload().path("data"), "order_id");

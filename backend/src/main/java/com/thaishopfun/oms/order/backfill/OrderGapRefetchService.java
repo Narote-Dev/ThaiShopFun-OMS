@@ -119,6 +119,10 @@ public class OrderGapRefetchService implements OrderGapRefetch {
         }
       }
       if (outcome == Outcome.APPLIED) {
+        if ("order.paid".equals(inboxEventType)) {
+          applyTx.executeWithoutResult(
+              status -> applier.retryReadyToPick(shopId, externalOrderId));
+        }
         gapRefetches.increment();
         return true;
       }

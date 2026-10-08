@@ -193,6 +193,10 @@ public class OrderRestSnapshotApplier {
     return Outcome.APPLIED;
   }
 
+  public void retryReadyToPick(String shopId, String externalOrderId) {
+    support.retryReadyToPick(shopId, externalOrderId);
+  }
+
   public Outcome applyCancelCatchUp(
       UUID tenantId,
       String shopId,
