@@ -105,9 +105,9 @@ public class MembershipChangedHandler implements InboxHandler {
           InboxWorker.ENTITLEMENT_DEFERRED);
     }
 
-    // Step 6: Audit the status change (skip on equal-ent_ver replay). No shop name, email, or
-    // payload.
-    if (!idempotentReplay) {
+    // Step 6: Audit the status change. Skip equal-ent_ver replays unless JIT provision already
+    // applied tenant state without an audit row (first inbox pass after shop create).
+    if (shouldWriteAudit(message.tenantId(), idempotentReplay)) {
       jdbc.update(
           """
           INSERT INTO audit_log (
@@ -124,6 +124,21 @@ public class MembershipChangedHandler implements InboxHandler {
               + incoming.entVer
               + "}");
     }
+  }
+
+  private boolean shouldWriteAudit(UUID tenantId, boolean idempotentReplay) {
+    if (!idempotentReplay) {
+      return true;
+    }
+    Long prior =
+        jdbc.queryForObject(
+            """
+            SELECT count(*) FROM audit_log
+            WHERE tenant_id = ? AND action = 'membership.changed'
+            """,
+            Long.class,
+            tenantId);
+    return prior == null || prior == 0;
   }
 
   private record Current(String tier, String status, OffsetDateTime expiresAt, long entVer) {
