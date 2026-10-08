@@ -90,15 +90,19 @@ public class InboxWorker {
       """
           .formatted(InboxEntitlementPolicy.entVerOrderedTypeLiterals());
 
-  private static final String MAX_AGGREGATE_VERSION_SEEN =
+  private static final String SUPERSEDED_BY_PENDING_NEWER =
       """
-      SELECT MAX(aggregate_version)
-      FROM inbox_event
-      WHERE tenant_id = ?
-        AND source = ?
-        AND aggregate_id = ?
-        AND aggregate_version > 0
-        AND id <> ?
+      SELECT EXISTS(
+        SELECT 1
+        FROM inbox_event
+        WHERE tenant_id = ?
+          AND source = ?
+          AND aggregate_id = ?
+          AND aggregate_version > ?
+          AND aggregate_version > 0
+          AND id <> ?
+          AND status IN ('RECEIVED', 'FAILED')
+      )
       """;
 
   private final InboxProperties properties;
@@ -325,13 +329,11 @@ public class InboxWorker {
     lockAggregate(row);
     Long lastForStale = lastProcessedVersionForStale(row);
     Long lastAggregate = lastProcessedVersionAggregate(row);
-    Long maxSeen = maxAggregateVersionSeen(row);
     boolean entVerOrdered = InboxEntitlementPolicy.ordersByEntVer(row.eventType());
     boolean superseded =
         !entVerOrdered
-            && maxSeen != null
             && row.aggregateVersion() > 0
-            && row.aggregateVersion() < maxSeen;
+            && supersededByPendingNewer(row);
     boolean stale =
         superseded
             || (!entVerOrdered
@@ -454,14 +456,16 @@ public class InboxWorker {
         row.id());
   }
 
-  private Long maxAggregateVersionSeen(InboxRow row) {
-    return jdbc.queryForObject(
-        MAX_AGGREGATE_VERSION_SEEN,
-        Long.class,
-        row.tenantId(),
-        row.source(),
-        row.aggregateId(),
-        row.id());
+  private boolean supersededByPendingNewer(InboxRow row) {
+    return Boolean.TRUE.equals(
+        jdbc.queryForObject(
+            SUPERSEDED_BY_PENDING_NEWER,
+            Boolean.class,
+            row.tenantId(),
+            row.source(),
+            row.aggregateId(),
+            row.aggregateVersion(),
+            row.id()));
   }
 
   private void pushBack(InboxRow row, Duration delay) {
