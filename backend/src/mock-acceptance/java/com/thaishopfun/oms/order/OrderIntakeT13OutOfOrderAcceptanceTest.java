@@ -62,6 +62,11 @@ class OrderIntakeT13OutOfOrderAcceptanceTest {
     registry.add("oms.inbox.hmac-secrets", () -> INBOX_SECRET);
     registry.add("oms.inbox.jitter-ratio", () -> "0");
     registry.add("oms.outbox.publisher-enabled", () -> "false");
+    registry.add("oms.tsf.base-url", () -> "http://127.0.0.1:" + mockPort);
+    registry.add("oms.tsf.token-uri", () -> "http://127.0.0.1:" + mockPort + "/tsf-idp/token");
+    registry.add("oms.tsf.client-id", () -> "oms-service");
+    registry.add("oms.tsf.client-secret", () -> "dev-oms-service-secret");
+    registry.add("oms.tsf.audience", () -> "tsf-internal");
   }
 
   @LocalServerPort private int port;

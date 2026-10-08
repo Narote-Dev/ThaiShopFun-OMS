@@ -56,7 +56,8 @@ public class OrderRestSnapshotApplier {
     Optional<SalesOrder> existing = orders.findByExternalId(account.id(), detail.orderId());
     long knownVersion =
         existing.map(o -> o.externalVersion() == null ? 0L : o.externalVersion()).orElse(0L);
-    if (detail.aggregateVersion() <= knownVersion) {
+    // Step 1b: Version 0 means the REST body did not carry aggregate_version; still apply snapshot.
+    if (detail.aggregateVersion() > 0 && detail.aggregateVersion() <= knownVersion) {
       return Outcome.SKIPPED;
     }
     // Step 2: Create when missing.
