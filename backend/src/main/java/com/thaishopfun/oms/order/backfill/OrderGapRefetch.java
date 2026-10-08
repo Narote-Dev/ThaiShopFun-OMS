@@ -17,4 +17,15 @@ public interface OrderGapRefetch {
       String prefix,
       String inboxEventType,
       JsonNode inboxPayload);
+
+  /**
+   * Applies the gap inbox payload when REST never reaches the inbox version within defer budget.
+   */
+  boolean applyAuthoritativeGapInbox(
+      UUID tenantId,
+      String shopId,
+      String externalOrderId,
+      String inboxEventType,
+      JsonNode inboxPayload,
+      String prefix);
 }

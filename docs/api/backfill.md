@@ -24,7 +24,13 @@ HTTP list/get runs **outside** DB transactions. Each applied order runs in a new
 
 ## Gap refetch
 
-When `aggregate_version` skips ahead of the last PROCESSED version, `InboxWorker` does not apply the webhook delta. It refetches `GET /orders/{id}` (+ payment status) outside the inbox transaction, then applies the REST snapshot through the same intake handlers as webhooks.
+When `aggregate_version` skips ahead of the last PROCESSED version on the aggregate (any order event type, including `order.updated`), `InboxWorker` does not apply the webhook delta alone. It refetches `GET /orders/{id}` (+ payment status) outside the inbox transaction, then applies the REST snapshot through the same intake handlers as webhooks.
+
+`order.updated` deltas are **not** dropped when a newer inbox row exists for another event type on the same order; stale skipping is per `event_type` only.
+
+If REST is behind the inbox version, the gap row uses the normal inbox failure backoff ladder (with jitter) until `oms.inbox.max-defer` age or max attempts. After that budget, OMS applies the gap inbox payload for `order.paid` / `order.cancelled` / `order.updated`, or marks the row `DEAD` with reconciliation rule `GAP_SNAPSHOT_STALE`.
+
+REST payment `PAID`, `PARTIALLY_REFUNDED`, and `REFUNDED` count as “paid happened” for catch-up. When REST payment is `UNPAID`/`FAILED` but `aggregate_version` is already at or past the inbox version, gap refetch applies the inbox `order.paid` payload instead of polling forever.
 
 ## Cancellation via REST
 

@@ -51,8 +51,7 @@ import tools.jackson.databind.node.ObjectNode;
       "spring.main.allow-bean-definition-overriding=true",
       "oms.order.backfill.enabled=false",
       "oms.inbox.worker-enabled=false",
-      "oms.inbox.jitter-ratio=0",
-      "oms.inbox.gap-refetch-order-paid=true"
+      "oms.inbox.jitter-ratio=0"
     })
 @Import(OrderIntakeT12ScenariosAcceptanceTest.IntakeTestConfig.class)
 class OrderBackfillT12CAcceptanceTest {
@@ -475,6 +474,88 @@ class OrderBackfillT12CAcceptanceTest {
     assertThat(worker.processAvailable(5)).isEqualTo(1);
     assertThat(gapRefetchCount()).isEqualTo(gapsBefore + 1);
     assertThat(externalVersion(shop.tenant(), orderId)).isEqualTo(3L);
+  }
+
+  @Test
+  void gapRefetchAppliesCancelledSnapshotOnUpdatedVersionJump() throws Exception {
+    StockFixture.Shop shop = fixture.shop("ACTIVE");
+    String shopId = fixture.tsfShopId(shop);
+    UUID account = fixture.tsfChannelAccount(shop, "ACTIVE", "CONNECTED");
+    UUID sku = fixture.sku(shop, 11);
+    fixture.channelListing(shop, account, "L-gap-cancel", sku, true);
+    String orderId = "TSF-GAP-CAN-" + UUID.randomUUID();
+    postMock(
+        "/control/orders/register",
+        "{\"shop_id\":\"" + shopId + "\",\"order_id\":\"" + orderId + "\"}");
+    ingest(
+        OrderIntakeScenarioSupport.orderCreated(
+            JSON, orderId, shopId, UUID.randomUUID().toString(), "COD", "L-gap-cancel", 1, 1));
+    assertThat(worker.processAvailable(5)).isEqualTo(1);
+
+    ObjectNode cancelOnly = OrderIntakeScenarioSupport.orderCancelled(JSON, orderId, shopId, 3);
+    cancelOnly.put("event_id", "evt-cancel-catalog-only-" + UUID.randomUUID());
+    MockTsfCatalogSync.note(cancelOnly);
+
+    ObjectNode updated = OrderIntakeScenarioSupport.orderUpdated(JSON, orderId, shopId, 3);
+    updated.put("event_id", "evt-upd-gap-" + UUID.randomUUID());
+    ingest(updated, false);
+    assertThat(worker.processAvailable(5)).isEqualTo(1);
+
+    assertThat(
+            fixture.inTenant(
+                shop.tenant(),
+                () ->
+                    jdbc.queryForObject(
+                        "SELECT order_status FROM sales_order WHERE external_order_id = ?",
+                        String.class,
+                        orderId)))
+        .isEqualTo("CANCELLED");
+  }
+
+  @Test
+  void backfillRetriesOrderAfterTransientRestFault() throws Exception {
+    StockFixture.Shop shop = fixture.shop("ACTIVE");
+    String shopId = fixture.tsfShopId(shop);
+    UUID account = fixture.tsfChannelAccount(shop, "ACTIVE", "CONNECTED");
+    UUID sku = fixture.sku(shop, 12);
+    fixture.channelListing(shop, account, "tsf_sku_7781", sku, true);
+    HttpResponse<String> bulk =
+        HTTP.send(
+            HttpRequest.newBuilder(
+                    URI.create(
+                        "http://127.0.0.1:"
+                            + OrderIntakeMockRuntime.mockPort()
+                            + "/control/orders/bulk"))
+                .timeout(Duration.ofSeconds(20))
+                .header("Content-Type", "application/json")
+                .POST(
+                    HttpRequest.BodyPublishers.ofString(
+                        "{\"count\":2,\"payment\":\"COD\",\"paid\":false,\"shop_id\":\""
+                            + shopId
+                            + "\"}",
+                        StandardCharsets.UTF_8))
+                .build(),
+            HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+    assertThat(bulk.statusCode()).isBetween(200, 299);
+    tools.jackson.databind.JsonNode ids = JSON.readTree(bulk.body()).path("order_ids");
+    String faultOrder = ids.get(1).asString();
+    postMock(
+        "/control/faults",
+        "{\"method\":\"GET\",\"path\":\"/internal/v1/orders/"
+            + faultOrder
+            + "\",\"status\":503,\"times\":5}");
+    backfill.runOnceForTenant(shop.tenant());
+    long afterFault =
+        fixture.inTenant(
+            shop.tenant(),
+            () -> jdbc.queryForObject("SELECT count(*) FROM sales_order", Long.class));
+    assertThat(afterFault).isEqualTo(1);
+    backfill.runOnceForTenant(shop.tenant());
+    long afterRetry =
+        fixture.inTenant(
+            shop.tenant(),
+            () -> jdbc.queryForObject("SELECT count(*) FROM sales_order", Long.class));
+    assertThat(afterRetry).isEqualTo(2);
   }
 
   @Test

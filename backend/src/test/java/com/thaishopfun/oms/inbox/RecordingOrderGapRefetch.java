@@ -36,6 +36,20 @@ public class RecordingOrderGapRefetch implements OrderGapRefetch {
     return List.copyOf(calls);
   }
 
+  @Override
+  public boolean applyAuthoritativeGapInbox(
+      UUID tenantId,
+      String shopId,
+      String externalOrderId,
+      String inboxEventType,
+      JsonNode inboxPayload,
+      String prefix) {
+    calls.add(
+        new Call(
+            tenantId, shopId, externalOrderId, inboxPayload.path("aggregate_version").asLong(0)));
+    return true;
+  }
+
   public void reset() {
     calls.clear();
   }

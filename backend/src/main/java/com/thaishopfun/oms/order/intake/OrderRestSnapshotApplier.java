@@ -276,10 +276,20 @@ public class OrderRestSnapshotApplier {
 
   private static boolean needsPaidCatchUp(PaymentStatus payment, SalesOrder current) {
     return payment != null
-        && "PAID".equals(payment.status())
+        && paidHappenedOnChannel(payment.status())
         && current != null
         && !"PAID".equals(current.paymentStatus())
         && !"CANCELLED".equals(current.orderStatus());
+  }
+
+  private static boolean paidHappenedOnChannel(String status) {
+    if (status == null) {
+      return false;
+    }
+    return switch (status) {
+      case "PAID", "PARTIALLY_REFUNDED", "REFUNDED" -> true;
+      default -> false;
+    };
   }
 
   private SalesOrder currentOrder(TsfAccount account, String externalOrderId) {

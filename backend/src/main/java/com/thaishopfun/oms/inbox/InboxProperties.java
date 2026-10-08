@@ -20,9 +20,6 @@ public class InboxProperties {
   private Duration deferDelay = Duration.ofSeconds(30);
   private Duration maxDefer = Duration.ofHours(24);
 
-  /** When false, order.paid version gaps use the inbox handler instead of REST gap refetch. */
-  private boolean gapRefetchOrderPaid = true;
-
   public List<String> secrets() {
     // Step 1: Split on comma so a rotation window can list the current key and the previous one.
     if (hmacSecrets == null || hmacSecrets.isBlank()) {
@@ -116,13 +113,5 @@ public class InboxProperties {
 
   public void setMaxDefer(Duration maxDefer) {
     this.maxDefer = maxDefer;
-  }
-
-  public boolean isGapRefetchOrderPaid() {
-    return gapRefetchOrderPaid;
-  }
-
-  public void setGapRefetchOrderPaid(boolean gapRefetchOrderPaid) {
-    this.gapRefetchOrderPaid = gapRefetchOrderPaid;
   }
 }

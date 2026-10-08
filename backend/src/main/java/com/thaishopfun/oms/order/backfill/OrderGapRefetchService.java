@@ -88,8 +88,24 @@ public class OrderGapRefetchService implements OrderGapRefetch {
       PaymentStatus payment = adapter.getPaymentStatus(ref, externalOrderId);
       long snapshotVersion = detail.aggregateVersion();
       if ("order.paid".equals(inboxEventType)
-          && payment != null
-          && !"PAID".equals(payment.status())) {
+          && !GapPaymentSnapshot.indicatesPaidHappened(payment)) {
+        if (snapshotVersion >= inboxAggregateVersion
+            && inboxPayload != null
+            && !inboxPayload.isNull()) {
+          Outcome inboxOnly =
+              applyTx.execute(
+                  status -> {
+                    aggregateLock.lockOrder(jdbc, tenantId, externalOrderId);
+                    return applier.applyGapInboxEvent(
+                        tenantId, shopId, inboxEventType, inboxPayload, prefix);
+                  });
+          if (inboxOnly == Outcome.APPLIED) {
+            applyTx.executeWithoutResult(
+                status -> applier.retryReadyToPick(shopId, externalOrderId));
+            gapRefetches.increment();
+            return true;
+          }
+        }
         throw new GapSnapshotNotReadyException(snapshotVersion, inboxAggregateVersion);
       }
       Outcome outcome = Outcome.SKIPPED;
@@ -161,6 +177,37 @@ public class OrderGapRefetchService implements OrderGapRefetch {
               });
     }
     return outcome;
+  }
+
+  @Override
+  public boolean applyAuthoritativeGapInbox(
+      UUID tenantId,
+      String shopId,
+      String externalOrderId,
+      String inboxEventType,
+      JsonNode inboxPayload,
+      String prefix) {
+    if (inboxPayload == null || inboxPayload.isNull() || inboxEventType == null) {
+      return false;
+    }
+    UUID previousTenant = TenantContext.tenantId();
+    UUID previousUser = TenantContext.userId();
+    try {
+      TenantContext.set(tenantId, null);
+      Outcome outcome =
+          applyTx.execute(
+              status -> {
+                aggregateLock.lockOrder(jdbc, tenantId, externalOrderId);
+                return applier.applyGapInboxEvent(
+                    tenantId, shopId, inboxEventType, inboxPayload, prefix);
+              });
+      if (outcome == Outcome.APPLIED && "order.paid".equals(inboxEventType)) {
+        applyTx.executeWithoutResult(status -> applier.retryReadyToPick(shopId, externalOrderId));
+      }
+      return outcome == Outcome.APPLIED;
+    } finally {
+      restoreTenant(previousTenant, previousUser);
+    }
   }
 
   public static String shopId(JsonNode payload) {

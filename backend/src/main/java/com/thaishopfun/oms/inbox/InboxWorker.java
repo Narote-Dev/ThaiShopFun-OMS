@@ -2,6 +2,7 @@ package com.thaishopfun.oms.inbox;
 
 import com.thaishopfun.oms.order.OrderOptimisticLockException;
 import com.thaishopfun.oms.order.ReconciliationIssueRepository;
+import com.thaishopfun.oms.order.backfill.GapSnapshotNotReadyException;
 import com.thaishopfun.oms.order.backfill.OrderGapRefetch;
 import com.thaishopfun.oms.stock.StockBusyException;
 import com.thaishopfun.oms.stock.StockConflictException;
@@ -89,21 +90,6 @@ public class InboxWorker {
         AND event_type NOT IN (%s)
       """
           .formatted(InboxEntitlementPolicy.entVerOrderedTypeLiterals());
-
-  private static final String SUPERSEDED_BY_PENDING_NEWER =
-      """
-      SELECT EXISTS(
-        SELECT 1
-        FROM inbox_event
-        WHERE tenant_id = ?
-          AND source = ?
-          AND aggregate_id = ?
-          AND aggregate_version > ?
-          AND aggregate_version > 0
-          AND id <> ?
-          AND status IN ('RECEIVED', 'FAILED')
-      )
-      """;
 
   private final InboxProperties properties;
   private final InboxHandlerRegistry registry;
@@ -363,25 +349,17 @@ public class InboxWorker {
     Long lastForStale = lastProcessedVersionForStale(row);
     Long lastAggregate = lastProcessedVersionAggregate(row);
     boolean entVerOrdered = InboxEntitlementPolicy.ordersByEntVer(row.eventType());
-    boolean superseded =
-        !entVerOrdered
-            && "order.updated".equals(row.eventType())
-            && row.aggregateVersion() > 0
-            && supersededByPendingNewer(row);
     boolean stale =
-        superseded
-            || (!entVerOrdered
-                && row.aggregateVersion() > 0
-                && lastForStale != null
-                && row.aggregateVersion() <= lastForStale);
+        !entVerOrdered
+            && row.aggregateVersion() > 0
+            && lastForStale != null
+            && row.aggregateVersion() <= lastForStale;
     // gap=true means aggregate_version skipped at least one version. REST refetch applies snapshot.
     boolean gap =
         !stale
             && row.aggregateVersion() > 0
             && lastAggregate != null
-            && row.aggregateVersion() > lastAggregate + 1
-            && !"order.updated".equals(row.eventType())
-            && (!"order.paid".equals(row.eventType()) || properties.isGapRefetchOrderPaid());
+            && row.aggregateVersion() > lastAggregate + 1;
     if (gap) {
       String shopId = row.payload().path("tsf_shop_id").asString(null);
       String orderId = row.payload().path("data").path("order_id").asString(null);
@@ -421,8 +399,7 @@ public class InboxWorker {
               gap.eventType(),
               gap.payload());
       if (!applied) {
-        throw new com.thaishopfun.oms.order.backfill.GapSnapshotNotReadyException(
-            0, gap.aggregateVersion());
+        throw new GapSnapshotNotReadyException(0, gap.aggregateVersion());
       }
       applyTx.executeWithoutResult(
           status -> {
@@ -433,17 +410,8 @@ public class InboxWorker {
             markProcessed(row);
           });
       return ClaimOutcome.PROCESSED;
-    } catch (com.thaishopfun.oms.order.backfill.GapSnapshotNotReadyException notReady) {
-      failureTx.executeWithoutResult(
-          status -> {
-            InboxRow row = lock(claimed.id());
-            if (row == null || !leaseMatches(row.nextAttemptAt(), gap.leaseUntil())) {
-              return;
-            }
-            // REST is behind the inbox version; retry soon without burning the failure ladder.
-            pushBack(row, Duration.ofMillis(1), sanitize(notReady));
-          });
-      return ClaimOutcome.GAP_RETRY;
+    } catch (GapSnapshotNotReadyException notReady) {
+      return handleGapSnapshotNotReady(claimed, gap, notReady);
     } catch (RuntimeException ex) {
       recordFailure(claimed, ex);
       return ClaimOutcome.HANDLED;
@@ -518,16 +486,69 @@ public class InboxWorker {
         row.id());
   }
 
-  private boolean supersededByPendingNewer(InboxRow row) {
-    return Boolean.TRUE.equals(
-        jdbc.queryForObject(
-            SUPERSEDED_BY_PENDING_NEWER,
-            Boolean.class,
-            row.tenantId(),
-            row.source(),
-            row.aggregateId(),
-            row.aggregateVersion(),
-            row.id()));
+  private ClaimOutcome handleGapSnapshotNotReady(
+      Claimed claimed, InboxGapRefetchRequired gap, GapSnapshotNotReadyException notReady) {
+    ClaimOutcome[] outcome = {ClaimOutcome.HANDLED};
+    failureTx.executeWithoutResult(
+        status -> {
+          InboxRow row = lock(claimed.id());
+          if (row == null || !leaseMatches(row.nextAttemptAt(), gap.leaseUntil())) {
+            return;
+          }
+          if (gapDeferExhausted(row)) {
+            if (exhaustGapInbox(claimed, gap, row)) {
+              outcome[0] = ClaimOutcome.PROCESSED;
+            }
+            return;
+          }
+          recordFailure(claimed, notReady);
+        });
+    return outcome[0];
+  }
+
+  private boolean gapDeferExhausted(InboxRow row) {
+    if (row.attempts() > BACKOFF.length + 1) {
+      return true;
+    }
+    Instant received = row.receivedAt();
+    if (received == null) {
+      return false;
+    }
+    OffsetDateTime now = jdbc.queryForObject("SELECT now()", OffsetDateTime.class);
+    return received.isBefore(now.toInstant().minus(properties.getMaxDefer()));
+  }
+
+  private boolean exhaustGapInbox(Claimed claimed, InboxGapRefetchRequired gap, InboxRow row) {
+    boolean applied =
+        gapRefetch.applyAuthoritativeGapInbox(
+            gap.tenantId(),
+            gap.shopId(),
+            gap.externalOrderId(),
+            gap.eventType(),
+            gap.payload(),
+            "gap:" + gap.inboxId());
+    if (applied) {
+      markProcessed(row);
+      return true;
+    }
+    UUID orderId =
+        jdbc.query(
+            """
+            SELECT id FROM sales_order
+            WHERE tenant_id = ? AND external_order_id = ?
+            LIMIT 1
+            """,
+            rs -> rs.next() ? rs.getObject("id", UUID.class) : null,
+            gap.tenantId(),
+            gap.externalOrderId());
+    if (orderId != null) {
+      reconciliation.upsertOpen(gap.inboxId(), "GAP_SNAPSHOT_STALE", orderId, "{}");
+    } else {
+      reconciliation.upsertOpenWithoutOrder(
+          gap.inboxId(), "GAP_SNAPSHOT_STALE", gap.externalOrderId());
+    }
+    markDead(row, "GAP_SNAPSHOT_STALE");
+    return false;
   }
 
   private void pushBack(InboxRow row, Duration delay) {

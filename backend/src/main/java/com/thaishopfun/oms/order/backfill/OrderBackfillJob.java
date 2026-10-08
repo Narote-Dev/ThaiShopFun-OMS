@@ -174,6 +174,7 @@ public class OrderBackfillJob {
     int touched = 0;
     boolean sawOrders = false;
     boolean appliedThisRun = false;
+    boolean failedThisRun = false;
     while (true) {
       assertNoActiveTransaction("listOrders");
       OrderPage page = adapter.listOrders(ref, since, pageCursor, properties.getPageLimit());
@@ -195,12 +196,17 @@ public class OrderBackfillJob {
           }
         } catch (RuntimeException ex) {
           failed.increment();
+          failedThisRun = true;
           log.warn(
-              "order backfill order {} on account {} failed; continuing",
+              "order backfill order {} on account {} failed; cursor retained",
               summary.orderId(),
               account.id(),
               ex);
+          break;
         }
+      }
+      if (failedThisRun) {
+        break;
       }
       pageCursor = page.nextCursor();
       String savedCursor = pageCursor;
@@ -212,7 +218,7 @@ public class OrderBackfillJob {
         break;
       }
     }
-    if (sawOrders && appliedThisRun) {
+    if (sawOrders && !failedThisRun) {
       tenantWriteTx.executeWithoutResult(
           status -> cursors.commitSuccess(tenantId, account.id(), runStart));
       recordLag(watermark, runStart);
@@ -233,7 +239,7 @@ public class OrderBackfillJob {
     }
     SalesOrder order = existing.get();
     return "PREPAID".equals(order.paymentMethod())
-        && !"PAID".equals(order.paymentStatus())
+        && !paidHappened(order.paymentStatus())
         && !"CANCELLED".equals(order.orderStatus());
   }
 
@@ -313,6 +319,16 @@ public class OrderBackfillJob {
     } else {
       TenantContext.set(tenantId, userId);
     }
+  }
+
+  private static boolean paidHappened(String paymentStatus) {
+    if (paymentStatus == null) {
+      return false;
+    }
+    return switch (paymentStatus) {
+      case "PAID", "PARTIALLY_REFUNDED", "REFUNDED" -> true;
+      default -> false;
+    };
   }
 
   private record AccountRow(UUID id, String externalShopId, String channel, String status) {}

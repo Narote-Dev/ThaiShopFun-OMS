@@ -365,7 +365,13 @@ class OrderCancelApiTest extends OrderIntegrationTest {
             7));
     ingest(orderCancelled("DEMO-CANCELLED", shop, 8));
 
-    drainInbox(50);
+    int processed;
+    int rounds = 0;
+    do {
+      processed = worker.processAvailable(20);
+      rounds++;
+    } while (processed > 0 && rounds < 50);
+    assertThat(rounds).isLessThan(50);
 
     assertDemoOrder("DEMO-READY", "READY_TO_PICK", "PAID", "NONE", null);
     assertDemoOrder("DEMO-COD", "READY_TO_PICK", "COD_PENDING", "NONE", null);
@@ -541,24 +547,6 @@ class OrderCancelApiTest extends OrderIntegrationTest {
       return hit.path("idempotencyKey").asString();
     }
     return hit.path("idempotency_key").asString();
-  }
-
-  private void drainInbox(int maxRounds) throws Exception {
-    int rounds = 0;
-    int processed;
-    do {
-      processed = worker.processAvailable(20);
-      rounds++;
-    } while (processed > 0 && rounds < maxRounds);
-    assertThat(rounds).isLessThan(maxRounds);
-    for (int wake = 0; wake < 30; wake++) {
-      jdbc.update(
-          "UPDATE inbox_event SET next_attempt_at = pg_catalog.now() WHERE status IN ('RECEIVED', 'FAILED')");
-      processed = worker.processAvailable(20);
-      if (processed == 0) {
-        break;
-      }
-    }
   }
 
   private void ingest(ObjectNode event) throws Exception {

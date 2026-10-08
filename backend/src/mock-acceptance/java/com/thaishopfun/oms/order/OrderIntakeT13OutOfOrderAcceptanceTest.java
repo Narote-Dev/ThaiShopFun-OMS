@@ -216,6 +216,72 @@ class OrderIntakeT13OutOfOrderAcceptanceTest {
   }
 
   @Test
+  void updatedRecipientAppliedWhenPaidArrivesWithHigherVersion() throws Exception {
+    StockFixture.Shop shop = fixture.shop("ACTIVE");
+    String shopId = fixture.tsfShopId(shop);
+    UUID account = fixture.tsfChannelAccount(shop, "ACTIVE", "CONNECTED");
+    UUID sku = fixture.sku(shop, 11);
+    fixture.channelListing(shop, account, "L-t13-upd-paid", sku, true);
+    String externalOrderId = "TSF-T13-UPD-PAID-" + UUID.randomUUID();
+    ingest(
+        OrderIntakeScenarioSupport.orderCreated(
+            JSON,
+            externalOrderId,
+            shopId,
+            UUID.randomUUID().toString(),
+            "PREPAID",
+            "L-t13-upd-paid",
+            1,
+            1));
+    assertThat(worker.processAvailable(10)).isEqualTo(1);
+
+    ObjectNode updated = OrderIntakeScenarioSupport.orderUpdated(JSON, externalOrderId, shopId, 2);
+    ObjectNode recipient = JSON.createObjectNode();
+    recipient.put("name", "Recipient V2");
+    recipient.put("phone", "0833333333");
+    ObjectNode address = JSON.createObjectNode();
+    address.put("line1", "line v2");
+    address.put("district", "district");
+    address.put("province", "Province-V2");
+    address.put("postcode", "10110");
+    recipient.set("address", address);
+    ((ObjectNode) updated.path("data")).set("recipient", recipient);
+    ingest(updated);
+
+    ObjectNode paid = OrderIntakeScenarioSupport.orderPaid(JSON, externalOrderId, shopId, 3);
+    paid.put("event_id", "evt-paid-after-upd-" + UUID.randomUUID());
+    ingest(paid);
+
+    int handled = 0;
+    for (int round = 0; round < 10 && handled < 2; round++) {
+      handled += worker.processAvailable(10);
+    }
+    assertThat(handled).isGreaterThanOrEqualTo(2);
+
+    String province =
+        fixture.inTenant(
+            shop.tenant(),
+            () ->
+                jdbc.queryForObject(
+                    """
+                    SELECT province FROM order_recipient
+                    WHERE order_id = (SELECT id FROM sales_order WHERE external_order_id = ?)
+                    """,
+                    String.class,
+                    externalOrderId));
+    assertThat(province).isEqualTo("Province-V2");
+    String payment =
+        fixture.inTenant(
+            shop.tenant(),
+            () ->
+                jdbc.queryForObject(
+                    "SELECT payment_status FROM sales_order WHERE external_order_id = ?",
+                    String.class,
+                    externalOrderId));
+    assertThat(payment).isEqualTo("PAID");
+  }
+
+  @Test
   void duplicatePaidWithNewEventIdAddsNoPaymentHistory() throws Exception {
     StockFixture.Shop shop = fixture.shop("ACTIVE");
     String shopId = fixture.tsfShopId(shop);
