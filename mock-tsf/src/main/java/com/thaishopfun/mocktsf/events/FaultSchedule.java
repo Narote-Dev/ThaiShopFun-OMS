@@ -28,8 +28,7 @@ public class FaultSchedule {
     arm(method, path, status, times, retryAfter, 0);
   }
 
-  public void arm(
-      String method, String path, int status, int times, Integer retryAfter, int skip) {
+  public void arm(String method, String path, int status, int times, Integer retryAfter, int skip) {
     arms.add(
         new Arm(
             method.toUpperCase(Locale.ROOT),

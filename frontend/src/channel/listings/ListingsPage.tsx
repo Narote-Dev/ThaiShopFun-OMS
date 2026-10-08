@@ -45,7 +45,7 @@ function parseHash(): {
   const params = new URLSearchParams(query)
   const mappedParam = params.get('mapped')
   const removedOnly = params.get('removed') === 'true'
-  let mapped =
+  let mapped: 'unmapped' | 'mapped' | 'all' =
     mappedParam === 'true'
       ? 'mapped'
       : mappedParam === 'false'
