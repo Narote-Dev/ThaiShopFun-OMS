@@ -17,7 +17,7 @@ Local profile: `POST /control/demo/invariants-check` runs one job pass (after `P
 | `stock.reserved_bounds` | `0 ≤ reserved ≤ on_hand` per inventory row | Prevents oversell and negative holds | DB CHECK + checker |
 | `stock.active_reservation_mismatch` | Sum of `ACTIVE` reservation `qty` per `(sku_id, warehouse_id)` = `inventory.reserved` | Reservation engine and inventory stay aligned | Checker |
 | `stock.ledger_mismatch` | Sum of `inventory_ledger` deltas = `on_hand` / `reserved` | Ledger is source of truth for audit | Checker |
-| `stock.reservation_owner_split` | One `(owner_type, owner_ref)` per `reservation_group_id` | One logical hold, one owner | Checker |
+| `stock.reservation_owner_split` | One `(owner_type, owner_ref)` per `reservation_group_id` among **ACTIVE** rows | One logical hold, one owner | Checker |
 
 ### SQL (tenant-scoped)
 
@@ -53,7 +53,7 @@ WHERE coalesce(l.on_hand, 0) <> i.on_hand OR coalesce(l.reserved, 0) <> i.reserv
 | `order.cancelled_active_reservation` | `CANCELLED` orders have no `ACTIVE` `ORDER` reservations | Cancel releases stock | Checker + engine |
 | `order.terminal_active_reservation` | `COMPLETED` orders have no `ACTIVE` `ORDER` reservations | Terminal orders release holds | Checker + engine |
 | `order.ready_to_pick_hold` | `READY_TO_PICK` and `order_status = ACTIVE` ⇒ `hold_reason` in (`NONE`, `CHANNEL_CANCEL_PENDING`) | PO picking gate (cancelled orders may keep stale fulfillment) | Checker |
-| `order.ready_to_pick_coverage` | `READY_TO_PICK` on `channel_account.mode = ACTIVE` with mapped lines has ORDER reservation coverage | Stock-enforced pick path | Checker (uses `OrderReservationCoverage`) |
+| `order.ready_to_pick_coverage` | `READY_TO_PICK` on `channel_account.mode = ACTIVE` and `status = CONNECTED` with mapped lines has ORDER reservation coverage | Stock-enforced pick path | Checker (uses `OrderReservationCoverage`) |
 | `order.status_history_missing` | Status transitions should append `ORDER` dimension history | Audit trail (best-effort) | State machine (checker deferred — intake can start `ACTIVE` without an `ORDER` row) |
 
 ACTIVE `ORDER` reservations on non-terminal orders are allowed; terminal statuses must not retain ACTIVE reservations.

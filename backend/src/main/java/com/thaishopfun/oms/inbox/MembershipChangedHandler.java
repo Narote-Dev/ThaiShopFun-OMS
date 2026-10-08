@@ -56,15 +56,11 @@ public class MembershipChangedHandler implements InboxHandler {
       throw new IllegalStateException("tenant is not visible");
     }
 
-    // Step 3: Stale or duplicate replay at the same ent_ver — no tenant or audit writes.
+    // Step 3: Stale ent_ver does not overwrite a newer membership. The inbox row still completes.
     if (incoming.entVer < current.entVer) {
       return;
     }
-    if (incoming.entVer == current.entVer && current.matches(incoming)) {
-      return;
-    }
-
-    // Step 4: A stale ent_ver does not overwrite a newer membership. The inbox row still completes.
+    boolean idempotentReplay = incoming.entVer == current.entVer && current.matches(incoming);
     int updated =
         jdbc.update(
             """
@@ -109,18 +105,25 @@ public class MembershipChangedHandler implements InboxHandler {
           InboxWorker.ENTITLEMENT_DEFERRED);
     }
 
-    // Step 6: Audit the status change. No shop name, email, or event payload.
-    jdbc.update(
-        """
-        INSERT INTO audit_log (
-          id, tenant_id, actor_type, action, entity_type, entity_id, "before", "after"
-        ) VALUES (?, ?, 'TSF', 'membership.changed', 'tenant', ?, ?::jsonb, ?::jsonb)
-        """,
-        UuidV7.generate(),
-        message.tenantId(),
-        message.tenantId().toString(),
-        "{\"entitlement_status\":\"" + current.status + "\",\"ent_ver\":" + current.entVer + "}",
-        "{\"entitlement_status\":\"" + incoming.status + "\",\"ent_ver\":" + incoming.entVer + "}");
+    // Step 6: Audit the status change (skip on equal-ent_ver replay). No shop name, email, or
+    // payload.
+    if (!idempotentReplay) {
+      jdbc.update(
+          """
+          INSERT INTO audit_log (
+            id, tenant_id, actor_type, action, entity_type, entity_id, "before", "after"
+          ) VALUES (?, ?, 'TSF', 'membership.changed', 'tenant', ?, ?::jsonb, ?::jsonb)
+          """,
+          UuidV7.generate(),
+          message.tenantId(),
+          message.tenantId().toString(),
+          "{\"entitlement_status\":\"" + current.status + "\",\"ent_ver\":" + current.entVer + "}",
+          "{\"entitlement_status\":\""
+              + incoming.status
+              + "\",\"ent_ver\":"
+              + incoming.entVer
+              + "}");
+    }
   }
 
   private record Current(String tier, String status, OffsetDateTime expiresAt, long entVer) {

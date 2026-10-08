@@ -211,6 +211,7 @@ public class InvariantChecker {
             """
             SELECT reservation_group_id AS id
             FROM stock_reservation
+            WHERE status = 'ACTIVE'
             GROUP BY reservation_group_id
             HAVING count(DISTINCT (owner_type, owner_ref)) > 1
             LIMIT ?
@@ -342,6 +343,7 @@ public class InvariantChecker {
               AND o.order_status = 'ACTIVE'
               AND o.hold_reason = 'NONE'
               AND ca.mode = 'ACTIVE'
+              AND ca.status = 'CONNECTED'
             """,
             (rs, row) -> rs.getObject("id", UUID.class));
     List<UUID> bad = new ArrayList<>();
