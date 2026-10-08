@@ -68,15 +68,25 @@ public class OrderGapRefetchService implements OrderGapRefetch {
     var adapter = adapters.require(Channel.TSF);
     OrderDetail detail = adapter.getOrder(ref, externalOrderId);
     PaymentStatus payment = adapter.getPaymentStatus(ref, externalOrderId);
-    applyTx.executeWithoutResult(
-        status -> {
-          aggregateLock.lockOrder(jdbc, tenantId, externalOrderId);
-          Outcome outcome =
-              applier.apply(tenantId, shopId, detail, payment, prefix, inboxAggregateVersion);
-          if (outcome == Outcome.APPLIED) {
-            gapRefetches.increment();
-          }
-        });
+    Outcome outcome =
+        applyTx.execute(
+            status -> {
+              aggregateLock.lockOrder(jdbc, tenantId, externalOrderId);
+              return applier.apply(
+                  tenantId, shopId, detail, payment, prefix, inboxAggregateVersion);
+            });
+    if (outcome == Outcome.APPLIED_NEEDS_PAID_CATCHUP) {
+      outcome =
+          applyTx.execute(
+              status -> {
+                aggregateLock.lockOrder(jdbc, tenantId, externalOrderId);
+                return applier.applyPaidCatchUp(
+                    tenantId, shopId, detail, payment, prefix, inboxAggregateVersion);
+              });
+    }
+    if (outcome == Outcome.APPLIED) {
+      gapRefetches.increment();
+    }
   }
 
   public static String shopId(JsonNode payload) {

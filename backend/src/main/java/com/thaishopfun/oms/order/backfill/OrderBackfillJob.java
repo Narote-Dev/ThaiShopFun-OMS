@@ -215,6 +215,14 @@ public class OrderBackfillJob {
               aggregateLock.lockOrder(jdbc, tenantId, orderId);
               return applier.apply(tenantId, shopId, detail, payment, "backfill:" + orderId, 0);
             });
+    if (outcome == Outcome.APPLIED_NEEDS_PAID_CATCHUP) {
+      tenantWriteTx.executeWithoutResult(
+          status -> {
+            aggregateLock.lockOrder(jdbc, tenantId, orderId);
+            applier.applyPaidCatchUp(tenantId, shopId, detail, payment, "backfill:" + orderId, 0);
+          });
+      outcome = Outcome.APPLIED;
+    }
     if (outcome == Outcome.APPLIED) {
       applied.increment();
       return 1;

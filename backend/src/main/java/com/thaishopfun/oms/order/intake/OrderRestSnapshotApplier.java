@@ -12,9 +12,6 @@ import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.PlatformTransactionManager;
-import org.springframework.transaction.TransactionDefinition;
-import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ObjectNode;
@@ -25,6 +22,8 @@ public class OrderRestSnapshotApplier {
 
   public enum Outcome {
     APPLIED,
+    /** Create committed; caller must run {@link #applyPaidCatchUp} in a new transaction. */
+    APPLIED_NEEDS_PAID_CATCHUP,
     SKIPPED
   }
 
@@ -32,20 +31,16 @@ public class OrderRestSnapshotApplier {
   private final ChannelAccountLookup channels;
   private final SalesOrderRepository orders;
   private final JsonMapper json;
-  private final TransactionTemplate paidCatchUpTx;
 
   public OrderRestSnapshotApplier(
       OrderIntakeSupport support,
       ChannelAccountLookup channels,
       SalesOrderRepository orders,
-      JsonMapper json,
-      PlatformTransactionManager transactions) {
+      JsonMapper json) {
     this.support = support;
     this.channels = channels;
     this.orders = orders;
     this.json = json;
-    this.paidCatchUpTx = new TransactionTemplate(transactions);
-    this.paidCatchUpTx.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
   }
 
   public Outcome apply(
@@ -109,33 +104,18 @@ public class OrderRestSnapshotApplier {
       touchExternalVersion(account.id(), detail.orderId(), detail.aggregateVersion());
       return Outcome.APPLIED;
     }
-    // Step 4: Payment catch-up.
-    SalesOrder current = orders.findByExternalId(account.id(), detail.orderId()).orElse(null);
-    if (payment != null
-        && "PAID".equals(payment.status())
-        && current != null
-        && !"PAID".equals(current.paymentStatus())
-        && !"CANCELLED".equals(current.orderStatus())) {
-      InboxMessage paid =
-          message(
-              tenantId,
-              eventIdPrefix + ":paid:" + detail.aggregateVersion(),
-              "order.paid",
-              detail.orderId(),
-              inboxAggregateVersion > 0 ? inboxAggregateVersion : detail.aggregateVersion(),
-              envelope(
-                  shopId,
-                  detail.orderId(),
-                  detail.aggregateVersion(),
-                  "order.paid",
-                  json.createObjectNode().put("order_id", detail.orderId())));
-      // Change: stock.adopt and ensure_order_hold cannot share one transaction.
-      if (createdInThisApply) {
-        paidCatchUpTx.executeWithoutResult(status -> support.handlePaid(paid));
-      } else {
-        support.handlePaid(paid);
-      }
-    }
+    // Step 4: Payment catch-up (defer to a second transaction when create just ran).
+    boolean pendingPaidCatchUp =
+        applyPaidCatchUpIfDue(
+            tenantId,
+            shopId,
+            account,
+            detail,
+            payment,
+            eventIdPrefix,
+            inboxAggregateVersion,
+            currentOrder(account, detail.orderId()),
+            createdInThisApply);
     // Step 5: Apply REST recipient snapshot when aggregate moved ahead of OMS.
     SalesOrder afterPayment = orders.findByExternalId(account.id(), detail.orderId()).orElse(null);
     if (afterPayment != null
@@ -158,10 +138,82 @@ public class OrderRestSnapshotApplier {
                   "order.updated",
                   updatedData));
       support.handleUpdated(updated);
-      return Outcome.APPLIED;
+      return pendingPaidCatchUp ? Outcome.APPLIED_NEEDS_PAID_CATCHUP : Outcome.APPLIED;
+    }
+    touchExternalVersion(account.id(), detail.orderId(), detail.aggregateVersion());
+    return pendingPaidCatchUp ? Outcome.APPLIED_NEEDS_PAID_CATCHUP : Outcome.APPLIED;
+  }
+
+  /**
+   * Step 4 only, after {@link Outcome#APPLIED_NEEDS_PAID_CATCHUP} was returned from {@link #apply}.
+   */
+  public Outcome applyPaidCatchUp(
+      UUID tenantId,
+      String shopId,
+      OrderDetail detail,
+      PaymentStatus payment,
+      String eventIdPrefix,
+      long inboxAggregateVersion) {
+    TsfAccount account =
+        channels
+            .tsfByExternalShopId(shopId)
+            .orElseThrow(() -> new IllegalStateException("TSF account missing for shop"));
+    SalesOrder current = currentOrder(account, detail.orderId());
+    if (!applyPaidCatchUpIfDue(
+        tenantId,
+        shopId,
+        account,
+        detail,
+        payment,
+        eventIdPrefix,
+        inboxAggregateVersion,
+        current,
+        false)) {
+      return Outcome.SKIPPED;
     }
     touchExternalVersion(account.id(), detail.orderId(), detail.aggregateVersion());
     return Outcome.APPLIED;
+  }
+
+  private SalesOrder currentOrder(TsfAccount account, String externalOrderId) {
+    return orders.findByExternalId(account.id(), externalOrderId).orElse(null);
+  }
+
+  private boolean applyPaidCatchUpIfDue(
+      UUID tenantId,
+      String shopId,
+      TsfAccount account,
+      OrderDetail detail,
+      PaymentStatus payment,
+      String eventIdPrefix,
+      long inboxAggregateVersion,
+      SalesOrder current,
+      boolean deferBecauseCreatedInSameApply) {
+    if (payment == null
+        || !"PAID".equals(payment.status())
+        || current == null
+        || "PAID".equals(current.paymentStatus())
+        || "CANCELLED".equals(current.orderStatus())) {
+      return false;
+    }
+    if (deferBecauseCreatedInSameApply) {
+      return true;
+    }
+    InboxMessage paid =
+        message(
+            tenantId,
+            eventIdPrefix + ":paid:" + detail.aggregateVersion(),
+            "order.paid",
+            detail.orderId(),
+            inboxAggregateVersion > 0 ? inboxAggregateVersion : detail.aggregateVersion(),
+            envelope(
+                shopId,
+                detail.orderId(),
+                detail.aggregateVersion(),
+                "order.paid",
+                json.createObjectNode().put("order_id", detail.orderId())));
+    support.handlePaid(paid);
+    return false;
   }
 
   private void touchExternalVersion(UUID channelAccountId, String externalOrderId, long version) {
