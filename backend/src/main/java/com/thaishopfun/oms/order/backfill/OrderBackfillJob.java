@@ -173,6 +173,7 @@ public class OrderBackfillJob {
     Instant runStart = clock.instant();
     int touched = 0;
     boolean sawOrders = false;
+    boolean appliedThisRun = false;
     while (true) {
       assertNoActiveTransaction("listOrders");
       OrderPage page = adapter.listOrders(ref, since, pageCursor, properties.getPageLimit());
@@ -183,7 +184,11 @@ public class OrderBackfillJob {
         fetched.increment();
         try {
           if (needsApply(account.id(), summary)) {
-            touched += applyOne(tenantId, ref, account.externalShopId(), adapter, summary.orderId());
+            int applied = applyOne(tenantId, ref, account.externalShopId(), adapter, summary.orderId());
+            touched += applied;
+            if (applied > 0) {
+              appliedThisRun = true;
+            }
           } else {
             skipped.increment();
           }
@@ -198,7 +203,7 @@ public class OrderBackfillJob {
       }
       pageCursor = page.nextCursor();
       String savedCursor = pageCursor;
-      if (sawOrders) {
+      if (sawOrders && appliedThisRun) {
         tenantWriteTx.executeWithoutResult(
             status -> cursors.saveProgress(tenantId, account.id(), watermark, savedCursor));
       }
@@ -206,7 +211,7 @@ public class OrderBackfillJob {
         break;
       }
     }
-    if (sawOrders) {
+    if (sawOrders && appliedThisRun) {
       tenantWriteTx.executeWithoutResult(
           status -> cursors.commitSuccess(tenantId, account.id(), runStart));
       recordLag(watermark, runStart);

@@ -440,15 +440,17 @@ class OrderBackfillT12CAcceptanceTest {
 
     ObjectNode paidEarly = OrderIntakeScenarioSupport.orderPaid(JSON, orderId, shopId, 3);
     paidEarly.put("event_id", "evt-paid-early-" + UUID.randomUUID());
-    ingest(paidEarly);
+    ingest(paidEarly, false);
     assertThat(worker.processAvailable(5)).isEqualTo(1);
     assertThat(gapRefetchCount()).isEqualTo(gapsBefore);
-    assertThat(inboxStatus(paidEarly.path("event_id").asString())).isNotEqualTo("PROCESSED");
+    assertThat(inboxStatus(shop.tenant(), paidEarly.path("event_id").asString()))
+        .isNotEqualTo("PROCESSED");
 
     postMock("/control/orders/" + orderId + "/mark-paid", "{\"aggregate_version\":3}");
     assertThat(worker.processAvailable(5)).isEqualTo(1);
     assertThat(gapRefetchCount()).isEqualTo(gapsBefore + 1);
-    assertThat(inboxStatus(paidEarly.path("event_id").asString())).isEqualTo("PROCESSED");
+    assertThat(inboxStatus(shop.tenant(), paidEarly.path("event_id").asString()))
+        .isEqualTo("PROCESSED");
 
     assertThat(paymentStatus(shop.tenant(), orderId)).isEqualTo("PAID");
     assertThat(externalVersion(shop.tenant(), orderId)).isEqualTo(3L);
@@ -485,15 +487,15 @@ class OrderBackfillT12CAcceptanceTest {
             + "\",\"status\":503,\"times\":20}");
     ObjectNode paid = OrderIntakeScenarioSupport.orderPaid(JSON, orderId, shopId, 3);
     String paidEventId = paid.path("event_id").asString();
-    ingest(paid);
+    ingest(paid, false);
     for (int round = 0; round < 12; round++) {
       worker.processAvailable(5);
-      String status = inboxStatus(paidEventId);
+      String status = inboxStatus(shop.tenant(), paidEventId);
       if ("DEAD".equals(status)) {
         break;
       }
     }
-    assertThat(inboxStatus(paidEventId)).isEqualTo("DEAD");
+    assertThat(inboxStatus(shop.tenant(), paidEventId)).isEqualTo("DEAD");
     assertThat(paymentStatus(shop.tenant(), orderId)).isEqualTo("PENDING");
   }
 
@@ -502,9 +504,12 @@ class OrderBackfillT12CAcceptanceTest {
     return counter == null ? 0 : counter.count();
   }
 
-  private String inboxStatus(String eventId) {
-    return jdbc.queryForObject(
-        "SELECT status FROM inbox_event WHERE event_id = ?", String.class, eventId);
+  private String inboxStatus(UUID tenantId, String eventId) {
+    return fixture.inTenant(
+        tenantId,
+        () ->
+            jdbc.queryForObject(
+                "SELECT status FROM inbox_event WHERE event_id = ?", String.class, eventId));
   }
 
   private String paymentStatus(UUID tenantId, String orderId) {
@@ -528,7 +533,13 @@ class OrderBackfillT12CAcceptanceTest {
   }
 
   private void ingest(ObjectNode event) throws Exception {
-    MockTsfCatalogSync.note(event);
+    ingest(event, true);
+  }
+
+  private void ingest(ObjectNode event, boolean syncCatalog) throws Exception {
+    if (syncCatalog) {
+      MockTsfCatalogSync.note(event);
+    }
     byte[] body = JSON.writeValueAsBytes(event);
     String eventId = event.path("event_id").asString();
     String now = Long.toString(Instant.now().getEpochSecond());

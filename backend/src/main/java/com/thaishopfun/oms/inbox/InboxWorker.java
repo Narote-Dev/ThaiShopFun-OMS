@@ -90,6 +90,17 @@ public class InboxWorker {
       """
           .formatted(InboxEntitlementPolicy.entVerOrderedTypeLiterals());
 
+  private static final String MAX_AGGREGATE_VERSION_SEEN =
+      """
+      SELECT MAX(aggregate_version)
+      FROM inbox_event
+      WHERE tenant_id = ?
+        AND source = ?
+        AND aggregate_id = ?
+        AND aggregate_version > 0
+        AND id <> ?
+      """;
+
   private final InboxProperties properties;
   private final InboxHandlerRegistry registry;
   private final InboxEntitlementPolicy policy;
@@ -314,12 +325,19 @@ public class InboxWorker {
     lockAggregate(row);
     Long lastForStale = lastProcessedVersionForStale(row);
     Long lastAggregate = lastProcessedVersionAggregate(row);
+    Long maxSeen = maxAggregateVersionSeen(row);
     boolean entVerOrdered = InboxEntitlementPolicy.ordersByEntVer(row.eventType());
-    boolean stale =
+    boolean superseded =
         !entVerOrdered
+            && maxSeen != null
             && row.aggregateVersion() > 0
-            && lastForStale != null
-            && row.aggregateVersion() <= lastForStale;
+            && row.aggregateVersion() < maxSeen;
+    boolean stale =
+        superseded
+            || (!entVerOrdered
+                && row.aggregateVersion() > 0
+                && lastForStale != null
+                && row.aggregateVersion() <= lastForStale);
     // gap=true means aggregate_version skipped at least one version. REST refetch applies snapshot.
     boolean gap =
         !stale
@@ -429,6 +447,16 @@ public class InboxWorker {
   private Long lastProcessedVersionAggregate(InboxRow row) {
     return jdbc.queryForObject(
         LAST_PROCESSED_AGGREGATE,
+        Long.class,
+        row.tenantId(),
+        row.source(),
+        row.aggregateId(),
+        row.id());
+  }
+
+  private Long maxAggregateVersionSeen(InboxRow row) {
+    return jdbc.queryForObject(
+        MAX_AGGREGATE_VERSION_SEEN,
         Long.class,
         row.tenantId(),
         row.source(),
