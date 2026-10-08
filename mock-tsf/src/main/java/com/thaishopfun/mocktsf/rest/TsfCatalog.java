@@ -150,8 +150,7 @@ public class TsfCatalog {
       } else {
         detail.remove("payment_expires_at");
       }
-      orders.add(
-          new Order(shopId, orderId, updated, version, detail, payment(orderId, "UNPAID")));
+      orders.add(new Order(shopId, orderId, updated, version, detail, payment(orderId, "UNPAID")));
       return;
     }
     if (existing.isEmpty()) {
@@ -178,7 +177,8 @@ public class TsfCatalog {
 
   private static Map<String, Object> orderDetailFromEvent(
       tools.jackson.databind.JsonNode data, String orderId, Instant updated, long version) {
-    Map<String, Object> detail = base(orderId, data.path("reservation_id").asString("rsv_" + orderId), updated, version);
+    Map<String, Object> detail =
+        base(orderId, data.path("reservation_id").asString("rsv_" + orderId), updated, version);
     if (data.has("lines") && data.get("lines").isArray()) {
       detail.put("lines", jsonToList(data.get("lines")));
     }

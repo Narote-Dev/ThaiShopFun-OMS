@@ -12,7 +12,7 @@ import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ObjectNode;
 
 /** Keeps mock-tsf REST catalog aligned when tests POST inbox events directly to OMS. */
-final class MockTsfCatalogSync {
+public final class MockTsfCatalogSync {
 
   private static final JsonMapper JSON = JsonMapper.builder().build();
   private static final HttpClient HTTP =
