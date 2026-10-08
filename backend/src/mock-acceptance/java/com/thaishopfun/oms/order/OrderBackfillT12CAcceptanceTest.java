@@ -144,8 +144,8 @@ class OrderBackfillT12CAcceptanceTest {
         OrderIntakeScenarioSupport.orderCreated(
             JSON, orderId, shopId, UUID.randomUUID().toString(), "PREPAID", "L-gap", 1, 1));
     assertThat(worker.processAvailable(5)).isEqualTo(1);
-    postMock("/control/orders/" + orderId + "/mark-paid", "{\"aggregate_version\":3}");
-    ingest(OrderIntakeScenarioSupport.orderPaid(JSON, orderId, shopId, 3));
+    postMock("/control/orders/" + orderId + "/mark-paid", "{\"aggregate_version\":2}");
+    ingest(OrderIntakeScenarioSupport.orderPaid(JSON, orderId, shopId, 2));
     assertThat(worker.processAvailable(5)).isEqualTo(1);
     String payment =
         fixture.inTenant(

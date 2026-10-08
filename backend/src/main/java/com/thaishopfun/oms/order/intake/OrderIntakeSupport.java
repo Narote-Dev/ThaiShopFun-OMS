@@ -331,6 +331,10 @@ public class OrderIntakeSupport {
     TsfAccount account = requireTsfAccount(message);
     String externalOrderId = requiredText(message.payload().path("data"), "order_id");
     SalesOrder order = requireOrder(account, externalOrderId);
+    long knownVersion = order.externalVersion() == null ? 0L : order.externalVersion();
+    if (message.aggregateVersion() > 0 && message.aggregateVersion() <= knownVersion) {
+      return;
+    }
     JsonNode data = message.payload().path("data");
     if (data.has("recipient")) {
       Recipient recipient = CreatedPayload.parseRecipient(data.path("recipient"));

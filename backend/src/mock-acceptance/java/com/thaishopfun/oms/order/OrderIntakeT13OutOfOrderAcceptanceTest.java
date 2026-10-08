@@ -170,7 +170,7 @@ class OrderIntakeT13OutOfOrderAcceptanceTest {
             1));
     assertThat(worker.processAvailable(10)).isEqualTo(1);
 
-    ObjectNode fresh = OrderIntakeScenarioSupport.orderUpdated(JSON, externalOrderId, shopId, 3);
+    ObjectNode fresh = OrderIntakeScenarioSupport.orderUpdated(JSON, externalOrderId, shopId, 2);
     ObjectNode recipientA = JSON.createObjectNode();
     recipientA.put("name", "Recipient A");
     recipientA.put("phone", "0811111111");
@@ -184,7 +184,7 @@ class OrderIntakeT13OutOfOrderAcceptanceTest {
     ingest(fresh);
     assertThat(worker.processAvailable(10)).isEqualTo(1);
 
-    ObjectNode stale = OrderIntakeScenarioSupport.orderUpdated(JSON, externalOrderId, shopId, 2);
+    ObjectNode stale = OrderIntakeScenarioSupport.orderUpdated(JSON, externalOrderId, shopId, 1);
     stale.put("event_id", "evt-stale-upd-" + UUID.randomUUID());
     ObjectNode recipientB = JSON.createObjectNode();
     recipientB.put("name", "Recipient B");
