@@ -14,6 +14,7 @@ import com.thaishopfun.oms.tenant.TenantContext;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.util.UUID;
+import tools.jackson.databind.JsonNode;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -67,7 +68,9 @@ public class OrderGapRefetchService implements OrderGapRefetch {
       String shopId,
       String externalOrderId,
       long inboxAggregateVersion,
-      String prefix) {
+      String prefix,
+      String inboxEventType,
+      JsonNode inboxPayload) {
     assertNoActiveTransaction("refetchAndApply");
     UUID previousTenant = TenantContext.tenantId();
     UUID previousUser = TenantContext.userId();
@@ -97,6 +100,18 @@ public class OrderGapRefetchService implements OrderGapRefetch {
                 return applier.apply(tenantId, shopId, detail, payment, prefix);
               });
       outcome = finalizeDeferred(tenantId, externalOrderId, shopId, detail, payment, prefix, outcome);
+      if (outcome != Outcome.APPLIED && inboxPayload != null && !inboxPayload.isNull()) {
+        Outcome inboxOutcome =
+            applyTx.execute(
+                status -> {
+                  aggregateLock.lockOrder(jdbc, tenantId, externalOrderId);
+                  return applier.applyGapInboxEvent(
+                      tenantId, shopId, inboxEventType, inboxPayload, prefix);
+                });
+        if (inboxOutcome == Outcome.APPLIED) {
+          outcome = Outcome.APPLIED;
+        }
+      }
       if (outcome == Outcome.SKIPPED && inboxAggregateVersion > 0) {
         long stored =
             tenantReadTx.execute(

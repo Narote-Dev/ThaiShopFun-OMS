@@ -4,6 +4,7 @@ import com.thaishopfun.oms.order.backfill.OrderGapRefetch;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import tools.jackson.databind.JsonNode;
 import org.springframework.context.annotation.Primary;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
@@ -24,7 +25,9 @@ public class RecordingOrderGapRefetch implements OrderGapRefetch {
       String shopId,
       String externalOrderId,
       long inboxAggregateVersion,
-      String prefix) {
+      String prefix,
+      String inboxEventType,
+      JsonNode inboxPayload) {
     calls.add(new Call(tenantId, shopId, externalOrderId, inboxAggregateVersion));
   }
 

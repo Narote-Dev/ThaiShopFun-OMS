@@ -1,6 +1,7 @@
 package com.thaishopfun.oms.order.backfill;
 
 import java.util.UUID;
+import tools.jackson.databind.JsonNode;
 
 /** Applies a TSF REST order snapshot when inbox aggregate_version has a gap. */
 public interface OrderGapRefetch {
@@ -10,5 +11,7 @@ public interface OrderGapRefetch {
       String shopId,
       String externalOrderId,
       long inboxAggregateVersion,
-      String prefix);
+      String prefix,
+      String inboxEventType,
+      JsonNode inboxPayload);
 }

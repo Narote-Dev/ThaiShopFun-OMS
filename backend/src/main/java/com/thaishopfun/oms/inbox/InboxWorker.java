@@ -368,12 +368,18 @@ public class InboxWorker {
 
   private void handleGapRefetch(Claimed claimed, InboxGapRefetchRequired gap) {
     try {
+      InboxRow gapRow = lock(claimed.id());
+      if (gapRow == null) {
+        return;
+      }
       gapRefetch.refetchAndApply(
           gap.tenantId(),
           gap.shopId(),
           gap.externalOrderId(),
           gap.aggregateVersion(),
-          "gap:" + gap.inboxId());
+          "gap:" + gap.inboxId(),
+          gapRow.eventType(),
+          gapRow.payload());
       applyTx.executeWithoutResult(
           status -> {
             InboxRow row = lock(claimed.id());

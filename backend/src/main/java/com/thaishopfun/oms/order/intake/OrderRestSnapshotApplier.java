@@ -127,6 +127,68 @@ public class OrderRestSnapshotApplier {
     return Outcome.APPLIED;
   }
 
+  /** Applies the gap inbox webhook when REST is behind or missing fields from the snapshot. */
+  public Outcome applyGapInboxEvent(
+      UUID tenantId,
+      String shopId,
+      String eventType,
+      JsonNode payload,
+      String eventIdPrefix) {
+    if (payload == null || payload.isNull() || eventType == null || eventType.isBlank()) {
+      return Outcome.SKIPPED;
+    }
+    TsfAccount account =
+        channels
+            .tsfByExternalShopId(shopId)
+            .orElseThrow(() -> new IllegalStateException("TSF account missing for shop"));
+    String orderId = payload.path("data").path("order_id").asString(null);
+    if (orderId == null || orderId.isBlank()) {
+      orderId = payload.path("aggregate_id").asString(null);
+    }
+    if (orderId == null || orderId.isBlank()) {
+      return Outcome.SKIPPED;
+    }
+    long version = payload.path("aggregate_version").asLong(0);
+    long known =
+        orders
+            .findByExternalId(account.id(), orderId)
+            .map(o -> o.externalVersion() == null ? 0L : o.externalVersion())
+            .orElse(0L);
+    if (version > 0 && version <= known) {
+      return Outcome.SKIPPED;
+    }
+    if (!orders.existsByExternalId(account.id(), orderId)) {
+      return Outcome.SKIPPED;
+    }
+    ObjectNode envelope = payload.isObject() ? (ObjectNode) payload : json.valueToTree(payload);
+    String eventId = payload.path("event_id").asString(eventIdPrefix + ":inbox");
+    InboxMessage message =
+        message(
+            tenantId,
+            eventId,
+            eventType,
+            orderId,
+            version,
+            envelope);
+    switch (eventType) {
+      case "order.updated":
+        support.handleUpdated(message);
+        break;
+      case "order.paid":
+        support.handlePaid(message);
+        break;
+      case "order.cancelled":
+        support.handleCancelled(message);
+        break;
+      default:
+        return Outcome.SKIPPED;
+    }
+    if (version > 0) {
+      touchExternalVersion(account.id(), orderId, version);
+    }
+    return Outcome.APPLIED;
+  }
+
   public Outcome applyCancelCatchUp(
       UUID tenantId,
       String shopId,
