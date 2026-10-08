@@ -1,0 +1,219 @@
+{
+  "tenant": {
+    "purpose": "ร้าน (tenant) หนึ่งแถวต่อ TSF shop",
+    "phase": "T02 JIT, T11",
+    "live": "ใช้งานจริง",
+    "writers": "`IdentityProvisioner`, `MembershipChangedHandler`",
+    "readers": "`MeService`, `TenantSessionService`, inbox entitlement"
+  },
+  "app_user": {
+    "purpose": "ผู้ใช้ OMS",
+    "phase": "T02",
+    "live": "ใช้งานจริง",
+    "writers": "`upsert_app_user` (V2)",
+    "readers": "join `tenant_membership`"
+  },
+  "tenant_membership": {
+    "purpose": "user↔tenant + role",
+    "phase": "T02",
+    "live": "ใช้งานจริง",
+    "writers": "`provision_membership`",
+    "readers": "`MeService`, RBAC"
+  },
+  "channel_account": {
+    "purpose": "บัญชีช่องทาง + mode",
+    "phase": "T06/T10",
+    "live": "ใช้งานจริง",
+    "writers": "JIT, intake, demo",
+    "readers": "checkout, orders, listings"
+  },
+  "product": {
+    "purpose": "กลุ่มสินค้า",
+    "phase": "T07",
+    "live": "ใช้งานจริง",
+    "writers": "`ProductService`",
+    "readers": "catalog UI"
+  },
+  "sku": {
+    "purpose": "SKU / bundle flag",
+    "phase": "T07",
+    "live": "ใช้งานจริง",
+    "writers": "`SkuService`, import",
+    "readers": "stock, orders, listings"
+  },
+  "sku_bundle_component": {
+    "purpose": "ส่วนประกอบ bundle",
+    "phase": "T07",
+    "live": "ใช้งานจริง",
+    "writers": "`SkuService` components API",
+    "readers": "`StockRepository`, order UI"
+  },
+  "channel_listing": {
+    "purpose": "listing↔SKU",
+    "phase": "T12",
+    "live": "ใช้งานจริง",
+    "writers": "`ChannelListingRepository`, `ListingChangedHandler`, sync",
+    "readers": "listings UI, intake, hold resolver"
+  },
+  "warehouse": {
+    "purpose": "คลัง",
+    "phase": "T07",
+    "live": "ใช้งานจริง",
+    "writers": "`WarehouseService`",
+    "readers": "stock, reservations"
+  },
+  "inventory": {
+    "purpose": "on_hand/reserved",
+    "phase": "T08",
+    "live": "ใช้งานจริง",
+    "writers": "`StockRepository` / `ReservationEngine` (single-write)",
+    "readers": "stock UI, checkout"
+  },
+  "inventory_ledger": {
+    "purpose": "delta append-only",
+    "phase": "T08",
+    "live": "ใช้งานจริง",
+    "writers": "`StockRepository`",
+    "readers": "`StockHistoryController`"
+  },
+  "stock_reservation": {
+    "purpose": "จอง CHECKOUT/ORDER",
+    "phase": "T08/T12",
+    "live": "ใช้งานจริง",
+    "writers": "`CheckoutReserveService`, `ReservationEngine`, intake",
+    "readers": "`StockExpiryJob`, `OrderQueryService`"
+  },
+  "stock_document": {
+    "purpose": "เอกสารสต็อก",
+    "phase": "T08A",
+    "live": "ใช้งานจริง",
+    "writers": "`StockDocumentService`",
+    "readers": "stock documents UI"
+  },
+  "stock_document_line": {
+    "purpose": "บรรทัดเอกสาร",
+    "phase": "T08A",
+    "live": "ใช้งานจริง",
+    "writers": "`StockDocumentStore`",
+    "readers": "document detail UI"
+  },
+  "sales_order": {
+    "purpose": "หัวออเดอร์",
+    "phase": "T10/T12/T13",
+    "live": "ใช้งานจริง",
+    "writers": "intake, `OrderStateMachine`",
+    "readers": "orders UI"
+  },
+  "order_hold_retry": {
+    "purpose": "backoff sweeper OUT_OF_STOCK",
+    "phase": "T12B-FU V13",
+    "live": "ใช้งานจริง",
+    "writers": "`OrderHoldRetryRepository`",
+    "readers": "`OrderHoldResolverJob`"
+  },
+  "order_recipient": {
+    "purpose": "PII ผู้รับ",
+    "phase": "T10",
+    "live": "ใช้งานจริง",
+    "writers": "`OrderRecipientRepository`",
+    "readers": "masked reader, detail API"
+  },
+  "order_line": {
+    "purpose": "บรรทัดออเดอร์",
+    "phase": "T10",
+    "live": "ใช้งานจริง",
+    "writers": "`OrderLineRepository`",
+    "readers": "order detail"
+  },
+  "order_status_history": {
+    "purpose": "ประวัติสถานะ",
+    "phase": "T10",
+    "live": "ใช้งานจริง",
+    "writers": "`OrderStateMachine`",
+    "readers": "timeline UI"
+  },
+  "shipment": {
+    "purpose": "การจัดส่ง",
+    "phase": "T18 Phase 3",
+    "live": "placeholder read-only",
+    "writers": "reserved T18 — ยังไม่มี writer main",
+    "readers": "`OrderQueryService.loadShipments`"
+  },
+  "return_request": {
+    "purpose": "คำขอคืน",
+    "phase": "T20",
+    "live": "reserved",
+    "writers": "reserved T20",
+    "readers": "reserved T20"
+  },
+  "return_line": {
+    "purpose": "บรรทัดคืน",
+    "phase": "T20",
+    "live": "reserved",
+    "writers": "reserved T20",
+    "readers": "reserved T20"
+  },
+  "refund": {
+    "purpose": "refund snapshot",
+    "phase": "T21 / TSF-10",
+    "live": "reserved",
+    "writers": "reserved T21",
+    "readers": "reserved T21"
+  },
+  "payment_status_snapshot": {
+    "purpose": "payment snapshot",
+    "phase": "T21",
+    "live": "reserved",
+    "writers": "reserved T21",
+    "readers": "derived `sales_order.payment_status`"
+  },
+  "inbox_event": {
+    "purpose": "คิว webhook",
+    "phase": "T11",
+    "live": "ใช้งานจริง",
+    "writers": "`InboxIngestService`, `InboxWorker`",
+    "readers": "worker"
+  },
+  "outbox_event": {
+    "purpose": "outbox TSF",
+    "phase": "T14",
+    "live": "ใช้งานจริงเมื่อตั้ง URL",
+    "writers": "`OutboxAppender`",
+    "readers": "`OutboxPublisher`, admin"
+  },
+  "sync_cursor": {
+    "purpose": "cursor sync",
+    "phase": "T12C (#26)",
+    "live": "reserved",
+    "writers": "reserved T12C",
+    "readers": "reserved T12C"
+  },
+  "idempotency_key": {
+    "purpose": "idempotent API",
+    "phase": "T08/T12",
+    "live": "ใช้งานจริง",
+    "writers": "Checkout/Stock/Hold idempotency",
+    "readers": "คลาสเดียวกัน"
+  },
+  "shadow_diff": {
+    "purpose": "SHADOW diff",
+    "phase": "T12/T13",
+    "live": "ใช้งานจริง",
+    "writers": "`ShadowDiffRepository`, checkout",
+    "readers": "tests"
+  },
+  "reconciliation_issue": {
+    "purpose": "inbox reconcile",
+    "phase": "T13",
+    "live": "ใช้งานจริง",
+    "writers": "`ReconciliationIssueRepository`",
+    "readers": "inbox orphan path"
+  },
+  "audit_log": {
+    "purpose": "audit append-only",
+    "phase": "T02+",
+    "live": "ใช้งานจริง",
+    "writers": "`TenantSessionService`, `CatalogAudit`, `OrderAudit`, `ListingAudit`, `MembershipChangedHandler`, `OutboxAdminService`",
+    "readers": "ops SQL"
+  }
+}
