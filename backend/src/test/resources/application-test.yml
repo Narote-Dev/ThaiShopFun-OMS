@@ -20,6 +20,8 @@ oms:
   stock:
     expiry:
       enabled: false
+  inbox:
+    gap-refetch-order-paid: false
   order:
     hold-resolver:
       # T12B ac06: immediate retry on the next sweeper batch in tests (backoff suite overrides).

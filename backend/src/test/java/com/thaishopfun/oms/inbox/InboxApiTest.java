@@ -676,8 +676,8 @@ class InboxApiTest {
     String paidId = id();
     postBusinessEvent(shop, paidId, aggregate, "order.paid", 3);
     worker.processAvailable();
-    assertThat(orderPaid.calls.get()).isZero();
-    assertThat(gapRefetch.calls()).hasSize(1);
+    assertThat(orderPaid.calls.get()).isEqualTo(1);
+    assertThat(gapRefetch.calls()).isEmpty();
   }
 
   @Test

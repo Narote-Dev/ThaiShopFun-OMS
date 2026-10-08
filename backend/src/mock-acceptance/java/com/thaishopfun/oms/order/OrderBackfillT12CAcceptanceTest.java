@@ -51,7 +51,8 @@ import tools.jackson.databind.node.ObjectNode;
       "spring.main.allow-bean-definition-overriding=true",
       "oms.order.backfill.enabled=false",
       "oms.inbox.worker-enabled=false",
-      "oms.inbox.jitter-ratio=0"
+      "oms.inbox.jitter-ratio=0",
+      "oms.inbox.gap-refetch-order-paid=true"
     })
 @Import(OrderIntakeT12ScenariosAcceptanceTest.IntakeTestConfig.class)
 class OrderBackfillT12CAcceptanceTest {
