@@ -13,7 +13,7 @@
 | [plan/05-task-list.md](plan/05-task-list.md) | task / Flyway |
 | [plan/CHANGELOG-v2.md](plan/CHANGELOG-v2.md) | บันทึกการเปลี่ยนแผน v2 |
 | [plan/NFR.md](plan/NFR.md) | NFR |
-| [db/DATA-DICTIONARY.md](db/DATA-DICTIONARY.md) | พจนานุกรมทุกตาราง/ฟิลด์ |
+| [db/DATA-DICTIONARY.md](db/DATA-DICTIONARY.md) | พจนานุกรมทุกตาราง/ฟิลด์ (สร้างด้วย `python docs/tools/build_reference_docs.py`; schema อยู่ที่ `docs/schema/`) |
 | [backend/MODULES.md](backend/MODULES.md) | backend modules + jobs |
 | [frontend/PAGES.md](frontend/PAGES.md) | หน้า UI ทุก route |
 | [api/catalog.md](api/catalog.md) | REST catalog |

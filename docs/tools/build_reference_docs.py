@@ -9,12 +9,13 @@ from collections import defaultdict
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-SCHEMA = Path("/home/ubuntu/.cursor/projects/workspace/uploads/schema-ee4e425_39c6.sql")
-COLS = Path("/home/ubuntu/.cursor/projects/workspace/uploads/columns-ee4e425_4276.tsv")
+DEFAULT_SCHEMA = ROOT / "docs/schema/schema-ee4e425_39c6.sql"
+DEFAULT_COLS = ROOT / "docs/schema/columns-ee4e425_4276.tsv"
 REF = "อ้างอิง main @ ee4e425 (Flyway V13)"
 
 sys.path.insert(0, str(ROOT / "docs/tools"))
 from field_meta.all_fields import FIELDS  # noqa: E402
+from field_meta.field_usage import USAGE  # noqa: E402
 
 BUSINESS_TABLES = [
     "tenant", "app_user", "tenant_membership", "channel_account", "product", "sku",
@@ -101,6 +102,22 @@ erDiagram
 """
 
 
+def balanced_paren_expr(text: str, open_paren: int) -> tuple[str, int]:
+    """Return CHECK expression inside parens starting at open_paren, and index after closing ')'."""
+    if text[open_paren] != "(":
+        raise ValueError("expected '('")
+    depth = 0
+    for i in range(open_paren, len(text)):
+        ch = text[i]
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+            if depth == 0:
+                return text[open_paren + 1 : i], i + 1
+    raise ValueError("unbalanced parens in CHECK")
+
+
 def parse_schema(text: str):
     fks = defaultdict(list)
     for m in re.finditer(
@@ -143,16 +160,18 @@ def parse_schema(text: str):
         uniques[m.group(1)].append((m.group(2), m.group(3).strip()))
 
     checks = defaultdict(list)
-    for m in re.finditer(r"CREATE TABLE public\.(\w+) \((.*?)\);", text, re.S):
+    for m in re.finditer(r"CREATE TABLE public\.(\w+) \((.*?)\n\);", text, re.S):
         tbl, body = m.group(1), m.group(2)
-        for cm in re.finditer(r"CONSTRAINT (\w+) CHECK \((.*?)\)(?=,|\s*\))", body, re.S):
-            checks[tbl].append((cm.group(1), re.sub(r"\s+", " ", cm.group(2).strip())))
+        for cm in re.finditer(r"CONSTRAINT (\w+) CHECK \(", body):
+            expr, _ = balanced_paren_expr(body, cm.end() - 1)
+            checks[tbl].append((cm.group(1), re.sub(r"\s+", " ", expr.strip())))
     for m in re.finditer(
-        r"ALTER TABLE ONLY public\.(\w+)\s+ADD CONSTRAINT (\w+) CHECK \((.*?)\);",
+        r"ALTER TABLE ONLY public\.(\w+)\s+ADD CONSTRAINT (\w+) CHECK \(",
         text,
-        re.S,
     ):
-        checks[m.group(1)].append((m.group(2), re.sub(r"\s+", " ", m.group(3).strip())))
+        tbl, cname = m.group(1), m.group(2)
+        expr, _ = balanced_paren_expr(text, m.end() - 1)
+        checks[tbl].append((cname, re.sub(r"\s+", " ", expr.strip())))
     for tbl in list(checks):
         seen: set[str] = set()
         deduped = []
@@ -182,9 +201,9 @@ def parse_schema(text: str):
     return fks, indexes, pks, uniques, checks, triggers, force_rls, sorted(set(functions))
 
 
-def parse_columns():
+def parse_columns(cols_path: Path):
     tables = defaultdict(list)
-    with COLS.open() as f:
+    with cols_path.open() as f:
         f.readline()
         for line in f:
             if not line.strip() or line.startswith("("):
@@ -218,16 +237,18 @@ def field_row(table: str, col: str, dtype: str, nullable: str, default: str, met
     meaning = fm["meaning"].strip()
     if not meaning or meaning == "—":
         raise ValueError(f"Blank meaning: {table}.{col}")
-    usage = fm.get("usage", "").strip()
+    usage = fm.get("usage", "").strip() or USAGE.get(key, "").strip()
     if not usage:
-        usage = f"เขียน: {meta['writers']}; อ่าน: {meta['readers']}"
+        raise ValueError(f"Missing usage: {table}.{col}")
     notes_parts = []
     if fm.get("notes"):
         notes_parts.append(fm["notes"])
-    if key in MONEY_COLS:
+    if key in MONEY_COLS and "THB" not in (fm.get("notes") or "") and "numeric" not in meaning:
         notes_parts.append("หน่วย: THB `numeric(14,2)` (บาท ไม่ใช่ satang)")
     if table in APPEND_ONLY and col not in ("id", "tenant_id"):
-        notes_parts.append("append-only — ห้าม UPDATE/DELETE")
+        append_note = "append-only — ห้าม UPDATE/DELETE"
+        if not any("append-only" in p for p in notes_parts):
+            notes_parts.append(append_note)
     if key in ENUM_FROM_CHECK:
         notes_parts.append(ENUM_FROM_CHECK[key])
     notes = "; ".join(notes_parts) if notes_parts else "—"
@@ -296,12 +317,16 @@ def md_table(rows):
     return "\n".join(out) + "\n"
 
 
-def mermaid_er(domain_tables, fks):
+def mermaid_er(domain_tables, fks, pks):
     domain_set = set(domain_tables)
     lines = ["```mermaid", "erDiagram"]
     for t in domain_tables:
         lines.append(f"  {t} {{")
-        lines.append("    uuid id")
+        pk_raw = pks.get(t, "id")
+        for pk_col in pk_raw.split(","):
+            pk_col = pk_col.strip()
+            # mermaid erDiagram requires "type name" lines
+            lines.append(f"    uuid {pk_col}")
         lines.append("  }")
     seen = set()
     for t in domain_tables:
@@ -324,13 +349,13 @@ def roles_section() -> str:
     return open(ROOT / "docs/tools/roles_section.md", encoding="utf-8").read()
 
 
-def build_data_dictionary():
-    text = SCHEMA.read_text()
+def build_data_dictionary(schema_path: Path, cols_path: Path):
+    text = schema_path.read_text()
     parsed = parse_schema(text)
-    columns = parse_columns()
+    columns = parse_columns(cols_path)
     parts = [
         f"# OMS Data Dictionary\n\n{REF}\n",
-        "พจนานุกรมข้อมูลทุกคอลัมน์ธุรกิจ (329) จาก `schema-ee4e425.sql` / `columns-ee4e425.tsv` "
+        "พจนานุกรมข้อมูลทุกคอลัมน์ธุรกิจ (329) จาก `docs/schema/schema-ee4e425_39c6.sql` / `columns-ee4e425_4276.tsv` "
         "cross-check กับ Flyway V1–V13 และ Java. หลักการ RLS/PII: [03-data-model.md](../plan/03-data-model.md).\n",
         "## ภาพรวมตาม domain\n",
     ]
@@ -340,7 +365,7 @@ def build_data_dictionary():
     parts.append("## ER diagrams\n")
     for domain, tbls in DOMAINS.items():
         parts.append(f"### {domain}\n")
-        parts.append(mermaid_er(tbls, parsed[0]) + "\n")
+        parts.append(mermaid_er(tbls, parsed[0], parsed[2]) + "\n")
     parts.append(CROSS_DOMAIN_ER + "\n")
     parts.append("## ค่า enum / status\n" + enum_section())
     parts.append("## DB roles, RLS, Flyway\n" + roles_section())
@@ -383,14 +408,24 @@ def verify_mermaid(md_path: Path) -> int:
 
 
 def main():
-    # load full TABLE_META from json if present
+    import argparse
+    import json
+
+    parser = argparse.ArgumentParser(description="Regenerate OMS reference docs")
+    parser.add_argument("--schema", type=Path, default=DEFAULT_SCHEMA, help="pg_dump schema SQL")
+    parser.add_argument("--columns", type=Path, default=DEFAULT_COLS, help="columns TSV from Flyway DB")
+    parser.add_argument("--skip-mermaid", action="store_true")
+    args = parser.parse_args()
+
+    global COLS, SCHEMA  # noqa: PLW0603 — legacy hook for tests
+    SCHEMA = args.schema
+    COLS = args.columns
+
     meta_path = ROOT / "docs/tools/table_meta.json"
     if meta_path.exists():
-        import json
-
         TABLE_META.update(json.loads(meta_path.read_text(encoding="utf-8")))
 
-    dd = build_data_dictionary()
+    dd = build_data_dictionary(args.schema, args.columns)
     (ROOT / "docs/db/DATA-DICTIONARY.md").write_text(dd, encoding="utf-8")
     (ROOT / "docs/backend/MODULES.md").write_text(build_modules(), encoding="utf-8")
     (ROOT / "docs/frontend/PAGES.md").write_text(build_pages(), encoding="utf-8")
@@ -400,8 +435,13 @@ def main():
     assert not blank, f"blank meanings: {blank[:5]}"
     assert len(FIELDS) == 329
 
-    mermaid_ok = verify_mermaid(ROOT / "docs/db/DATA-DICTIONARY.md")
-    print(f"Wrote docs. Fields={len(FIELDS)} mermaid_rendered={mermaid_ok}")
+    mermaid_ok = 0
+    if not args.skip_mermaid:
+        mermaid_ok = verify_mermaid(ROOT / "docs/db/DATA-DICTIONARY.md")
+    checks = sum(len(v) for v in parse_schema(args.schema.read_text())[4].values())
+    print(
+        f"Wrote docs. Fields={len(FIELDS)} usage={len(USAGE)} checks={checks} mermaid_rendered={mermaid_ok}"
+    )
 
 
 if __name__ == "__main__":

@@ -1,9 +1,11 @@
 
 | Role | ใช้เมื่อ | สิทธิ์ |
 |---|---|---|
-| `oms_migrator` | Flyway | DDL; owner ตาราง |
+| `oms_migrator` | **owner ตาราง** (NOLOGIN — ไม่ใช่ login ของ Flyway) | DDL ผ่าน superuser ที่รัน migration; ตารางทั้งหมด OWNER TO `oms_migrator` |
 | `oms_app` | runtime + jobs | DML, **NOBYPASSRLS** |
 | `oms_maint` | break-glass | BYPASSRLS; owner ฟังก์ชัน SECURITY DEFINER |
+
+**Flyway:** เชื่อมต่อด้วย **bootstrap superuser** (local มักเป็น user `oms` ใน docker-compose) — `V1__foundation_rls.sql` บังคับ superuser เพื่อสร้าง `oms_maint` BYPASSRLS และ reassign ownership
 
 **RLS mechanics:** ทุก transaction ตั้ง `set_config('app.tenant_id', …, true)` ผ่าน `TenantAwareDataSourceTransactionManager` (`tenant/TenantAwareDataSourceTransactionManager.java`) ทันทีที่ `doBegin` — ไม่ใช่ JPA generic manager. JWT filter ตั้ง `TenantContext` (ThreadLocal) เท่านั้น; query นอก `@Transactional` = ไม่มี context = 0 แถว (fail-closed).
 

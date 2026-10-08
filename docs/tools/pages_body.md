@@ -86,12 +86,12 @@ Hash routing (`#/...`). สี/label: [`frontend/src/ui/status.ts`](../../fronte
 
 ## `#/channel/listings` — Listings (`ListingsPage`)
 
-- **Hash params:** `channel_account_id`, `mapped` (`true`/`false`/`all`), `removed=true`, `q`, `offset`
+- **Hash params:** `channel_account_id`, `mapped` (`true`/`false`/`all`, default **unmapped**), `removed=true`, `q`, `offset`
 - **API:** `GET /api/v1/channel-accounts`, `GET /api/v1/channel-listings`, `PUT .../mapping`, `DELETE .../mapping`, `POST .../listing-syncs`
-- **ส่วน:** filter บัญชี, mapped/unmapped/all, checkbox removed-only, ค้นหา seller sku/name, ตาราง, ปุ่ม sync, dialog แมป SKU
+- **ส่วน:** filter บัญชี, select mapped/unmapped/all, **chip removed** (`aria-pressed` toggle — เปิดแล้วบังคับ `mapped=all`), ค้นหา seller sku/name, ตาราง, ปุ่ม sync, dialog แมป SKU
 - **Sync result (ไทยใน UI):** แสดงจำนวน inserted/updated/removed + `ReevalSummary` (released/outOfStock/stillHeld/deferred)
 - **Warning:** `removal_skipped` เมื่อ sync guard บล็อกการ mark removed มากเกิน (`max-removal-ratio`)
-- **Chip:** listing ที่มี `removed_at` — removed chip / กรอง `removed=true`
+- **Removed:** chip toggle กรอง `removed=true`; แถวที่ `removed_at` มี chip “removed” และ **ซ่อน**ปุ่ม Map/Unmap (`!row.removed_at`)
 - **Empty:** ไม่มี listing ตาม filter; **error:** `listingsMessage` + `AlertBanner`
 
 ---

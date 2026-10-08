@@ -9,13 +9,13 @@
 | Package | หน้าที่ | คลาสหลัก | ตาราง | Endpoints (สรุป) |
 |---|---|---|---|---|
 | `tenant` | RLS transaction binding | `TenantAwareDataSourceTransactionManager`, `TenantTransactionConfig` | (context) | — |
-| `config` | Spring config รวม | `OrderConfig`, `StockConfig`, `OutboxConfig`, `ListingConfig` | — | — |
+| `config` | JDBC URL + clock | `ClockConfig`, `PostgresJdbcUrl`, `PostgresJdbcUrlEnvironmentPostProcessor` | — | — |
 | `auth` | JWT/OIDC, JIT, `/api/v1/me` | `TenantContextFilter`, `IdentityProvisioner`, `TenantSessionService`, `MeController`, `EntitlementGate` | `tenant`, `app_user`, `tenant_membership`, `audit_log` (login) | `GET /api/v1/me`, `GET /internal/v1/health` |
 | `inbox` | webhook TSF | `InboxController`, `InboxIngestService`, `InboxWorker`, `InboxScheduler`, handlers | `inbox_event`, `reconciliation_issue` | `POST /internal/v1/events` |
-| `outbox` | publish TSF | `OutboxAppender`, `OutboxPublisher`, `OutboxScheduler`, `OutboxAdminService` | `outbox_event`, `audit_log` (retry) | `GET/POST /api/v1/outbox` |
+| `outbox` | publish TSF | `OutboxAppender`, `OutboxPublisher`, `OutboxScheduler`, `OutboxAdminService` | `outbox_event`, `audit_log` (retry) | `GET /api/v1/outbox`, `POST /api/v1/outbox/{id}/retry` (`OutboxAdminController`) |
 | `channel` | adapter + resilience | `TsfChannelAdapter`, `ChannelProperties`, `BaseChannelAdapter` | `channel_account` (อ่าน) | TSF `/internal/v1/...` (client) |
 | `channel.api` | DTO 4.7 | `OrderDetail`, `ListingPage`, `Shipment` | — | — |
-| `channel.tsf` | TSF HTTP | `TsfChannelAdapter`, `TsfTokenClient` | — | — |
+| `channel.tsf` | TSF HTTP | `TsfChannelAdapter`, `TsfTokenProvider` | — | — |
 | `channel.exception` | channel errors | — | — | — |
 | `checkout` | TSF checkout reserve | `CheckoutReservationController`, `CheckoutReserveService`, `CheckoutRepository` | reservations, `shadow_diff`, `idempotency_key` | `POST /internal/v1/inventory/reservations`, `DELETE .../{id}` |
 | `catalog` | products/SKUs/import | `ProductController`, `SkuController`, `CatalogImportService`, `CatalogAudit` | `product`, `sku`, `sku_bundle_component` | `/api/v1/products`, `/api/v1/skus`, `POST /api/v1/catalog/import` |
@@ -27,7 +27,7 @@
 | `order.hold` | hold resolution | **`OrderHoldResolver`**, **`OrderHoldEffects`**, `OrderHoldResolverJob`, `OrderHoldRetryRepository` | `order_hold_retry`, `sales_order` | — |
 | `order.web` | REST orders | `OrderController`, `OrderQueryService`, `OrderCancelService`, `OrderHoldRecheckService` | อ่าน/เขียน order | `/api/v1/orders`, holds, cancel, hold-recheck |
 | `order.demo` | demo seed (local) | `OrderDemoCatalogController`, `OrderDemoCatalogService` | catalog/stock/listing | `POST .../order-catalog` (profile) |
-| `listing` | listings UI/API | `ChannelListingController`, `ChannelListingSyncService`, `ChannelListingRepository` | `channel_listing` | `/api/v1/channel-listings`, mapping, sync |
+| `listing` | listings UI/API | `ChannelListingController`, `ChannelAccountListingSyncController`, `ChannelListingSyncService`, `ChannelListingRepository` | `channel_listing` | `GET /api/v1/channel-accounts`, `/api/v1/channel-listings`, mapping, `POST .../listing-syncs` |
 | `listing.intake` | `listing.changed` | `ListingChangedHandler` | `channel_listing` | (inbox) |
 | `pii` | encryption | `PiiCipher`, `PiiKeyRing` | `order_recipient` | — |
 
@@ -100,7 +100,8 @@ stateDiagram-v2
   [*] --> ACTIVE_CHECKOUT: CheckoutReserveService
   ACTIVE_CHECKOUT --> ACTIVE_ORDER: ReservationEngine adopt CHECKOUT→ORDER
   ACTIVE_ORDER --> CONSUMED: ship (T18)
-  ACTIVE_CHECKOUT --> EXPIRED: StockExpiryJob
+  ACTIVE_CHECKOUT --> EXPIRED: StockExpiryJob (checkout TTL)
+  ACTIVE_ORDER --> EXPIRED: StockExpiryJob (unpaid grace)
   ACTIVE_CHECKOUT --> RELEASED: DELETE reservation API
   ACTIVE_ORDER --> RELEASED: cancel / release
   EXPIRED --> [*]
@@ -113,19 +114,23 @@ stateDiagram-v2
 ```mermaid
 flowchart TD
   A[hold SKU_NOT_MAPPED] --> B{แมป listing แล้ว?}
-  B -->|manual/auto map| C[OrderHoldResolverJob.reevalAfterMapping]
+  B -->|manual/auto map| C[reevalAfterMapping applyBackoff=false]
   B -->|scheduled| D[findResolvableSkuNotMappedOrderIds batch]
   C --> E[OrderHoldResolver]
   D --> E
   E -->|ปล่อย hold + จอง| F[RELEASED / READY_TO_PICK]
-  E -->|ยังไม่พอ| G[STILL_HELD / OUT_OF_STOCK]
-  G --> H[order_hold_retry backoff]
-  H --> D
-  I[hold OUT_OF_STOCK] --> J[manual hold-recheck API]
-  J --> E
+  E -->|ยัง hold| G[STILL_HELD]
+  E -->|ของไม่พอ| H[OUT_OF_STOCK]
+  E -->|lock retries หมด| I[DEFERRED]
+  G --> J[recordBackoff applyBackoff=true]
+  I --> J
+  J --> D
+  K[hold OUT_OF_STOCK] --> L[manual hold-recheck API only]
+  L --> E
 ```
 
-`OUT_OF_STOCK` **ไม่**ถูก scheduled sweeper ปล่อยเอง — ใช้ recheck/remap/stock มาแล้ว; sweeper เน้น `SKU_NOT_MAPPED` ที่ listing แมปแล้ว
+- **Backoff (`order_hold_retry`):** เฉพาะ scheduled path (`applyBackoff=true`) เมื่อ outcome `STILL_HELD` หรือ `DEFERRED` — **ไม่**เขียน backoff จาก `reevalAfterMapping` / hold-recheck
+- **`OUT_OF_STOCK`:** ไม่เข้า backoff; scheduled sweeper **ไม่**ปล่อย — ต้อง manual hold-recheck (remap/restock ไม่แตะ hold นี้โดยตรง)
 
 ## Flow: listing sync
 

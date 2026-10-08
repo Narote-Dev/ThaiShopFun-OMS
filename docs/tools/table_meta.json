@@ -105,11 +105,11 @@
     "readers": "orders UI"
   },
   "order_hold_retry": {
-    "purpose": "backoff sweeper OUT_OF_STOCK",
+    "purpose": "backoff สำหรับ scheduled sweeper ของ hold SKU_NOT_MAPPED (STILL_HELD/DEFERRED → recordBackoff); RELEASED/OUT_OF_STOCK ลบแถว (`OrderHoldResolverJob.persistRetryState`)",
     "phase": "T12B-FU V13",
     "live": "ใช้งานจริง",
-    "writers": "`OrderHoldRetryRepository`",
-    "readers": "`OrderHoldResolverJob`"
+    "writers": "`OrderHoldRetryRepository.recordBackoff` / DELETE จาก `OrderHoldResolverJob`",
+    "readers": "`OrderHoldResolverJob` (claim due rows)"
   },
   "order_recipient": {
     "purpose": "PII ผู้รับ",

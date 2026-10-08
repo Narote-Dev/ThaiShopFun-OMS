@@ -9,9 +9,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "docs/tools"))
 from field_meta.all_fields import FIELDS  # noqa: E402
+from field_meta.field_usage import USAGE  # noqa: E402
 
-COLS = Path("/home/ubuntu/.cursor/projects/workspace/uploads/columns-ee4e425_4276.tsv")
-SCHEMA = Path("/home/ubuntu/.cursor/projects/workspace/uploads/schema-ee4e425_39c6.sql")
+COLS = ROOT / "docs/schema/columns-ee4e425_4276.tsv"
+SCHEMA = ROOT / "docs/schema/schema-ee4e425_39c6.sql"
 DD = ROOT / "docs/db/DATA-DICTIONARY.md"
 
 
@@ -45,18 +46,30 @@ def main():
     missing = [k for k in cols if k not in FIELDS]
     extra = [k for k in FIELDS if k not in cols]
     blank = [k for k, v in FIELDS.items() if not v.get("meaning", "").strip()]
+    missing_usage = [k for k in FIELDS if not USAGE.get(k, "").strip()]
     assert not missing, missing[:5]
     assert not extra, extra[:5]
     assert not blank, blank[:5]
+    assert not missing_usage, missing_usage[:5]
+    assert len(USAGE) == 329
 
     fk = count_fks(SCHEMA.read_text())
     assert fk == 59, fk
+
+    from build_reference_docs import parse_schema
+
+    check_count = sum(len(v) for v in parse_schema(SCHEMA.read_text())[4].values())
+    assert check_count == 81, check_count
 
     dd = DD.read_text(encoding="utf-8")
     assert "CREATE TRIGGER audit_log_append_only" not in dd
     assert dd.count("```mermaid") >= 7
 
-    print(f"OK columns={len(cols)} fields={len(FIELDS)} fks={fk} blank_meanings=0")
+    mermaid_blocks = dd.count("```mermaid")
+    print(
+        f"OK columns={len(cols)} fields={len(FIELDS)} fks={fk} checks={check_count} "
+        f"blank_meanings=0 usage=329 mermaid_blocks={mermaid_blocks}"
+    )
 
 
 if __name__ == "__main__":
