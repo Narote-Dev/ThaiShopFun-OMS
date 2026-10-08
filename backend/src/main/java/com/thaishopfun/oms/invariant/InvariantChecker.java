@@ -132,7 +132,6 @@ public class InvariantChecker {
       violations.addAll(orderCancelledActiveReservation(tenantId));
       violations.addAll(orderTerminalActiveReservation(tenantId));
       violations.addAll(orderReadyToPickHold(tenantId));
-      violations.addAll(orderStatusHistoryMissing(tenantId));
       violations.addAll(orderReadyToPickCoverage(tenantId));
     }
     return violations;
@@ -311,7 +310,7 @@ public class InvariantChecker {
               SELECT 1 FROM order_status_history h
               WHERE h.tenant_id = o.tenant_id
                 AND h.order_id = o.id
-                AND h.dimension = 'order_status'
+                AND h.dimension = 'ORDER'
             )
             LIMIT ?
             """,

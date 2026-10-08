@@ -10,7 +10,6 @@ import com.thaishopfun.oms.invariant.SkipInvariantCheck;
 import com.thaishopfun.oms.invariant.Violation;
 import java.sql.Connection;
 import java.sql.Statement;
-import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Disabled;
@@ -37,14 +36,29 @@ class InvariantCheckerBreakTest extends StockTestBase {
     as(
         shop,
         () -> {
+          long seq =
+              jdbc.queryForObject(
+                  """
+                  UPDATE inventory SET ledger_seq = ledger_seq + 1
+                  WHERE tenant_id = ? AND sku_id = ? AND warehouse_id = ?
+                  RETURNING ledger_seq
+                  """,
+                  Long.class,
+                  shop.tenant(),
+                  sku,
+                  shop.warehouse());
           jdbc.update(
               """
-              UPDATE inventory SET on_hand = on_hand + 1, stock_version = stock_version + 1
-              WHERE tenant_id = ? AND sku_id = ? AND warehouse_id = ?
+              INSERT INTO inventory_ledger (
+                id, tenant_id, sku_id, warehouse_id, delta_on_hand, delta_reserved,
+                reason, actor, ledger_seq
+              ) VALUES (?, ?, ?, ?, 1, 0, 'ADJUST_IN', 'break-test', ?)
               """,
+              UuidV7.generate(),
               shop.tenant(),
               sku,
-              shop.warehouse());
+              shop.warehouse(),
+              seq);
           return null;
         });
     assertStockCode(shop.tenant(), InvariantCodes.STOCK_LEDGER_MISMATCH);
@@ -54,24 +68,17 @@ class InvariantCheckerBreakTest extends StockTestBase {
   void activeReservationMismatch() {
     StockFixture.Shop shop = fixture.shop("ACTIVE");
     UUID sku = fixture.sku(shop, 10);
-    UUID reservation = UuidV7.generate();
     as(
         shop,
         () -> {
           jdbc.update(
               """
-              INSERT INTO stock_reservation (
-                id, tenant_id, sku_id, warehouse_id, owner_type, owner_ref, status, qty,
-                reservation_group_id, expires_at
-              ) VALUES (?, ?, ?, ?, 'CHECKOUT', ?, 'ACTIVE', 2, ?, ?)
+              UPDATE inventory SET reserved = 3
+              WHERE tenant_id = ? AND sku_id = ? AND warehouse_id = ?
               """,
-              reservation,
               shop.tenant(),
               sku,
-              shop.warehouse(),
-              "chk-break",
-              reservation,
-              OffsetDateTime.now().plusHours(1));
+              shop.warehouse());
           return null;
         });
     assertStockCode(shop.tenant(), InvariantCodes.STOCK_ACTIVE_RESERVATION_MISMATCH);
@@ -113,12 +120,11 @@ class InvariantCheckerBreakTest extends StockTestBase {
                 fulfillment_status, hold_reason, payment_method, currency, subtotal, shipping_fee,
                 discount, grand_total, ordered_at, version
               ) VALUES (?, ?, ?, 'brk-cancel', 'CANCELLED', 'PAID', 'UNFULFILLED', 'NONE', 'PREPAID',
-                'THB', 1, 0, 0, 1, ?, 0)
+                'THB', 1, 0, 0, 1, CURRENT_TIMESTAMP, 0)
               """,
               orderId,
               shop.tenant(),
-              channel,
-              OffsetDateTime.now());
+              channel);
           UUID reservation = UuidV7.generate();
           jdbc.update(
               """

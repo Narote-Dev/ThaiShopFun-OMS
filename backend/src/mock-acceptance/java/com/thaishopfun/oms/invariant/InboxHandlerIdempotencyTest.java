@@ -65,15 +65,9 @@ class InboxHandlerIdempotencyTest {
     fixture = new StockFixture(jdbc, transactions);
     StockFixture.Shop shop = fixture.shop("ACTIVE");
     tenantId = shop.tenant();
-    channelAccountId = fixture.tsfChannelAccount(shop, "ACTIVE", "CONNECTED");
+    fixture.setTsfShopId(shop, "shop_45021");
+    channelAccountId = fixture.channelAccount(shop, "shop_45021", "ACTIVE", "CONNECTED");
     fixture.channelListing(shop, channelAccountId, "tsf_sku_7781", fixture.sku(shop, 20), true);
-    fixture.runInTenant(
-        tenantId,
-        () ->
-            jdbc.update(
-                "UPDATE tenant SET tsf_shop_id = ?, name = 'Active Shop' WHERE id = ?",
-                "shop_45021",
-                tenantId));
   }
 
   @Test
