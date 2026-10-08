@@ -96,7 +96,7 @@ class MembershipChangedHandlerAuditTest extends StockTestBase {
     StockFixture.Shop shop = fixture.shop("ACTIVE");
     long entVer = 7;
     UUID tenantId = shop.tenant();
-    String payloadExpiry = EXPIRES.toString() + "123";
+    String payloadExpiry = EXPIRES.plusNanos(789).toString();
 
     fixture.runInTenant(
         tenantId,

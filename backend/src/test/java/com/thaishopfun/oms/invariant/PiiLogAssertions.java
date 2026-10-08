@@ -13,6 +13,7 @@ public final class PiiLogAssertions implements AutoCloseable {
 
   /** Legacy sentinel; kept for tests that embed this value explicitly. */
   public static final String SENTINEL_PHONE = "0812345678";
+
   public static final String SENTINEL_EMAIL = "customer-pii@example.com";
   public static final String SENTINEL_NAME = "สมชาย ใจดี";
 
