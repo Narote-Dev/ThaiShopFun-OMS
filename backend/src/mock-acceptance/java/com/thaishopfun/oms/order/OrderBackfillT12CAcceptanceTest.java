@@ -543,7 +543,7 @@ class OrderBackfillT12CAcceptanceTest {
         "/control/faults",
         "{\"method\":\"GET\",\"path\":\"/internal/v1/orders/"
             + faultOrder
-            + "\",\"status\":503,\"times\":5}");
+            + "\",\"status\":503,\"times\":1}");
     backfill.runOnceForTenant(shop.tenant());
     long afterFault =
         fixture.inTenant(

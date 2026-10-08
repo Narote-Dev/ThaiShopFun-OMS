@@ -210,7 +210,7 @@ public class OrderBackfillJob {
       }
       pageCursor = page.nextCursor();
       String savedCursor = pageCursor;
-      if (sawOrders && appliedThisRun) {
+      if (sawOrders && appliedThisRun && !failedThisRun) {
         tenantWriteTx.executeWithoutResult(
             status -> cursors.saveProgress(tenantId, account.id(), watermark, savedCursor));
       }

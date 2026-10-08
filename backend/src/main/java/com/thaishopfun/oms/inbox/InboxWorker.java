@@ -349,6 +349,10 @@ public class InboxWorker {
     // Step 5: One aggregate at a time, then drop a version that is already applied.
     // Events ordered by ent_ver are not part of this history, and do not use it.
     lockAggregate(row);
+    if (shouldWaitForOrderBootstrap(row)) {
+      pushBack(row, NEWER_PENDING_DEFER);
+      return ClaimOutcome.HANDLED;
+    }
     if (blockedByNewerPending(row)) {
       pushBack(row, NEWER_PENDING_DEFER);
       return ClaimOutcome.HANDLED;
@@ -469,8 +473,40 @@ public class InboxWorker {
     aggregateLock.lock(jdbc, row.tenantId(), row.source(), row.aggregateId());
   }
 
+  private boolean shouldWaitForOrderBootstrap(InboxRow row) {
+    if ("order.created".equals(row.eventType())
+        || InboxEntitlementPolicy.ordersByEntVer(row.eventType())) {
+      return false;
+    }
+    if (!InboxAggregateVersionPolicy.versionByEventType(row.eventType())) {
+      return false;
+    }
+    String orderId = row.payload().path("data").path("order_id").asString(null);
+    if (orderId == null || orderId.isBlank()) {
+      orderId = row.aggregateId();
+    }
+    if (orderId == null || orderId.isBlank()) {
+      return false;
+    }
+    Boolean exists =
+        jdbc.queryForObject(
+            """
+            SELECT EXISTS (
+              SELECT 1 FROM sales_order
+              WHERE tenant_id = ? AND external_order_id = ?
+            )
+            """,
+            Boolean.class,
+            row.tenantId(),
+            orderId);
+    return !Boolean.TRUE.equals(exists);
+  }
+
   private boolean blockedByNewerPending(InboxRow row) {
     if (InboxEntitlementPolicy.ordersByEntVer(row.eventType()) || row.aggregateVersion() <= 0) {
+      return false;
+    }
+    if (!InboxAggregateVersionPolicy.versionByEventType(row.eventType())) {
       return false;
     }
     Boolean blocked =
@@ -482,6 +518,7 @@ public class InboxWorker {
               WHERE tenant_id = ?
                 AND source = ?
                 AND aggregate_id = ?
+                AND event_type = ?
                 AND status IN ('RECEIVED', 'FAILED')
                 AND aggregate_version > ?
                 AND id <> ?
@@ -491,6 +528,7 @@ public class InboxWorker {
             row.tenantId(),
             row.source(),
             row.aggregateId(),
+            row.eventType(),
             row.aggregateVersion(),
             row.id());
     return Boolean.TRUE.equals(blocked);
