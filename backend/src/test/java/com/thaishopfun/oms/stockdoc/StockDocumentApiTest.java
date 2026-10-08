@@ -225,6 +225,10 @@ class StockDocumentApiTest extends CatalogIntegrationTest {
     assertThat(noReason.body().path("errors").get(0).path("error").asString())
         .isEqualTo("REASON_REQUIRED");
     assertThat(ledger(shop, mug, "DAMAGE_WRITE_OFF") + ledger(shop, mug, "ADJUST_OUT")).isZero();
+    execute(
+        "UPDATE inventory SET reserved = 0 WHERE tenant_id = ? AND sku_id = ?",
+        shop.tenantId(),
+        UUID.fromString(mug.id()));
   }
 
   @Test

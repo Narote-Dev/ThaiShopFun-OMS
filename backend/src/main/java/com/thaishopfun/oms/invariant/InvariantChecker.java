@@ -222,7 +222,7 @@ public class InvariantChecker {
             FROM stock_reservation sr
             WHERE sr.status = 'ACTIVE'
               AND sr.owner_type = 'ORDER'
-              AND lower(sr.owner_ref) ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+              AND lower(sr.owner_ref) ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
               AND NOT EXISTS (
                 SELECT 1 FROM sales_order o
                 WHERE o.tenant_id = sr.tenant_id AND o.id::text = lower(sr.owner_ref)

@@ -59,21 +59,22 @@ class InboxHandlerIdempotencyTest {
   StockFixture fixture;
   UUID tenantId;
   UUID channelAccountId;
+  String tsfShopId;
 
   @BeforeEach
   void seed() {
     fixture = new StockFixture(jdbc, transactions);
     StockFixture.Shop shop = fixture.shop("ACTIVE");
     tenantId = shop.tenant();
-    fixture.setTsfShopId(shop, "shop_45021");
-    channelAccountId = fixture.channelAccount(shop, "shop_45021", "ACTIVE", "CONNECTED");
+    tsfShopId = fixture.tsfShopId(shop);
+    channelAccountId = fixture.channelAccount(shop, tsfShopId, "ACTIVE", "CONNECTED");
     fixture.channelListing(shop, channelAccountId, "tsf_sku_7781", fixture.sku(shop, 20), true);
   }
 
   @Test
   void fingerprintDetectsMutationsUnderRls() throws Exception {
     Map<String, Long> before = fingerprint();
-    deliver(registry.find("order.created"), loadExample("order.created.json"), "fp-probe");
+    deliver(registry.find("order.created"), loadExample("order.created.json", tsfShopId), "fp-probe");
     assertThat(fingerprint()).isNotEqualTo(before);
   }
 
@@ -87,10 +88,10 @@ class InboxHandlerIdempotencyTest {
         if (eventType.startsWith("order.") && !"order.created".equals(eventType)) {
           deliver(
               registry.find("order.created"),
-              loadExample("order.created.json"),
+              loadExample("order.created.json", tsfShopId),
               "seed-" + eventType);
         }
-        JsonNode payload = loadExample(CONTRACTS.get(eventType));
+        JsonNode payload = loadExample(CONTRACTS.get(eventType), tsfShopId);
         deliver(handler, payload, "idem-1");
         Map<String, Long> afterOne = fingerprint();
         deliver(handler, payload, "idem-2");
@@ -138,11 +139,14 @@ class InboxHandlerIdempotencyTest {
         });
   }
 
-  private static JsonNode loadExample(String file) throws Exception {
+  private static JsonNode loadExample(String file, String tsfShopId) throws Exception {
     try (InputStream in =
         MockTsfApplication.class.getResourceAsStream("/contracts/examples/events/" + file)) {
       assertThat(in).as(file).isNotNull();
-      return JSON.readTree(in);
+      tools.jackson.databind.node.ObjectNode root =
+          (tools.jackson.databind.node.ObjectNode) JSON.readTree(in);
+      root.put("tsf_shop_id", tsfShopId);
+      return root;
     }
   }
 }
