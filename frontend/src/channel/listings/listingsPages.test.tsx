@@ -230,6 +230,52 @@ describe('ListingsPage', () => {
     expect(screen.getByText('Map L-two')).toBeTruthy()
   })
 
+  it('renders sync result counts and removal_skipped warning', async () => {
+    const { fetchImpl } = stubFetch(({ url, init }) => {
+      if (url.includes('/channel-accounts') && !url.includes('listing-syncs')) {
+        return { body: { items: [{ id: 'ca-1', channel: 'TSF', external_shop_id: 'shop', status: 'CONNECTED' }] } }
+      }
+      if (url.includes('listing-syncs') && init?.method === 'POST') {
+        return {
+          body: {
+            fetched: 4,
+            created: 0,
+            updated: 4,
+            auto_mapped: 0,
+            revived: 0,
+            removed: 0,
+            removal_skipped: true,
+            reevaluated_orders: 0,
+            deferred: 0,
+          },
+        }
+      }
+      return { body: { items: [], total: 0, limit: 25, offset: 0 } }
+    })
+    configureApi({ getAccessToken: () => 't', fetchImpl })
+    render(<ListingsPage me={owner} />)
+    await screen.findByRole('button', { name: 'Sync listings' })
+    fireEvent.click(screen.getByRole('button', { name: 'Sync listings' }))
+    await screen.findByText(/ดึงมา 4/)
+    expect(screen.getByText(/ถูกลบจาก TSF 0/)).toBeTruthy()
+    expect(screen.getByText(/ไม่ได้ลบรายการจาก TSF/)).toBeTruthy()
+  })
+
+  it('maps removed filter chip to query string', async () => {
+    const { fetchImpl, calls } = stubFetch(({ url }) => {
+      if (url.includes('/channel-accounts') && !url.includes('listing-syncs')) {
+        return { body: { items: [{ id: 'ca-1', channel: 'TSF', external_shop_id: 'shop', status: 'CONNECTED' }] } }
+      }
+      return { body: { items: [], total: 0, limit: 25, offset: 0 } }
+    })
+    configureApi({ getAccessToken: () => 't', fetchImpl })
+    render(<ListingsPage me={owner} />)
+    await screen.findByRole('button', { name: 'ถูกลบจาก TSF' })
+    fireEvent.click(screen.getByRole('button', { name: 'ถูกลบจาก TSF' }))
+    await waitFor(() => expect(window.location.hash).toContain('removed=true'))
+    await waitFor(() => expect(calls.some((c) => c.url.includes('removed=true'))).toBe(true))
+  })
+
   it('resets offset on first search after fast account load', async () => {
     vi.useFakeTimers()
     window.location.hash = '#/channel/listings?channel_account_id=ca-1&mapped=false&offset=25'

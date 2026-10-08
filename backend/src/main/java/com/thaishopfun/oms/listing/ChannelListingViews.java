@@ -41,7 +41,11 @@ final class ChannelListingViews {
       int created,
       int updated,
       @JsonProperty("auto_mapped") int autoMapped,
-      @JsonProperty("reevaluated_orders") int reevaluatedOrders) {}
+      int revived,
+      int removed,
+      @JsonProperty("removal_skipped") boolean removalSkipped,
+      @JsonProperty("reevaluated_orders") int reevaluatedOrders,
+      int deferred) {}
 
   static ListingView from(ChannelListingRepository.ListingRow row) {
     return new ListingView(

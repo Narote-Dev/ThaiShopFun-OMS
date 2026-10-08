@@ -67,6 +67,10 @@ class ChannelAccountListingSyncController {
                 result.created(),
                 result.updated(),
                 result.autoMapped(),
-                result.reevaluatedOrders()));
+                result.revived(),
+                result.removed(),
+                result.removalSkipped(),
+                result.reevaluatedOrders(),
+                result.deferred()));
   }
 }

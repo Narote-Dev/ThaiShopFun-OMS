@@ -103,6 +103,7 @@ class CheckoutRepository {
             SELECT id, sku_id, stock_control, safety_buffer
             FROM channel_listing
             WHERE tenant_id = ? AND channel_account_id = ? AND external_sku_id = ?
+              AND removed_at IS NULL
             """,
             (rs, row) ->
                 new ListingRow(

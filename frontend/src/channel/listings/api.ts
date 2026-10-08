@@ -34,7 +34,11 @@ export type ListingSyncResponse = {
   created: number
   updated: number
   auto_mapped: number
+  revived: number
+  removed: number
+  removal_skipped: boolean
   reevaluated_orders: number
+  deferred: number
 }
 
 export type ChannelAccount = {
@@ -51,6 +55,7 @@ export const listingsApi = {
   list(
     channelAccountId: string,
     mapped: boolean | null,
+    removedOnly: boolean,
     q: string,
     limit: number,
     offset: number,
@@ -60,6 +65,7 @@ export const listingsApi = {
     params.set('limit', String(limit))
     params.set('offset', String(offset))
     if (mapped !== null) params.set('mapped', mapped ? 'true' : 'false')
+    if (removedOnly) params.set('removed', 'true')
     if (q) params.set('q', q)
     return apiRequest(`/api/v1/channel-listings?${params}`)
   },

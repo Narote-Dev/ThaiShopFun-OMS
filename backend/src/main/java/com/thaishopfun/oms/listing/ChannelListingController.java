@@ -27,12 +27,25 @@ class ChannelListingController {
 
   @GetMapping
   ResponseEntity<ChannelListingViews.Page> list(
-      @RequestParam(name = "channel_account_id") UUID channelAccountId,
+      @RequestParam(name = "channel_account_id", required = false) String channelAccountId,
       @RequestParam(name = "mapped", required = false) Boolean mapped,
+      @RequestParam(name = "removed", required = false) Boolean removedOnly,
       @RequestParam(name = "q", required = false) String q,
       @RequestParam(name = "limit", required = false) Integer limit,
       @RequestParam(name = "offset", required = false) Integer offset) {
-    return ok(queries.list(channelAccountId, mapped, q, limit, offset));
+    UUID accountId = parseChannelAccountId(channelAccountId);
+    return ok(queries.list(accountId, mapped, removedOnly, q, limit, offset));
+  }
+
+  private static UUID parseChannelAccountId(String raw) {
+    if (raw == null || raw.isBlank()) {
+      throw ListingApiException.missingChannelAccountId();
+    }
+    try {
+      return UUID.fromString(raw.trim());
+    } catch (IllegalArgumentException ex) {
+      throw ListingApiException.invalidChannelAccountId();
+    }
   }
 
   @GetMapping("/{id}")

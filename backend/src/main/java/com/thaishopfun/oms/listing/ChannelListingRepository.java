@@ -30,7 +30,7 @@ public class ChannelListingRepository {
       long heldOrders) {}
 
   public record UpsertResult(
-      UUID id, boolean inserted, boolean mappingChanged, boolean newlyMapped) {}
+      UUID id, boolean inserted, boolean mappingChanged, boolean newlyMapped, boolean revived) {}
 
   private final JdbcTemplate jdbc;
 
@@ -106,7 +106,7 @@ public class ChannelListingRepository {
   }
 
   public List<ListingRow> list(
-      UUID channelAccountId, Boolean mapped, String q, int limit, int offset) {
+      UUID channelAccountId, Boolean mapped, Boolean removedOnly, String q, int limit, int offset) {
     StringBuilder sql =
         new StringBuilder(
             """
@@ -127,6 +127,9 @@ public class ChannelListingRepository {
             """);
     java.util.List<Object> args = new java.util.ArrayList<>();
     args.add(channelAccountId);
+    if (Boolean.TRUE.equals(removedOnly)) {
+      sql.append(" AND cl.removed_at IS NOT NULL ");
+    }
     if (mapped != null) {
       sql.append(mapped ? " AND cl.sku_id IS NOT NULL " : " AND cl.sku_id IS NULL ");
     }
@@ -143,7 +146,7 @@ public class ChannelListingRepository {
     return jdbc.query(sql.toString(), this::map, args.toArray());
   }
 
-  public long count(UUID channelAccountId, Boolean mapped, String q) {
+  public long count(UUID channelAccountId, Boolean mapped, Boolean removedOnly, String q) {
     StringBuilder sql =
         new StringBuilder(
             """
@@ -152,6 +155,9 @@ public class ChannelListingRepository {
             """);
     java.util.List<Object> args = new java.util.ArrayList<>();
     args.add(channelAccountId);
+    if (Boolean.TRUE.equals(removedOnly)) {
+      sql.append(" AND cl.removed_at IS NOT NULL ");
+    }
     if (mapped != null) {
       sql.append(mapped ? " AND cl.sku_id IS NOT NULL " : " AND cl.sku_id IS NULL ");
     }
@@ -168,6 +174,21 @@ public class ChannelListingRepository {
 
   public UpsertResult upsertFromChannel(
       UUID tenantId, UUID channelAccountId, String externalSkuId, String sellerSku, String name) {
+    java.util.Optional<java.time.OffsetDateTime> removedBefore =
+        jdbc.query(
+            """
+            SELECT removed_at FROM channel_listing
+            WHERE channel_account_id = ? AND external_sku_id = ?
+            """,
+            rs -> {
+              if (!rs.next()) {
+                return java.util.Optional.empty();
+              }
+              return java.util.Optional.ofNullable(
+                  rs.getObject("removed_at", OffsetDateTime.class));
+            },
+            channelAccountId,
+            externalSkuId);
     UUID existingSku =
         jdbc.query(
             """
@@ -219,11 +240,92 @@ public class ChannelListingRepository {
         jdbc.queryForObject("SELECT sku_id FROM channel_listing WHERE id = ?", UUID.class, id);
     boolean mappingChanged = existingSku == null && newSku != null;
     boolean newlyMapped = existingSku == null && newSku != null;
+    boolean revived = removedBefore.isPresent() && removedBefore.get() != null;
     return new UpsertResult(
         id,
         Boolean.TRUE.equals(inserted),
         mappingChanged || (existingSku == null && newSku != null),
-        newlyMapped);
+        newlyMapped,
+        revived);
+  }
+
+  public long countActive(UUID channelAccountId) {
+    Long count =
+        jdbc.queryForObject(
+            """
+            SELECT count(*) FROM channel_listing
+            WHERE channel_account_id = ? AND removed_at IS NULL
+            """,
+            Long.class,
+            channelAccountId);
+    return count == null ? 0 : count;
+  }
+
+  public long countVanishedCandidates(
+      UUID channelAccountId, java.util.Set<String> fetchedIds, Instant syncStartedAt) {
+    if (fetchedIds.isEmpty()) {
+      return 0;
+    }
+    String[] ids = fetchedIds.toArray(String[]::new);
+    Long count =
+        jdbc.query(
+            """
+            SELECT count(*) FROM channel_listing
+            WHERE channel_account_id = ?
+              AND removed_at IS NULL
+              AND updated_at < ?
+              AND NOT (external_sku_id = ANY (?))
+            """,
+            ps -> {
+              ps.setObject(1, channelAccountId);
+              ps.setObject(2, OffsetDateTime.ofInstant(syncStartedAt, java.time.ZoneOffset.UTC));
+              ps.setArray(3, ps.getConnection().createArrayOf("text", ids));
+            },
+            rs -> {
+              rs.next();
+              return rs.getLong(1);
+            });
+    return count == null ? 0 : count;
+  }
+
+  public int markVanished(
+      UUID channelAccountId, java.util.Set<String> fetchedIds, Instant syncStartedAt) {
+    if (fetchedIds.isEmpty()) {
+      return 0;
+    }
+    String[] ids = fetchedIds.toArray(String[]::new);
+    return jdbc.update(
+        """
+        UPDATE channel_listing
+        SET removed_at = now(), updated_at = now()
+        WHERE channel_account_id = ?
+          AND removed_at IS NULL
+          AND updated_at < ?
+          AND NOT (external_sku_id = ANY (?))
+        """,
+        ps -> {
+          ps.setObject(1, channelAccountId);
+          ps.setObject(2, OffsetDateTime.ofInstant(syncStartedAt, java.time.ZoneOffset.UTC));
+          ps.setArray(3, ps.getConnection().createArrayOf("text", ids));
+        });
+  }
+
+  public long countHeldOrdersForListing(UUID channelAccountId, String externalSkuId) {
+    Long count =
+        jdbc.queryForObject(
+            """
+            SELECT count(DISTINCT so.id)
+            FROM sales_order so
+            JOIN order_line ol ON ol.order_id = so.id
+            WHERE so.channel_account_id = ?
+              AND ol.external_sku_id = ?
+              AND so.hold_reason = 'SKU_NOT_MAPPED'
+              AND so.order_status = 'ACTIVE'
+            """,
+            Long.class,
+            channelAccountId,
+            externalSkuId);
+    return count == null ? 0 : count;
   }
 
   public void markRemoved(UUID tenantId, UUID channelAccountId, String externalSkuId) {
@@ -300,6 +402,12 @@ public class ChannelListingRepository {
              AND cl.sku_id IS NOT NULL
             WHERE ol.order_id = so.id
               AND cl.id IS NULL
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM order_hold_retry r
+            WHERE r.tenant_id = so.tenant_id
+              AND r.order_id = so.id
+              AND r.next_attempt_at > now()
           )
         ORDER BY so.ordered_at, so.id
         LIMIT ?

@@ -22,6 +22,7 @@ public class TsfCatalog {
 
   private final List<Order> orders = new ArrayList<>();
   private final List<Map<String, Object>> listings = new ArrayList<>();
+  private final Set<String> hiddenListings = ConcurrentHashMap.newKeySet();
   private final ConcurrentHashMap<String, Stored> idempotency = new ConcurrentHashMap<>();
   private final ConcurrentHashMap<String, Map<String, Object>> shipments =
       new ConcurrentHashMap<>();
@@ -55,6 +56,11 @@ public class TsfCatalog {
     listings.add(listing("tsf_sku_9001", "MUG-WHT", "แก้วขาว", 4, 880));
     listings.add(listing("tsf_sku_5000", "SET-TSHIRT-2", "เซ็ตเสื้อ 2 ตัว", 9, 1043));
     listings.add(listing("L-demo-missing", "DEMO-SKU-MISSING", "Demo unmapped", 0, 2001));
+    listings.add(listing("L-demo-ready", "DEMO-SKU-READY", "Demo ready", 50, 3001));
+    listings.add(listing("L-demo-cod", "DEMO-SKU-COD", "Demo COD", 50, 3002));
+    listings.add(listing("L-demo-oos", "DEMO-SKU-OOS", "Demo OOS", 0, 3003));
+    listings.add(listing("L-demo-bundle", "DEMO-SKU-BUNDLE-EMPTY", "Demo bundle", 0, 3004));
+    listings.add(listing("L-demo-cancel", "DEMO-SKU-COD", "Demo cancel", 50, 3005));
   }
 
   public boolean knownShop(String shopId) {
@@ -98,7 +104,22 @@ public class TsfCatalog {
   }
 
   public List<Map<String, Object>> listings() {
-    return listings;
+    List<Map<String, Object>> visible = new ArrayList<>();
+    for (Map<String, Object> row : listings) {
+      String id = String.valueOf(row.get("listing_sku_id"));
+      if (!hiddenListings.contains(id)) {
+        visible.add(row);
+      }
+    }
+    return visible;
+  }
+
+  public void setListingHidden(String listingSkuId, boolean hidden) {
+    if (hidden) {
+      hiddenListings.add(listingSkuId);
+    } else {
+      hiddenListings.remove(listingSkuId);
+    }
   }
 
   /**

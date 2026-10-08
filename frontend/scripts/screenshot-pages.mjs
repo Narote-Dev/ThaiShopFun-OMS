@@ -63,6 +63,15 @@ await capture(page, 'stock-documents')
 
 await navTo(page, 'Listings')
 await capture(page, 'listings')
+const syncBtn = page.getByRole('button', { name: 'Sync listings' })
+if (await syncBtn.isVisible().catch(() => false)) {
+  await syncBtn.click()
+  await page.getByLabel('ผลการซิงก์ listings').waitFor({ timeout: 60_000 }).catch(() => {})
+  await capture(page, 'listings-sync-result')
+}
+await page.getByRole('button', { name: 'ถูกลบจาก TSF' }).click().catch(() => {})
+await page.waitForTimeout(400)
+await capture(page, 'listings-removed-filter')
 
 await navTo(page, 'Hold queue')
 await capture(page, 'hold-queue')

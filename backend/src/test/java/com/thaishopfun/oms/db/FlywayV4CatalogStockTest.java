@@ -282,7 +282,7 @@ class FlywayV4CatalogStockTest {
         // Change: migrate() also applies V6 (T08) and V7 (T10). V5 is unused (T07 shipped
         // without one).
         assertThat(versions)
-            .containsExactly("1", "2", "3", "4", "6", "7", "8", "9", "10", "11", "12");
+            .containsExactly("1", "2", "3", "4", "6", "7", "8", "9", "10", "11", "12", "13");
         assertThat(count(upgrade, "inbox_event")).isEqualTo(1);
         Graph graph = seedForTenant(upgrade, tenant);
         assertThat(countFor(upgrade, "inventory", graph.tenant())).isEqualTo(1);
