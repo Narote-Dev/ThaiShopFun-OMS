@@ -83,6 +83,21 @@ test('owner browses orders, opens detail with masked phone, requests cancel', as
   await expect(page.getByRole('status')).toContainText('CHANNEL_CANCEL_PENDING', { timeout: 30_000 })
 })
 
+test('owner sync listings shows removed zero for demo catalog', async ({ page, request }) => {
+  test.setTimeout(180_000)
+  const token = await ownerToken(request)
+  await page.goto('/')
+  await page.getByRole('link', { name: /^Active Shop/ }).click()
+  const seed = await request.post('http://127.0.0.1:8090/control/demo/orders-seed')
+  expect(seed.ok()).toBeTruthy()
+  const catalog = await request.post('http://127.0.0.1:8080/control/demo/order-catalog')
+  expect(catalog.ok()).toBeTruthy()
+  const channelAccountId = (await catalog.json()).channel_account_id as string
+  await page.goto(`/#/channel/listings?channel_account_id=${channelAccountId}`)
+  await page.getByRole('button', { name: 'Sync listings' }).click()
+  await expect(page.getByText(/ถูกลบจาก TSF 0/)).toBeVisible({ timeout: 90_000 })
+})
+
 test('owner maps unmapped listing via listings UI and order becomes ready to pick', async ({
   page,
   request,
