@@ -39,7 +39,8 @@ REST payment `PAID`, `PARTIALLY_REFUNDED`, and `REFUNDED` count as “paid happe
 ## Metrics
 
 - `oms.order.backfill.fetched|applied|skipped|failed`
-- `oms.order.backfill.lag_seconds` (gauge: watermark lag after a successful run)
+- `oms.order.backfill.lag_seconds` (gauge, tag `tenant_id`: watermark lag per tenant after a successful run)
+- `oms.order.backfill.lag_seconds_max` (gauge: max lag across tenants on this instance)
 - `oms.order.gap_refetch`
 
 Logs include order ids only (no recipient PII).

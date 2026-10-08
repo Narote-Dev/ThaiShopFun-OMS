@@ -16,7 +16,7 @@ STATE_MACHINE = "เขียน `OrderStateMachine` ผ่าน `SalesOrderRep
 READ_REPO = "อ่าน `SalesOrderRepository` (`findById` / `findByExternalId`)"
 READ_ORDERS_UI = "อ่าน `OrderQueryService` / orders UI"
 
-# Per (table, column) — verified against main @ ee4e425 Java/SQL
+# Per (table, column) — verified against main @ f642c69 Java/SQL
 OVERRIDES: dict[tuple[str, str], str] = {
     # --- app_user ---
     ("app_user", "id"): "INSERT `upsert_app_user` (V2) จาก `IdentityProvisioner`; อ่าน join `tenant_membership`",
@@ -26,7 +26,7 @@ OVERRIDES: dict[tuple[str, str], str] = {
     ("app_user", "last_login_at"): "ตั้งโดย `upsert_app_user` (V2) ตอน JIT login; ไม่มี reader บน main",
     # --- tenant ---
     ("tenant", "id"): "INSERT `provision_tenant` (V2); อ่าน `MeService`, RLS",
-    ("tenant", "name"): "INSERT/UPDATE `provision_tenant`, `MembershipChangedHandler`; อ่าน `MeService`",
+    ("tenant", "name"): "INSERT/UPDATE `provision_tenant`; อ่าน `MeService`",
     ("tenant", "tsf_shop_id"): "INSERT `provision_tenant`; อ่าน `MeService`, `CheckoutRepository`, `OutboxAppender`",
     ("tenant", "membership_tier"): "อัปเดต `MembershipChangedHandler`; อ่าน `MeService`",
     ("tenant", "entitlement_status"): "อัปเดต `MembershipChangedHandler`; อ่าน `MeService`, `TenantSessionService`, `InboxWorker`",
@@ -161,6 +161,14 @@ OVERRIDES: dict[tuple[str, str], str] = {
     ("inbox_event", "aggregate_version"): "INSERT `InboxIngestService`; อ่าน `InboxWorker` dedup",
     ("inbox_event", "payload_sha256"): "INSERT `InboxIngestService`; อ่าน `InboxIngestService` duplicate check",
     ("inbox_event", "orphan_recorded_at"): "อัปเดต `InboxWorker` เมื่อเกิน max-defer",
+    # --- sync_cursor (T12C order backfill) ---
+    ("sync_cursor", "tenant_id"): "INSERT/UPDATE `OrderSyncCursorRepository`; อ่าน `OrderSyncCursorRepository`",
+    ("sync_cursor", "channel_account_id"): "INSERT/UPDATE `OrderSyncCursorRepository`; อ่าน `OrderSyncCursorRepository`",
+    ("sync_cursor", "resource"): "INSERT `OrderSyncCursorRepository` (ORDERS); อ่าน `OrderSyncCursorRepository`",
+    ("sync_cursor", "cursor"): "INSERT/UPDATE `OrderSyncCursorRepository`; อ่าน `OrderSyncCursorRepository`",
+    ("sync_cursor", "last_success_at"): "UPDATE `OrderSyncCursorRepository`; อ่าน `OrderSyncCursorRepository`",
+    ("sync_cursor", "created_at"): "INSERT default; อ่าน ops",
+    ("sync_cursor", "updated_at"): "trigger/default on upsert; อ่าน ops",
     # --- order_line ---
     ("order_line", "id"): "INSERT `OrderLineRepository` จาก `OrderIntakeSupport`; อ่าน `OrderQueryService`",
     ("order_line", "tenant_id"): "INSERT `OrderLineRepository`; RLS",
@@ -212,7 +220,7 @@ TABLE_HINT: dict[str, str] = {
     "refund": "reserved [T21](../plan/05-task-list.md#L237)",
     "return_request": "reserved [T20](../plan/05-task-list.md#L233)",
     "return_line": "reserved [T20](../plan/05-task-list.md#L233)",
-    "sync_cursor": "reserved [T12C](../plan/05-task-list.md#L212) — ไม่มี writer/reader บน main",
+    "sync_cursor": "`OrderSyncCursorRepository`",
 }
 
 READ_HINT: dict[str, str] = {
@@ -221,7 +229,7 @@ READ_HINT: dict[str, str] = {
     "order_line": "`OrderQueryService`",
     "inbox_event": "`InboxWorker`",
     "outbox_event": "`OutboxAdminService`",
-    "sync_cursor": "ไม่มี reader บน main ([T12C](../plan/05-task-list.md#L212))",
+    "sync_cursor": "`OrderSyncCursorRepository`",
 }
 
 
@@ -234,9 +242,6 @@ def generic_usage(table: str, col: str) -> str:
         return f"reserved — ไม่มี writer/reader บน main ({link})"
     if table in ("return_request", "return_line"):
         link = "[T20](../plan/05-task-list.md#L233)"
-        return f"reserved — ไม่มี writer/reader บน main ({link})"
-    if table == "sync_cursor":
-        link = "[T12C](../plan/05-task-list.md#L212)"
         return f"reserved — ไม่มี writer/reader บน main ({link})"
     w = TABLE_HINT.get(table, f"service ของ `{table}`")
     r = READ_HINT.get(table, "repository/API ที่ query ตาราง")

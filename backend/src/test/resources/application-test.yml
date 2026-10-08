@@ -24,10 +24,7 @@ oms:
     hold-resolver:
       # T12B ac06: immediate retry on the next sweeper batch in tests (backoff suite overrides).
       backoff-base: 0s
-<<<<<<< HEAD
-  invariant:
-    enabled: false
-=======
     backfill:
       enabled: false
->>>>>>> b364a7a (T12C: order backfill, gap refetch, and optional REST order status)
+  invariant:
+    enabled: false

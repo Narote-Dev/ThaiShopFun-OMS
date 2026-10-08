@@ -9,6 +9,7 @@ import com.thaishopfun.mocktsf.OmsEndpoint;
 import com.thaishopfun.mocktsf.idp.TokenIssuer;
 import com.thaishopfun.oms.auth.AuthTestSupport;
 import com.thaishopfun.oms.inbox.InboxWorker;
+import com.thaishopfun.oms.invariant.VerifyInvariants;
 import com.thaishopfun.oms.order.backfill.OrderBackfillJob;
 import com.thaishopfun.oms.order.backfill.OrderBackfillProperties;
 import com.thaishopfun.oms.order.backfill.OrderGapRefetchService;
@@ -54,6 +55,7 @@ import tools.jackson.databind.node.ObjectNode;
       "oms.inbox.jitter-ratio=0"
     })
 @Import(OrderIntakeT12ScenariosAcceptanceTest.IntakeTestConfig.class)
+@VerifyInvariants
 class OrderBackfillT12CAcceptanceTest {
 
   private static final String INBOX_SECRET = "dev-inbox-hmac-secret";

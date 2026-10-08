@@ -22,6 +22,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -40,6 +41,7 @@ public class OrderBackfillJob {
   public static final String SKIPPED = "oms.order.backfill.skipped";
   public static final String FAILED = "oms.order.backfill.failed";
   public static final String LAG = "oms.order.backfill.lag_seconds";
+  public static final String LAG_MAX = "oms.order.backfill.lag_seconds_max";
 
   private static final Logger log = LoggerFactory.getLogger(OrderBackfillJob.class);
 
@@ -53,11 +55,13 @@ public class OrderBackfillJob {
   private final TransactionTemplate tenantReadTx;
   private final TransactionTemplate tenantWriteTx;
   private final Clock clock;
+  private final MeterRegistry meters;
   private final Counter fetched;
   private final Counter applied;
   private final Counter skipped;
   private final Counter failed;
-  private final AtomicLong lagSeconds = new AtomicLong(0);
+  private final AtomicLong lagSecondsMax = new AtomicLong(0);
+  private final ConcurrentHashMap<UUID, AtomicLong> lagSecondsByTenant = new ConcurrentHashMap<>();
 
   public OrderBackfillJob(
       OrderBackfillProperties properties,
@@ -84,11 +88,14 @@ public class OrderBackfillJob {
     this.tenantWriteTx.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
     this.tenantWriteTx.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
     this.clock = clock;
+    this.meters = meters;
     this.fetched = Counter.builder(FETCHED).register(meters);
     this.applied = Counter.builder(APPLIED).register(meters);
     this.skipped = Counter.builder(SKIPPED).register(meters);
     this.failed = Counter.builder(FAILED).register(meters);
-    Gauge.builder(LAG, lagSeconds, AtomicLong::get).register(meters);
+    Gauge.builder(LAG_MAX, lagSecondsMax, AtomicLong::get)
+        .description("Max order-backfill lag_seconds across tenants on this instance")
+        .register(meters);
   }
 
   public int runOnce() {
@@ -228,7 +235,7 @@ public class OrderBackfillJob {
               cursors.touchSuccess(tenantId, account.id(), runStart);
             }
           });
-      recordLag(watermark, runStart);
+      recordLag(tenantId, watermark, runStart);
     }
     return touched;
   }
@@ -299,13 +306,25 @@ public class OrderBackfillJob {
     return outcome;
   }
 
-  private void recordLag(Instant watermark, Instant now) {
-    if (watermark == null) {
+  private void recordLag(UUID tenantId, Instant watermark, Instant now) {
+    if (watermark == null || tenantId == null) {
       return;
     }
     long seconds = Math.max(0, now.getEpochSecond() - watermark.getEpochSecond());
-    lagSeconds.set(seconds);
-    log.debug("order backfill lag_seconds={}", seconds);
+    AtomicLong holder =
+        lagSecondsByTenant.computeIfAbsent(
+            tenantId,
+            id -> {
+              AtomicLong created = new AtomicLong(0);
+              Gauge.builder(LAG, created, AtomicLong::get)
+                  .tag("tenant_id", id.toString())
+                  .register(meters);
+              return created;
+            });
+    holder.set(seconds);
+    lagSecondsMax.set(
+        lagSecondsByTenant.values().stream().mapToLong(AtomicLong::get).max().orElse(0));
+    log.debug("order backfill lag_seconds tenant={} value={}", tenantId, seconds);
   }
 
   private List<UUID> listTenants() {
