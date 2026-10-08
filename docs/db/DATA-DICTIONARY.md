@@ -2,6 +2,9 @@
 
 อ้างอิง main @ ee4e425 (Flyway V13)
 
+> **Generated** — แก้ usage ที่ `docs/tools/generate_field_usage.py` (OVERRIDES) + meanings ที่ `docs/tools/field_meta/all_fields.py`; รัน `python docs/tools/generate_field_usage.py` แล้ว `python docs/tools/build_reference_docs.py`. หน้า PAGES/MODULES แก้ที่ `pages_body.md` / `modules_body.md`.
+
+
 พจนานุกรมข้อมูลทุกคอลัมน์ธุรกิจ (329) จาก `docs/schema/schema-ee4e425_39c6.sql` / `columns-ee4e425_4276.tsv` cross-check กับ Flyway V1–V13 และ Java. หลักการ RLS/PII: [03-data-model.md](../plan/03-data-model.md).
 
 ## ภาพรวมตาม domain
@@ -252,7 +255,7 @@ erDiagram
 ### `stock_reservation`
 - `owner_type`: `CHECKOUT`, `ORDER`
 - `status`: `ACTIVE`, `CONSUMED`, `RELEASED`, `EXPIRED`
-- Lifecycle: CHECKOUT+TTL → adopt เป็น ORDER (`expires_at` NULL) ผ่าน `ReservationEngine`; expiry job ปล่อย CHECKOUT หมดอายุ
+- Lifecycle: CHECKOUT+TTL → adopt เป็น ORDER (`expires_at` NULL) ผ่าน `ReservationEngine`; `StockExpiryJob` ปล่อย CHECKOUT หมดอายุ (query `owner_type` ผ่าน `StockRepository`)
 
 ### `inventory_ledger.reason`
 `OPENING_BALANCE`, `RECEIVE`, `ADJUST_IN`, `ADJUST_OUT`, `COUNT_CORRECTION`, `DAMAGE_WRITE_OFF`, `RETURN_RESTOCK`, `SHIP`, `RESERVE`, `RELEASE`, `UNPACK`
@@ -351,7 +354,7 @@ erDiagram
 | `name` | `text` | NO | — | ชื่อร้านที่แสดงใน OMS | INSERT/UPDATE `provision_tenant`, `MembershipChangedHandler`; อ่าน `MeService` | — |
 | `tsf_shop_id` | `text` | NO | — | รหัสร้านบน TSF (ไม่ซ้ำทั้งระบบ) | INSERT `provision_tenant`; อ่าน `MeService`, `CheckoutRepository`, `OutboxAppender` | — |
 | `membership_tier` | `text` | NO | — | แพ็กเกจ membership จาก TSF | อัปเดต `MembershipChangedHandler`; อ่าน `MeService` | — |
-| `entitlement_status` | `text` | NO | — | สิทธิ์ใช้งาน OMS ของร้าน | TenantSessionService, InboxEntitlementPolicy | enum: ACTIVE, GRACE, SUSPENDED เท่านั้น |
+| `entitlement_status` | `text` | NO | — | สิทธิ์ใช้งาน OMS ของร้าน | อัปเดต `MembershipChangedHandler`; อ่าน `MeService`, `TenantSessionService`, `InboxWorker` | enum: ACTIVE, GRACE, SUSPENDED เท่านั้น |
 | `entitlement_expires_at` | `timestamp with time zone` | YES | — | เวลาหมดอายุ subscription หรือช่วง GRACE | อัปเดต `MembershipChangedHandler`; อ่าน `MeService`, `CheckoutRepository` | — |
 | `ent_ver` | `bigint` | NO | — | เวอร์ชัน entitlement กันข้อมูล stale จาก JWT และ membership.changed | อัปเดต `MembershipChangedHandler`; อ่าน `TenantSessionService` (JWT gate) | — |
 
@@ -371,10 +374,10 @@ erDiagram
 
 | field | type | null | default | ความหมาย | ใช้ทำอะไร / ใครเขียน-ใครอ่าน | หมายเหตุ |
 |---|---|---|---|---|---|---|
-| `id` | `uuid` | NO | — | รหัสประจำผู้ใช้ OMS (UUIDv7) | PK; เขียน `IdentityProvisioner` / `upsert_app_user` (V2); อ่าน join `tenant_membership` / `MeService` | — |
-| `tsf_user_id` | `text` | NO | — | รหัสผู้ใช้บน TSF (ไม่ซ้ำทั้งระบบ) | เขียน `IdentityProvisioner` / `upsert_app_user` (V2); อ่าน join `tenant_membership` / `MeService` | — |
-| `email` | `text` | YES | — | อีเมลผู้ใช้จาก TSF | เขียน `IdentityProvisioner` / `upsert_app_user` (V2); อ่าน join `tenant_membership` / `MeService` | PII 🔒 |
-| `display_name` | `text` | YES | — | ชื่อที่แสดงของผู้ใช้ | เขียน `IdentityProvisioner` / `upsert_app_user` (V2); อ่าน join `tenant_membership` / `MeService` | PII 🔒 |
+| `id` | `uuid` | NO | — | รหัสประจำผู้ใช้ OMS (UUIDv7) | INSERT `upsert_app_user` (V2) จาก `IdentityProvisioner`; อ่าน join `tenant_membership` | — |
+| `tsf_user_id` | `text` | NO | — | รหัสผู้ใช้บน TSF (ไม่ซ้ำทั้งระบบ) | INSERT/UPDATE `upsert_app_user` (V2) จาก `IdentityProvisioner`; ไม่มี reader บน main | — |
+| `email` | `text` | YES | — | อีเมลผู้ใช้จาก TSF | INSERT/UPDATE `upsert_app_user` (V2) จาก `IdentityProvisioner`; ไม่มี reader บน main | PII 🔒 |
+| `display_name` | `text` | YES | — | ชื่อที่แสดงของผู้ใช้ | INSERT/UPDATE `upsert_app_user` (V2) จาก `IdentityProvisioner`; ไม่มี reader บน main | PII 🔒 |
 | `last_login_at` | `timestamp with time zone` | YES | — | เวลา login ล่าสุด (UTC) | ตั้งโดย `upsert_app_user` (V2) ตอน JIT login; ไม่มี reader บน main | — |
 
 ### `tenant_membership`
@@ -435,7 +438,7 @@ erDiagram
 | `status` | `text` | NO | — | สถานะการเชื่อมต่อบัญชี | INSERT โดย `provision_tenant` (V10); อ่าน `CheckoutRepository`, `OrderHoldResolver`, `OrderQueryService` | enum: CONNECTED, DISCONNECTED |
 | `credentials_ref` | `text` | YES | — | ชื่อ secret ใน secret manager (ไม่เก็บ token ในฐานข้อมูล) | reserved — ไม่มี writer/reader บน main | — |
 | `token_expires_at` | `timestamp with time zone` | YES | — | เวลาหมดอายุ token OAuth (UTC) | reserved — ไม่มี writer/reader บน main | — |
-| `last_synced_at` | `timestamp with time zone` | YES | — | เวลา sync ช่องทางสำเร็จล่าสุด (UTC) | เขียน `ChannelListingSyncService` (`UPDATE channel_account SET last_synced_at`); อ่าน listings sync UI/API | — |
+| `last_synced_at` | `timestamp with time zone` | YES | — | เวลา sync ช่องทางสำเร็จล่าสุด (UTC) | เขียน `ChannelListingSyncService` (`UPDATE channel_account SET last_synced_at`); ไม่มี reader บน main | — |
 | `created_at` | `timestamp with time zone` | NO | `now()` | เวลาที่แถวถูกสร้าง (timestamptz UTC) | default ตอน INSERT `provision_tenant`; อ่าน `OrderDemoCatalogService` (ORDER BY created_at) | — |
 | `updated_at` | `timestamp with time zone` | NO | `now()` | เวลาที่แถวถูกแก้ไขล่าสุด (timestamptz UTC) | trigger/default; ไม่มี writer แยกบน main | — |
 
@@ -571,7 +574,7 @@ erDiagram
 | `name` | `text` | YES | — | ชื่อ listing จากช่องทาง | INSERT/UPDATE `ChannelListingRepository` (sync/inbox); อ่าน list UI | — |
 | `mapping_source` | `text` | YES | — | วิธีที่แมป listing กับ SKU OMS | เขียน `ChannelListingRepository.putManualMapping` / upsert AUTO; อ่าน list API | enum: AUTO, MANUAL หรือ NULL ก่อนแมป |
 | `mapped_at` | `timestamp with time zone` | YES | — | เวลาที่แมป SKU สำเร็จ (UTC) | เขียน `ChannelListingRepository.putManualMapping` / upsert; อ่าน list API | — |
-| `removed_at` | `timestamp with time zone` | YES | — | เวลาที่ listing หายจากช่องทาง (soft delete) | เขียน ChannelListingSyncService.markVanished; listing.changed UPSERT ล้างเป็น NULL (ListingChangedHandler, ChannelListingRepository) | — |
+| `removed_at` | `timestamp with time zone` | YES | — | เวลาที่ listing หายจากช่องทาง (soft delete) | เขียน `ChannelListingRepository.markVanished` / `markRemoved`; inbox upsert ล้าง NULL; อ่าน list filter | — |
 
 ### `warehouse`
 
@@ -708,14 +711,14 @@ erDiagram
 |---|---|---|---|---|---|---|
 | `id` | `uuid` | NO | — | รหัสประจำแถว (UUIDv7 ที่แอปสร้าง) | INSERT `StockRepository`; อ่าน `OrderQueryService` | — |
 | `tenant_id` | `uuid` | NO | — | รหัสร้านที่แถวนี้สังกัด ใช้กรองด้วย RLS | INSERT `StockRepository`; RLS | — |
-| `owner_type` | `text` | NO | — | เจ้าของการจอง | INSERT/UPDATE `StockRepository`; อ่าน expiry job | enum: CHECKOUT, ORDER |
+| `owner_type` | `text` | NO | — | เจ้าของการจอง | INSERT/UPDATE `StockRepository`; อ่าน `StockRepository` (expiry queries) | enum: CHECKOUT, ORDER |
 | `owner_ref` | `text` | NO | — | อ้างอิงเจ้าของ (เช่น checkout id หรือ order id เป็น text) | INSERT/UPDATE `StockRepository`; อ่าน `OrderQueryService` | — |
 | `sku_id` | `uuid` | NO | — | SKU OMS ที่แถวอ้างอิง | INSERT `StockRepository` / `ReservationEngine` | — |
 | `warehouse_id` | `uuid` | NO | — | คลังที่แถวอ้างอิง | INSERT `StockRepository` | — |
 | `qty` | `integer` | NO | — | จำนวนที่จอง (ต่อ component SKU) | INSERT `StockRepository` / `ReservationEngine` | — |
 | `status` | `text` | NO | — | ACTIVE กำลังจอง, CONSUMED ตัดสต็อกเมื่อ ship, RELEASED คืนสต็อก, EXPIRED หมดเวลา/unpaid grace | อัปเดต `ReservationEngine`, `StockExpiryJob` (EXPIRED), cancel/release paths | — |
-| `expires_at` | `timestamp with time zone` | YES | — | เวลาหมดอายุการจอง (UTC); NULL เมื่อชำระแล้วหรือไม่มี TTL | ตั้ง `CheckoutReserveService`/`ReservationEngine` (CHECKOUT TTL); ORDER unpaid PREPAID = payment_expires_at + grace (`OrderIntakeSupport.adoptForOrder`); ล้าง NULL เมื่อ paid (`StockRepository`) | — |
-| `reservation_group_id` | `uuid` | NO | — | รหัสกลุ่มจองร่วมกัน (UUIDv7) ที่ส่งกลับ TSF เป็น reservation_id | CheckoutReserveService.createdResponse; ReservationEngine | — |
+| `expires_at` | `timestamp with time zone` | YES | — | เวลาหมดอายุการจอง (UTC); NULL เมื่อชำระแล้วหรือไม่มี TTL | ตั้ง `CheckoutReserveService`/`ReservationEngine` (CHECKOUT TTL); ORDER unpaid PREPAID = payment_expires_at + grace (order intake adopt path); ล้าง NULL เมื่อ paid (`StockRepository`) | — |
+| `reservation_group_id` | `uuid` | NO | — | รหัสกลุ่มจองร่วมกัน (UUIDv7) ที่ส่งกลับ TSF เป็น reservation_id | INSERT `StockRepository`; อ่าน checkout response | — |
 | `created_at` | `timestamp with time zone` | NO | `now()` | เวลาที่แถวถูกสร้าง (timestamptz UTC) | INSERT default; อ่าน ops | — |
 | `updated_at` | `timestamp with time zone` | NO | `now()` | เวลาที่แถวถูกแก้ไขล่าสุด (timestamptz UTC) | อัปเดต `StockRepository` | — |
 
@@ -825,28 +828,28 @@ erDiagram
 
 | field | type | null | default | ความหมาย | ใช้ทำอะไร / ใครเขียน-ใครอ่าน | หมายเหตุ |
 |---|---|---|---|---|---|---|
-| `id` | `uuid` | NO | — | รหัสประจำแถว (UUIDv7 ที่แอปสร้าง) | เขียน `SalesOrderRepository.insert` (caller OrderIntakeSupport); อ่าน `OrderQueryService`, handlers | — |
-| `tenant_id` | `uuid` | NO | — | รหัสร้านที่แถวนี้สังกัด ใช้กรองด้วย RLS | เขียน `SalesOrderRepository.insert` (caller OrderIntakeSupport); RLS กรอง | — |
-| `channel_account_id` | `uuid` | NO | — | บัญชีช่องทางขายที่แถวอ้างอิง | เขียน `SalesOrderRepository.insert` (caller OrderIntakeSupport); อ่าน `OrderQueryService` list/filter | — |
-| `external_order_id` | `text` | NO | — | รหัสออเดอร์ฝั่งช่องทาง | เขียน `SalesOrderRepository.insert` (caller OrderIntakeSupport); อ่าน `OrderQueryService`, `SalesOrderRepository.existsByExternalId` | — |
-| `order_status` | `text` | NO | `'ACTIVE'::text` | สถานะชีวิตออเดอร์ | OrderStateMachine | enum: ACTIVE, CANCELLED, COMPLETED |
-| `payment_status` | `text` | NO | — | สถานะการชำระเงินที่ OMS derive | OrderStateMachine | enum: PENDING, PAID, COD_PENDING, PARTIALLY_REFUNDED, REFUNDED |
-| `fulfillment_status` | `text` | NO | `'UNFULFILLED'::text` | สถานะการจัดส่ง/fulfillment | OrderStateMachine | enum: UNFULFILLED, READY_TO_PICK, PICKING, PACKED, SHIPPED, DELIVERED |
-| `hold_reason` | `text` | NO | `'NONE'::text` | เหตุผลที่ออเดอร์ถูก hold | OrderStateMachine, OrderHoldResolver | enum: NONE, SKU_NOT_MAPPED, OUT_OF_STOCK, ADDRESS_PROBLEM, PAYMENT_MISMATCH, CHANNEL_CANCEL_PENDING, MANUAL |
+| `id` | `uuid` | NO | — | รหัสประจำแถว (UUIDv7 ที่แอปสร้าง) | เขียน `SalesOrderRepository.insert` (caller order intake handlers); อ่าน `OrderQueryService`, handlers | — |
+| `tenant_id` | `uuid` | NO | — | รหัสร้านที่แถวนี้สังกัด ใช้กรองด้วย RLS | เขียน `SalesOrderRepository.insert` (caller order intake handlers); RLS กรอง | — |
+| `channel_account_id` | `uuid` | NO | — | บัญชีช่องทางขายที่แถวอ้างอิง | เขียน `SalesOrderRepository.insert` (caller order intake handlers); อ่าน `OrderQueryService` list/filter | — |
+| `external_order_id` | `text` | NO | — | รหัสออเดอร์ฝั่งช่องทาง | เขียน `SalesOrderRepository.insert` (caller order intake handlers); อ่าน `OrderQueryService`, `SalesOrderRepository.existsByExternalId` | — |
+| `order_status` | `text` | NO | `'ACTIVE'::text` | สถานะชีวิตออเดอร์ | เขียน `OrderStateMachine` ผ่าน `SalesOrderRepository.updateStatusFields`; อ่าน `OrderQueryService` | enum: ACTIVE, CANCELLED, COMPLETED |
+| `payment_status` | `text` | NO | — | สถานะการชำระเงินที่ OMS derive | เขียน `OrderStateMachine` ผ่าน `SalesOrderRepository.updateStatusFields`; อ่าน `OrderQueryService` | enum: PENDING, PAID, COD_PENDING, PARTIALLY_REFUNDED, REFUNDED |
+| `fulfillment_status` | `text` | NO | `'UNFULFILLED'::text` | สถานะการจัดส่ง/fulfillment | เขียน `OrderStateMachine` ผ่าน `SalesOrderRepository.updateStatusFields`; อ่าน `OrderQueryService` | enum: UNFULFILLED, READY_TO_PICK, PICKING, PACKED, SHIPPED, DELIVERED |
+| `hold_reason` | `text` | NO | `'NONE'::text` | เหตุผลที่ออเดอร์ถูก hold | เขียน `OrderStateMachine` ผ่าน `SalesOrderRepository.updateStatusFields` และ `OrderHoldEffects.applyHold`; อ่าน `OrderQueryService` | enum: NONE, SKU_NOT_MAPPED, OUT_OF_STOCK, ADDRESS_PROBLEM, PAYMENT_MISMATCH, CHANNEL_CANCEL_PENDING, MANUAL |
 | `hold_note` | `text` | YES | — | หมายเหตุเพิ่มเมื่อ hold (เช่น MANUAL) | เขียน `OrderStateMachine` ผ่าน `SalesOrderRepository.updateStatusFields` / `OrderHoldEffects.applyHold`; อ่าน `OrderQueryService` detail | — |
-| `channel_status` | `text` | YES | — | ข้อความสถานะดิบจากช่องทาง | เขียน `SalesOrderRepository.insert` (caller OrderIntakeSupport); อ่าน `SalesOrderRepository` (`findById` / `findByExternalId`) | — |
-| `payment_method` | `text` | NO | — | วิธีชำระ | เขียน `SalesOrderRepository.insert` (caller OrderIntakeSupport); อ่าน `OrderQueryService` list | enum: PREPAID, COD |
-| `currency` | `text` | NO | `'THB'::text` | สกุลเงินออเดอร์ — CHECK บังคับ `THB` เท่านั้นบน main | เขียน `SalesOrderRepository.insert` (caller OrderIntakeSupport); อ่าน `OrderQueryService` / detail | — |
-| `subtotal` | `numeric` | NO | `0` | ยอดรวมสินค้า (บาท) | เขียน `SalesOrderRepository.insert` (caller OrderIntakeSupport); อ่าน detail (`SalesOrder` จาก repository) | เงิน THB numeric(14,2) |
-| `shipping_fee` | `numeric` | NO | `0` | ค่าจัดส่ง (บาท) | เขียน `SalesOrderRepository.insert` (caller OrderIntakeSupport); อ่าน detail (`SalesOrder` จาก repository) | เงิน THB numeric(14,2) |
-| `discount` | `numeric` | NO | `0` | ส่วนลด (บาท) | เขียน `SalesOrderRepository.insert` (caller OrderIntakeSupport); อ่าน detail (`SalesOrder` จาก repository) | เงิน THB numeric(14,2) |
-| `grand_total` | `numeric` | NO | `0` | ยอดสุทธิออเดอร์ (บาท) | เขียน `SalesOrderRepository.insert` (caller OrderIntakeSupport); อ่าน `OrderQueryService` list | เงิน THB numeric(14,2) |
-| `ordered_at` | `timestamp with time zone` | NO | — | เวลาที่ลูกค้าสั่ง (UTC) | เขียน `SalesOrderRepository.insert` (caller OrderIntakeSupport); อ่าน `OrderQueryService` list (sort/cursor) | — |
-| `paid_at` | `timestamp with time zone` | YES | — | เวลาชำระเงินสำเร็จ (UTC) | เขียน `SalesOrderRepository.insert` (caller OrderIntakeSupport) และ เขียน `OrderStateMachine` ผ่าน `SalesOrderRepository.updateStatusFields`; อ่าน detail timeline | — |
-| `ship_by` | `timestamp with time zone` | YES | — | กำหนดส่งล่าสุดจากช่องทาง (UTC) | เขียน `SalesOrderRepository.insert` (caller OrderIntakeSupport); อ่าน `OrderQueryService` list | — |
+| `channel_status` | `text` | YES | — | ข้อความสถานะดิบจากช่องทาง | เขียน `SalesOrderRepository.insert` (caller order intake handlers); อ่าน `SalesOrderRepository` (`findById` / `findByExternalId`) | — |
+| `payment_method` | `text` | NO | — | วิธีชำระ | เขียน `SalesOrderRepository.insert` (caller order intake handlers); อ่าน `OrderQueryService` list | enum: PREPAID, COD |
+| `currency` | `text` | NO | `'THB'::text` | สกุลเงินออเดอร์ — CHECK บังคับ `THB` เท่านั้นบน main | เขียน `SalesOrderRepository.insert` (caller order intake handlers); อ่าน `OrderQueryService` / detail | — |
+| `subtotal` | `numeric` | NO | `0` | ยอดรวมสินค้า (บาท) | เขียน `SalesOrderRepository.insert` (caller order intake handlers); อ่าน detail (`SalesOrder` จาก repository) | เงิน THB numeric(14,2) |
+| `shipping_fee` | `numeric` | NO | `0` | ค่าจัดส่ง (บาท) | เขียน `SalesOrderRepository.insert` (caller order intake handlers); อ่าน detail (`SalesOrder` จาก repository) | เงิน THB numeric(14,2) |
+| `discount` | `numeric` | NO | `0` | ส่วนลด (บาท) | เขียน `SalesOrderRepository.insert` (caller order intake handlers); อ่าน detail (`SalesOrder` จาก repository) | เงิน THB numeric(14,2) |
+| `grand_total` | `numeric` | NO | `0` | ยอดสุทธิออเดอร์ (บาท) | เขียน `SalesOrderRepository.insert` (caller order intake handlers); อ่าน `OrderQueryService` list | เงิน THB numeric(14,2) |
+| `ordered_at` | `timestamp with time zone` | NO | — | เวลาที่ลูกค้าสั่ง (UTC) | เขียน `SalesOrderRepository.insert` (caller order intake handlers); อ่าน `OrderQueryService` list (sort/cursor) | — |
+| `paid_at` | `timestamp with time zone` | YES | — | เวลาชำระเงินสำเร็จ (UTC) | เขียน `SalesOrderRepository.insert` (caller order intake handlers) และ เขียน `OrderStateMachine` ผ่าน `SalesOrderRepository.updateStatusFields`; อ่าน detail timeline | — |
+| `ship_by` | `timestamp with time zone` | YES | — | กำหนดส่งล่าสุดจากช่องทาง (UTC) | เขียน `SalesOrderRepository.insert` (caller order intake handlers); อ่าน `OrderQueryService` list | — |
 | `completed_at` | `timestamp with time zone` | YES | — | เวลาออเดอร์ปิดงาน (UTC) | reserved — ไม่มี writer/reader บน main | reserved — ไม่มี writer/reader บน main |
-| `external_version` | `bigint` | YES | — | เวอร์ชัน aggregate จากช่องทาง ใช้ dedup inbox | เขียน `SalesOrderRepository.insert` (caller OrderIntakeSupport); อ่าน `SalesOrderRepository` (`findById` / `findByExternalId`) (inbox aggregate version) | — |
-| `version` | `bigint` | NO | `0` | เวอร์ชัน optimistic lock ของออเดอร์ | OrderStateMachine | — |
+| `external_version` | `bigint` | YES | — | เวอร์ชัน aggregate จากช่องทาง ใช้ dedup inbox | เขียน `SalesOrderRepository.insert` (caller order intake handlers); อ่าน `SalesOrderRepository` (`findById` / `findByExternalId`) (inbox aggregate version) | — |
+| `version` | `bigint` | NO | `0` | เวอร์ชัน optimistic lock ของออเดอร์ | เขียน `OrderStateMachine` ผ่าน `SalesOrderRepository.updateStatusFields`; optimistic lock ใน `SalesOrderRepository.updateStatusFields` | — |
 | `created_at` | `timestamp with time zone` | NO | `now()` | เวลาที่แถวถูกสร้าง (timestamptz UTC) | default ตอน insert; อ่าน ops | — |
 | `updated_at` | `timestamp with time zone` | NO | `now()` | เวลาที่แถวถูกแก้ไขล่าสุด (timestamptz UTC) | อัปเดต `SalesOrderRepository.updateStatusFields`; อ่าน ops | — |
 
@@ -868,9 +871,9 @@ erDiagram
 | field | type | null | default | ความหมาย | ใช้ทำอะไร / ใครเขียน-ใครอ่าน | หมายเหตุ |
 |---|---|---|---|---|---|---|
 | `tenant_id` | `uuid` | NO | — | รหัสร้านที่แถวนี้สังกัด ใช้กรองด้วย RLS | PK; RLS | — |
-| `order_id` | `uuid` | NO | — | ออเดอร์ SKU_NOT_MAPPED ที่ scheduled sweeper จะลองอีก (PK) | PK; เขียน/ลบ `OrderHoldResolverJob.persistRetryState` | — |
+| `order_id` | `uuid` | NO | — | ออเดอร์ SKU_NOT_MAPPED ที่ scheduled sweeper จะลองอีก (PK) | PK; เขียน/ลบ `OrderHoldRetryRepository` จาก hold-resolver job | — |
 | `attempts` | `integer` | NO | `0` | จำนวนรอบ backoff ที่ scheduled sweeper บันทึกแล้ว | เขียน `OrderHoldRetryRepository.recordBackoff` (scheduled sweeper); ลบแถวเมื่อ RELEASED/OUT_OF_STOCK | — |
-| `next_attempt_at` | `timestamp with time zone` | NO | — | เวลาที่ scheduled sweeper จะลอง resolve อีก | เขียน `recordBackoff` จาก `OrderHoldResolverJob.persistRetryState` | — |
+| `next_attempt_at` | `timestamp with time zone` | NO | — | เวลาที่ scheduled sweeper จะลอง resolve อีก | เขียน `OrderHoldRetryRepository.recordBackoff` จาก scheduled hold-resolver job | — |
 | `last_error` | `text` | YES | — | โค้ดผลล่าสุด: `STILL_HELD`, `DEFERRED`, หรือ simple name ของ exception (ไม่ใช่ข้อความ error) | เขียน `recordBackoff` — โค้ด STILL_HELD \| DEFERRED \| simple name ของ exception (ไม่ใช่ message) | — |
 | `updated_at` | `timestamp with time zone` | NO | `now()` | เวลาที่แถวถูกแก้ไขล่าสุด (timestamptz UTC) | อัปเดต `OrderHoldRetryRepository` | — |
 
@@ -976,8 +979,8 @@ erDiagram
 |---|---|---|---|---|---|---|
 | `id` | `uuid` | NO | — | รหัสประจำแถว (UUIDv7 ที่แอปสร้าง) | INSERT `OrderStatusHistoryRepository`; อ่าน `OrderQueryService` timeline | — |
 | `tenant_id` | `uuid` | NO | — | รหัสร้านที่แถวนี้สังกัด ใช้กรองด้วย RLS | INSERT `OrderStatusHistoryRepository`; RLS | — |
-| `order_id` | `uuid` | NO | — | ออเดอร์ที่แถวนี้สังกัด | INSERT `OrderStatusHistoryRepository` (caller OrderStateMachine) | append-only — ห้าม UPDATE/DELETE |
-| `dimension` | `text` | NO | — | มิติสถานะที่เปลี่ยน | OrderStateMachine | enum: ORDER, PAYMENT, FULFILLMENT, HOLD; append-only — ห้าม UPDATE/DELETE |
+| `order_id` | `uuid` | NO | — | ออเดอร์ที่แถวนี้สังกัด | INSERT `OrderStatusHistoryRepository` (caller order state machine) | append-only — ห้าม UPDATE/DELETE |
+| `dimension` | `text` | NO | — | มิติสถานะที่เปลี่ยน | INSERT `OrderStatusHistoryRepository`; อ่าน `OrderQueryService` | enum: ORDER, PAYMENT, FULFILLMENT, HOLD; append-only — ห้าม UPDATE/DELETE |
 | `from_value` | `text` | YES | — | ค่าก่อนเปลี่ยน (NULL สำหรับครั้งแรกของมิติ) | INSERT `OrderStatusHistoryRepository` | append-only — ห้าม UPDATE/DELETE |
 | `to_value` | `text` | NO | — | ค่าหลังเปลี่ยน | INSERT `OrderStatusHistoryRepository` | append-only — ห้าม UPDATE/DELETE |
 | `reason` | `text` | YES | — | เหตุผลประกอบการเปลี่ยนสถานะ | INSERT `OrderStatusHistoryRepository` | append-only — ห้าม UPDATE/DELETE |
@@ -1009,18 +1012,18 @@ erDiagram
 | field | type | null | default | ความหมาย | ใช้ทำอะไร / ใครเขียน-ใครอ่าน | หมายเหตุ |
 |---|---|---|---|---|---|---|
 | `id` | `uuid` | NO | — | รหัสประจำการจัดส่ง (หนึ่งแถวต่อออเดอร์) | อ่าน `OrderQueryService.loadShipments` | reserved [T18](../plan/05-task-list.md#L229) — ยังไม่มี writer บน main |
-| `tenant_id` | `uuid` | NO | — | รหัสร้านที่แถวนี้สังกัด ใช้กรองด้วย RLS | อ่าน OrderQueryService | reserved [T18](../plan/05-task-list.md#L229) — ยังไม่มี writer บน main |
-| `order_id` | `uuid` | NO | — | ออเดอร์ที่จัดส่งนี้สังกัด | อ่าน OrderQueryService | reserved [T18](../plan/05-task-list.md#L229) — ยังไม่มี writer บน main |
-| `warehouse_id` | `uuid` | NO | — | คลังที่จัดส่งออก | อ่าน OrderQueryService | reserved [T18](../plan/05-task-list.md#L229) — ยังไม่มี writer บน main |
-| `carrier` | `text` | YES | — | บริษัทขนส่ง | อ่าน OrderQueryService | reserved [T18](../plan/05-task-list.md#L229) — ยังไม่มี writer บน main |
-| `tracking_no` | `text` | YES | — | เลขพัสดุ | อ่าน OrderQueryService | reserved [T18](../plan/05-task-list.md#L229) — ยังไม่มี writer บน main |
-| `external_shipment_id` | `text` | YES | — | รหัส shipment ฝั่งช่องทาง/ขนส่ง | อ่าน OrderQueryService | reserved [T18](../plan/05-task-list.md#L229) — ยังไม่มี writer บน main |
-| `label_cached_until` | `timestamp with time zone` | YES | — | หมดอายุ cache ใบปะหน้า (ไม่เก็บ PDF ในฐานข้อมูล) | อ่าน OrderQueryService | reserved [T18](../plan/05-task-list.md#L229) — ยังไม่มี writer บน main |
-| `status` | `text` | NO | `'PENDING'::text` | สถานะการจัดส่ง | อ่าน OrderQueryService | enum: PENDING, LABEL_READY, SHIPPED, IN_TRANSIT, DELIVERED, FAILED, RETURNED_TO_SENDER; reserved T18 Phase 3 |
-| `shipped_at` | `timestamp with time zone` | YES | — | เวลาออกจากคลัง (UTC) | อ่าน OrderQueryService | reserved [T18](../plan/05-task-list.md#L229) — ยังไม่มี writer บน main |
-| `delivered_at` | `timestamp with time zone` | YES | — | เวลาส่งถึงผู้รับ (UTC) | อ่าน OrderQueryService | reserved [T18](../plan/05-task-list.md#L229) — ยังไม่มี writer บน main |
-| `created_at` | `timestamp with time zone` | NO | `now()` | เวลาที่แถวถูกสร้าง (timestamptz UTC) | อ่าน OrderQueryService | reserved [T18](../plan/05-task-list.md#L229) — ยังไม่มี writer บน main |
-| `updated_at` | `timestamp with time zone` | NO | `now()` | เวลาที่แถวถูกแก้ไขล่าสุด (timestamptz UTC) | อ่าน OrderQueryService | reserved [T18](../plan/05-task-list.md#L229) — ยังไม่มี writer บน main |
+| `tenant_id` | `uuid` | NO | — | รหัสร้านที่แถวนี้สังกัด ใช้กรองด้วย RLS | reserved [T18](../plan/05-task-list.md#L229) — ไม่มี reader บน main | reserved [T18](../plan/05-task-list.md#L229) — ยังไม่มี writer บน main |
+| `order_id` | `uuid` | NO | — | ออเดอร์ที่จัดส่งนี้สังกัด | อ่าน `OrderQueryService` (filter `shipment.order_id` / join) | reserved [T18](../plan/05-task-list.md#L229) — ยังไม่มี writer บน main |
+| `warehouse_id` | `uuid` | NO | — | คลังที่จัดส่งออก | reserved [T18](../plan/05-task-list.md#L229) — ไม่มี reader บน main | reserved [T18](../plan/05-task-list.md#L229) — ยังไม่มี writer บน main |
+| `carrier` | `text` | YES | — | บริษัทขนส่ง | อ่าน `OrderQueryService.loadShipments` | reserved [T18](../plan/05-task-list.md#L229) — ยังไม่มี writer บน main |
+| `tracking_no` | `text` | YES | — | เลขพัสดุ | อ่าน `OrderQueryService.loadShipments` และค้นหา orders (`tracking_no = ?`) | reserved [T18](../plan/05-task-list.md#L229) — ยังไม่มี writer บน main |
+| `external_shipment_id` | `text` | YES | — | รหัส shipment ฝั่งช่องทาง/ขนส่ง | reserved [T18](../plan/05-task-list.md#L229) — ไม่มี reader บน main | reserved [T18](../plan/05-task-list.md#L229) — ยังไม่มี writer บน main |
+| `label_cached_until` | `timestamp with time zone` | YES | — | หมดอายุ cache ใบปะหน้า (ไม่เก็บ PDF ในฐานข้อมูล) | reserved [T18](../plan/05-task-list.md#L229) — ไม่มี reader บน main | reserved [T18](../plan/05-task-list.md#L229) — ยังไม่มี writer บน main |
+| `status` | `text` | NO | `'PENDING'::text` | สถานะการจัดส่ง | อ่าน `OrderQueryService.loadShipments` | enum: PENDING, LABEL_READY, SHIPPED, IN_TRANSIT, DELIVERED, FAILED, RETURNED_TO_SENDER; reserved [T18](../plan/05-task-list.md#L229) |
+| `shipped_at` | `timestamp with time zone` | YES | — | เวลาออกจากคลัง (UTC) | อ่าน `OrderQueryService.loadShipments` | reserved [T18](../plan/05-task-list.md#L229) — ยังไม่มี writer บน main |
+| `delivered_at` | `timestamp with time zone` | YES | — | เวลาส่งถึงผู้รับ (UTC) | reserved [T18](../plan/05-task-list.md#L229) — ไม่มี reader บน main | reserved [T18](../plan/05-task-list.md#L229) — ยังไม่มี writer บน main |
+| `created_at` | `timestamp with time zone` | NO | `now()` | เวลาที่แถวถูกสร้าง (timestamptz UTC) | reserved [T18](../plan/05-task-list.md#L229) — ไม่มี reader บน main | reserved [T18](../plan/05-task-list.md#L229) — ยังไม่มี writer บน main |
+| `updated_at` | `timestamp with time zone` | NO | `now()` | เวลาที่แถวถูกแก้ไขล่าสุด (timestamptz UTC) | reserved [T18](../plan/05-task-list.md#L229) — ไม่มี reader บน main | reserved [T18](../plan/05-task-list.md#L229) — ยังไม่มี writer บน main |
 
 ### `return_request`
 
@@ -1045,18 +1048,18 @@ erDiagram
 
 | field | type | null | default | ความหมาย | ใช้ทำอะไร / ใครเขียน-ใครอ่าน | หมายเหตุ |
 |---|---|---|---|---|---|---|
-| `id` | `uuid` | NO | — | รหัสประจำแถว (UUIDv7 ที่แอปสร้าง) | PK; เขียน reserved [T20](../plan/05-task-list.md#L233); อ่าน repository/API ที่ query ตาราง | reserved [T20](../plan/05-task-list.md#L233) |
-| `tenant_id` | `uuid` | NO | — | รหัสร้านที่แถวนี้สังกัด ใช้กรองด้วย RLS | INSERT ใส่ tenant ปัจจุบัน; RLS กรองทุก SELECT | reserved [T20](../plan/05-task-list.md#L233) |
-| `order_id` | `uuid` | NO | — | ออเดอร์ที่แถวนี้สังกัด | เขียน reserved [T20](../plan/05-task-list.md#L233); อ่าน repository/API ที่ query ตาราง | reserved [T20](../plan/05-task-list.md#L233) |
-| `external_return_id` | `text` | YES | — | รหัสคืนสินค้าจากช่องทาง | เขียน reserved [T20](../plan/05-task-list.md#L233); อ่าน repository/API ที่ query ตาราง | reserved [T20](../plan/05-task-list.md#L233) |
-| `type` | `text` | NO | — | ประเภทคำขอ | เขียน reserved [T20](../plan/05-task-list.md#L233); อ่าน repository/API ที่ query ตาราง | enum: RETURN, RTS; reserved [T20](../plan/05-task-list.md#L233) |
-| `status` | `text` | NO | `'REQUESTED'::text` | สถานะคำขอ | เขียน reserved [T20](../plan/05-task-list.md#L233); อ่าน repository/API ที่ query ตาราง | enum: REQUESTED, APPROVED, REJECTED, RECEIVED, CLOSED; reserved [T20](../plan/05-task-list.md#L233) |
-| `rejected` | `boolean` | NO | `false` | เคยถูกปฏิเสธแล้ว (sticky ไม่ล้าง) | เขียน reserved [T20](../plan/05-task-list.md#L233); อ่าน repository/API ที่ query ตาราง | reserved [T20](../plan/05-task-list.md#L233) — trigger return_request_rejected_guard |
-| `reason` | `text` | YES | — | เหตุผลที่ขอคืน | เขียน reserved [T20](../plan/05-task-list.md#L233); อ่าน repository/API ที่ query ตาราง | reserved [T20](../plan/05-task-list.md#L233) |
-| `requested_at` | `timestamp with time zone` | NO | `now()` | เวลายื่นคำขอ (UTC) | เขียน reserved [T20](../plan/05-task-list.md#L233); อ่าน repository/API ที่ query ตาราง | reserved [T20](../plan/05-task-list.md#L233) |
-| `received_at` | `timestamp with time zone` | YES | — | เวลารับสินค้าคืน (UTC) | เขียน reserved [T20](../plan/05-task-list.md#L233); อ่าน repository/API ที่ query ตาราง | reserved [T20](../plan/05-task-list.md#L233) |
-| `created_at` | `timestamp with time zone` | NO | `now()` | เวลาที่แถวถูกสร้าง (timestamptz UTC) | INSERT default now(); อ่าน repository/API ที่ query ตาราง | reserved [T20](../plan/05-task-list.md#L233) |
-| `updated_at` | `timestamp with time zone` | NO | `now()` | เวลาที่แถวถูกแก้ไขล่าสุด (timestamptz UTC) | อัปเดต reserved [T20](../plan/05-task-list.md#L233); อ่าน repository/API ที่ query ตาราง | reserved [T20](../plan/05-task-list.md#L233) |
+| `id` | `uuid` | NO | — | รหัสประจำแถว (UUIDv7 ที่แอปสร้าง) | reserved — ไม่มี writer/reader บน main ([T20](../plan/05-task-list.md#L233)) | reserved [T20](../plan/05-task-list.md#L233) |
+| `tenant_id` | `uuid` | NO | — | รหัสร้านที่แถวนี้สังกัด ใช้กรองด้วย RLS | reserved — ไม่มี writer/reader บน main ([T20](../plan/05-task-list.md#L233)) | reserved [T20](../plan/05-task-list.md#L233) |
+| `order_id` | `uuid` | NO | — | ออเดอร์ที่แถวนี้สังกัด | reserved — ไม่มี writer/reader บน main ([T20](../plan/05-task-list.md#L233)) | reserved [T20](../plan/05-task-list.md#L233) |
+| `external_return_id` | `text` | YES | — | รหัสคืนสินค้าจากช่องทาง | reserved — ไม่มี writer/reader บน main ([T20](../plan/05-task-list.md#L233)) | reserved [T20](../plan/05-task-list.md#L233) |
+| `type` | `text` | NO | — | ประเภทคำขอ | reserved — ไม่มี writer/reader บน main ([T20](../plan/05-task-list.md#L233)) | enum: RETURN, RTS; reserved [T20](../plan/05-task-list.md#L233) |
+| `status` | `text` | NO | `'REQUESTED'::text` | สถานะคำขอ | reserved — ไม่มี writer/reader บน main ([T20](../plan/05-task-list.md#L233)) | enum: REQUESTED, APPROVED, REJECTED, RECEIVED, CLOSED; reserved [T20](../plan/05-task-list.md#L233) |
+| `rejected` | `boolean` | NO | `false` | เคยถูกปฏิเสธแล้ว (sticky ไม่ล้าง) | reserved — ไม่มี writer/reader บน main ([T20](../plan/05-task-list.md#L233)) | reserved [T20](../plan/05-task-list.md#L233) — trigger return_request_rejected_guard |
+| `reason` | `text` | YES | — | เหตุผลที่ขอคืน | reserved — ไม่มี writer/reader บน main ([T20](../plan/05-task-list.md#L233)) | reserved [T20](../plan/05-task-list.md#L233) |
+| `requested_at` | `timestamp with time zone` | NO | `now()` | เวลายื่นคำขอ (UTC) | reserved — ไม่มี writer/reader บน main ([T20](../plan/05-task-list.md#L233)) | reserved [T20](../plan/05-task-list.md#L233) |
+| `received_at` | `timestamp with time zone` | YES | — | เวลารับสินค้าคืน (UTC) | reserved — ไม่มี writer/reader บน main ([T20](../plan/05-task-list.md#L233)) | reserved [T20](../plan/05-task-list.md#L233) |
+| `created_at` | `timestamp with time zone` | NO | `now()` | เวลาที่แถวถูกสร้าง (timestamptz UTC) | reserved — ไม่มี writer/reader บน main ([T20](../plan/05-task-list.md#L233)) | reserved [T20](../plan/05-task-list.md#L233) |
+| `updated_at` | `timestamp with time zone` | NO | `now()` | เวลาที่แถวถูกแก้ไขล่าสุด (timestamptz UTC) | reserved — ไม่มี writer/reader บน main ([T20](../plan/05-task-list.md#L233)) | reserved [T20](../plan/05-task-list.md#L233) |
 
 ### `return_line`
 
@@ -1084,16 +1087,16 @@ erDiagram
 
 | field | type | null | default | ความหมาย | ใช้ทำอะไร / ใครเขียน-ใครอ่าน | หมายเหตุ |
 |---|---|---|---|---|---|---|
-| `id` | `uuid` | NO | — | รหัสประจำแถว (UUIDv7 ที่แอปสร้าง) | PK; เขียน reserved [T20](../plan/05-task-list.md#L233); อ่าน repository/API ที่ query ตาราง | reserved [T20](../plan/05-task-list.md#L233) |
-| `tenant_id` | `uuid` | NO | — | รหัสร้านที่แถวนี้สังกัด ใช้กรองด้วย RLS | INSERT ใส่ tenant ปัจจุบัน; RLS กรองทุก SELECT | reserved [T20](../plan/05-task-list.md#L233) |
-| `order_id` | `uuid` | NO | — | ออเดอร์ที่แถวนี้สังกัด | เขียน reserved [T20](../plan/05-task-list.md#L233); อ่าน repository/API ที่ query ตาราง | reserved [T20](../plan/05-task-list.md#L233) |
-| `return_id` | `uuid` | NO | — | คำขอคืนที่บรรทัดนี้สังกัด | เขียน reserved [T20](../plan/05-task-list.md#L233); อ่าน repository/API ที่ query ตาราง | reserved [T20](../plan/05-task-list.md#L233) |
-| `order_line_id` | `uuid` | NO | — | บรรทัดออเดอร์ที่คืน | เขียน reserved [T20](../plan/05-task-list.md#L233); อ่าน repository/API ที่ query ตาราง | reserved [T20](../plan/05-task-list.md#L233) |
-| `qty` | `integer` | NO | — | จำนวนที่ขอคืน | เขียน reserved [T20](../plan/05-task-list.md#L233); อ่าน repository/API ที่ query ตาราง | reserved [T20](../plan/05-task-list.md#L233) |
-| `condition` | `text` | YES | — | สภาพสินค้าเมื่อรับคืน | เขียน reserved [T20](../plan/05-task-list.md#L233); อ่าน repository/API ที่ query ตาราง | enum: RESELLABLE, DAMAGED หรือ NULL ก่อนรับ; reserved [T20](../plan/05-task-list.md#L233) |
-| `restocked_qty` | `integer` | NO | `0` | จำนวนที่นำกลับเข้าสต็อกแล้ว | เขียน reserved [T20](../plan/05-task-list.md#L233); อ่าน repository/API ที่ query ตาราง | reserved [T20](../plan/05-task-list.md#L233) |
-| `created_at` | `timestamp with time zone` | NO | `now()` | เวลาที่แถวถูกสร้าง (timestamptz UTC) | INSERT default now(); อ่าน repository/API ที่ query ตาราง | reserved [T20](../plan/05-task-list.md#L233) |
-| `updated_at` | `timestamp with time zone` | NO | `now()` | เวลาที่แถวถูกแก้ไขล่าสุด (timestamptz UTC) | อัปเดต reserved [T20](../plan/05-task-list.md#L233); อ่าน repository/API ที่ query ตาราง | reserved [T20](../plan/05-task-list.md#L233) |
+| `id` | `uuid` | NO | — | รหัสประจำแถว (UUIDv7 ที่แอปสร้าง) | reserved — ไม่มี writer/reader บน main ([T20](../plan/05-task-list.md#L233)) | reserved [T20](../plan/05-task-list.md#L233) |
+| `tenant_id` | `uuid` | NO | — | รหัสร้านที่แถวนี้สังกัด ใช้กรองด้วย RLS | reserved — ไม่มี writer/reader บน main ([T20](../plan/05-task-list.md#L233)) | reserved [T20](../plan/05-task-list.md#L233) |
+| `order_id` | `uuid` | NO | — | ออเดอร์ที่แถวนี้สังกัด | reserved — ไม่มี writer/reader บน main ([T20](../plan/05-task-list.md#L233)) | reserved [T20](../plan/05-task-list.md#L233) |
+| `return_id` | `uuid` | NO | — | คำขอคืนที่บรรทัดนี้สังกัด | reserved — ไม่มี writer/reader บน main ([T20](../plan/05-task-list.md#L233)) | reserved [T20](../plan/05-task-list.md#L233) |
+| `order_line_id` | `uuid` | NO | — | บรรทัดออเดอร์ที่คืน | reserved — ไม่มี writer/reader บน main ([T20](../plan/05-task-list.md#L233)) | reserved [T20](../plan/05-task-list.md#L233) |
+| `qty` | `integer` | NO | — | จำนวนที่ขอคืน | reserved — ไม่มี writer/reader บน main ([T20](../plan/05-task-list.md#L233)) | reserved [T20](../plan/05-task-list.md#L233) |
+| `condition` | `text` | YES | — | สภาพสินค้าเมื่อรับคืน | reserved — ไม่มี writer/reader บน main ([T20](../plan/05-task-list.md#L233)) | enum: RESELLABLE, DAMAGED หรือ NULL ก่อนรับ; reserved [T20](../plan/05-task-list.md#L233) |
+| `restocked_qty` | `integer` | NO | `0` | จำนวนที่นำกลับเข้าสต็อกแล้ว | reserved — ไม่มี writer/reader บน main ([T20](../plan/05-task-list.md#L233)) | reserved [T20](../plan/05-task-list.md#L233) |
+| `created_at` | `timestamp with time zone` | NO | `now()` | เวลาที่แถวถูกสร้าง (timestamptz UTC) | reserved — ไม่มี writer/reader บน main ([T20](../plan/05-task-list.md#L233)) | reserved [T20](../plan/05-task-list.md#L233) |
+| `updated_at` | `timestamp with time zone` | NO | `now()` | เวลาที่แถวถูกแก้ไขล่าสุด (timestamptz UTC) | reserved — ไม่มี writer/reader บน main ([T20](../plan/05-task-list.md#L233)) | reserved [T20](../plan/05-task-list.md#L233) |
 
 ### `refund`
 
@@ -1122,18 +1125,18 @@ erDiagram
 
 | field | type | null | default | ความหมาย | ใช้ทำอะไร / ใครเขียน-ใครอ่าน | หมายเหตุ |
 |---|---|---|---|---|---|---|
-| `id` | `uuid` | NO | — | รหัสประจำแถว (UUIDv7 ที่แอปสร้าง) | PK; เขียน reserved [T21](../plan/05-task-list.md#L237); อ่าน repository/API ที่ query ตาราง | reserved [T21](../plan/05-task-list.md#L237) |
-| `tenant_id` | `uuid` | NO | — | รหัสร้านที่แถวนี้สังกัด ใช้กรองด้วย RLS | INSERT ใส่ tenant ปัจจุบัน; RLS กรองทุก SELECT | reserved [T21](../plan/05-task-list.md#L237) |
-| `order_id` | `uuid` | NO | — | ออเดอร์ที่แถวนี้สังกัด | เขียน reserved [T21](../plan/05-task-list.md#L237); อ่าน repository/API ที่ query ตาราง | reserved [T21](../plan/05-task-list.md#L237) |
-| `return_id` | `uuid` | YES | — | คำขอคืนที่เกี่ยว (ถ้ามี) | เขียน reserved [T21](../plan/05-task-list.md#L237); อ่าน repository/API ที่ query ตาราง | reserved [T21](../plan/05-task-list.md#L237) |
-| `provider_ref` | `text` | YES | — | อ้างอิงจาก payment provider | เขียน reserved [T21](../plan/05-task-list.md#L237); อ่าน repository/API ที่ query ตาราง | reserved [T21](../plan/05-task-list.md#L237) |
-| `amount` | `numeric` | NO | — | จำนวนเงินคืน (บาท) | เขียน reserved [T21](../plan/05-task-list.md#L237); อ่าน repository/API ที่ query ตาราง | เงิน THB numeric(14,2); reserved [T21](../plan/05-task-list.md#L237) |
-| `currency` | `text` | NO | `'THB'::text` | สกุลเงินของ refund (schema คาด THB) | เขียน reserved [T21](../plan/05-task-list.md#L237); อ่าน repository/API ที่ query ตาราง | reserved [T21](../plan/05-task-list.md#L237) |
-| `status` | `text` | NO | — | สถานะ refund จาก TSF Pay | เขียน reserved [T21](../plan/05-task-list.md#L237); อ่าน repository/API ที่ query ตาราง | enum: PENDING, SUCCEEDED, FAILED; reserved [T21](../plan/05-task-list.md#L237) |
-| `observed_at` | `timestamp with time zone` | NO | — | เวลาที่สะท้อนจาก provider (UTC) | เขียน reserved [T21](../plan/05-task-list.md#L237); อ่าน repository/API ที่ query ตาราง | reserved [T21](../plan/05-task-list.md#L237) |
-| `source_event_id` | `text` | NO | — | event id จาก inbox ใช้ dedup | เขียน reserved [T21](../plan/05-task-list.md#L237); อ่าน repository/API ที่ query ตาราง | reserved [T21](../plan/05-task-list.md#L237); unique ต่อ tenant |
-| `created_at` | `timestamp with time zone` | NO | `now()` | เวลาที่แถวถูกสร้าง (timestamptz UTC) | INSERT default now(); อ่าน repository/API ที่ query ตาราง | reserved [T21](../plan/05-task-list.md#L237) |
-| `updated_at` | `timestamp with time zone` | NO | `now()` | เวลาที่แถวถูกแก้ไขล่าสุด (timestamptz UTC) | อัปเดต reserved [T21](../plan/05-task-list.md#L237); อ่าน repository/API ที่ query ตาราง | reserved [T21](../plan/05-task-list.md#L237) |
+| `id` | `uuid` | NO | — | รหัสประจำแถว (UUIDv7 ที่แอปสร้าง) | reserved — ไม่มี writer/reader บน main ([T21](../plan/05-task-list.md#L237)) | reserved [T21](../plan/05-task-list.md#L237) |
+| `tenant_id` | `uuid` | NO | — | รหัสร้านที่แถวนี้สังกัด ใช้กรองด้วย RLS | reserved — ไม่มี writer/reader บน main ([T21](../plan/05-task-list.md#L237)) | reserved [T21](../plan/05-task-list.md#L237) |
+| `order_id` | `uuid` | NO | — | ออเดอร์ที่แถวนี้สังกัด | reserved — ไม่มี writer/reader บน main ([T21](../plan/05-task-list.md#L237)) | reserved [T21](../plan/05-task-list.md#L237) |
+| `return_id` | `uuid` | YES | — | คำขอคืนที่เกี่ยว (ถ้ามี) | reserved — ไม่มี writer/reader บน main ([T21](../plan/05-task-list.md#L237)) | reserved [T21](../plan/05-task-list.md#L237) |
+| `provider_ref` | `text` | YES | — | อ้างอิงจาก payment provider | reserved — ไม่มี writer/reader บน main ([T21](../plan/05-task-list.md#L237)) | reserved [T21](../plan/05-task-list.md#L237) |
+| `amount` | `numeric` | NO | — | จำนวนเงินคืน (บาท) | reserved — ไม่มี writer/reader บน main ([T21](../plan/05-task-list.md#L237)) | เงิน THB numeric(14,2); reserved [T21](../plan/05-task-list.md#L237) |
+| `currency` | `text` | NO | `'THB'::text` | สกุลเงินของ refund (schema คาด THB) | reserved — ไม่มี writer/reader บน main ([T21](../plan/05-task-list.md#L237)) | reserved [T21](../plan/05-task-list.md#L237) |
+| `status` | `text` | NO | — | สถานะ refund จาก TSF Pay | reserved — ไม่มี writer/reader บน main ([T21](../plan/05-task-list.md#L237)) | enum: PENDING, SUCCEEDED, FAILED; reserved [T21](../plan/05-task-list.md#L237) |
+| `observed_at` | `timestamp with time zone` | NO | — | เวลาที่สะท้อนจาก provider (UTC) | reserved — ไม่มี writer/reader บน main ([T21](../plan/05-task-list.md#L237)) | reserved [T21](../plan/05-task-list.md#L237) |
+| `source_event_id` | `text` | NO | — | event id จาก inbox ใช้ dedup | reserved — ไม่มี writer/reader บน main ([T21](../plan/05-task-list.md#L237)) | reserved [T21](../plan/05-task-list.md#L237); unique ต่อ tenant |
+| `created_at` | `timestamp with time zone` | NO | `now()` | เวลาที่แถวถูกสร้าง (timestamptz UTC) | reserved — ไม่มี writer/reader บน main ([T21](../plan/05-task-list.md#L237)) | reserved [T21](../plan/05-task-list.md#L237) |
+| `updated_at` | `timestamp with time zone` | NO | `now()` | เวลาที่แถวถูกแก้ไขล่าสุด (timestamptz UTC) | reserved — ไม่มี writer/reader บน main ([T21](../plan/05-task-list.md#L237)) | reserved [T21](../plan/05-task-list.md#L237) |
 
 ### `payment_status_snapshot`
 
@@ -1161,19 +1164,19 @@ erDiagram
 
 | field | type | null | default | ความหมาย | ใช้ทำอะไร / ใครเขียน-ใครอ่าน | หมายเหตุ |
 |---|---|---|---|---|---|---|
-| `id` | `uuid` | NO | — | รหัสประจำแถว (UUIDv7 ที่แอปสร้าง) | PK; เขียน reserved [T21](../plan/05-task-list.md#L237); อ่าน repository/API ที่ query ตาราง | reserved [T21](../plan/05-task-list.md#L237) |
-| `tenant_id` | `uuid` | NO | — | รหัสร้านที่แถวนี้สังกัด ใช้กรองด้วย RLS | INSERT ใส่ tenant ปัจจุบัน; RLS กรองทุก SELECT | reserved [T21](../plan/05-task-list.md#L237) |
-| `order_id` | `uuid` | NO | — | ออเดอร์ที่แถวนี้สังกัด | เขียน reserved [T21](../plan/05-task-list.md#L237); อ่าน repository/API ที่ query ตาราง | reserved [T21](../plan/05-task-list.md#L237) |
-| `provider` | `text` | NO | — | ผู้ให้บริการชำระเงิน | เขียน reserved [T21](../plan/05-task-list.md#L237); อ่าน repository/API ที่ query ตาราง | enum: XENDIT, OPN; reserved [T21](../plan/05-task-list.md#L237) |
-| `provider_ref` | `text` | YES | — | อ้างอิงจาก payment provider | เขียน reserved [T21](../plan/05-task-list.md#L237); อ่าน repository/API ที่ query ตาราง | reserved [T21](../plan/05-task-list.md#L237) |
-| `status` | `text` | NO | — | สถานะดิบจาก provider (ไม่ enumerate ใน schema) | เขียน reserved [T21](../plan/05-task-list.md#L237); อ่าน repository/API ที่ query ตาราง | reserved [T21](../plan/05-task-list.md#L237) |
-| `amount` | `numeric` | NO | — | ยอดชำระ (บาท) | เขียน reserved [T21](../plan/05-task-list.md#L237); อ่าน repository/API ที่ query ตาราง | เงิน THB numeric(14,2); reserved [T21](../plan/05-task-list.md#L237) |
-| `refunded_amount` | `numeric` | NO | `0` | ยอดที่ refund แล้ว (บาท) | เขียน reserved [T21](../plan/05-task-list.md#L237); อ่าน repository/API ที่ query ตาราง | เงิน THB numeric(14,2); reserved [T21](../plan/05-task-list.md#L237) |
-| `currency` | `text` | NO | `'THB'::text` | สกุลเงินของ snapshot (schema คาด THB) | เขียน reserved [T21](../plan/05-task-list.md#L237); อ่าน repository/API ที่ query ตาราง | reserved [T21](../plan/05-task-list.md#L237) |
-| `paid_at` | `timestamp with time zone` | YES | — | เวลาชำระสำเร็จ (UTC) | เขียน reserved [T21](../plan/05-task-list.md#L237); อ่าน repository/API ที่ query ตาราง | reserved [T21](../plan/05-task-list.md#L237) |
-| `observed_at` | `timestamp with time zone` | NO | — | เวลาที่สะท้อนจาก provider (UTC) | เขียน reserved [T21](../plan/05-task-list.md#L237); อ่าน repository/API ที่ query ตาราง | reserved [T21](../plan/05-task-list.md#L237) |
-| `source_event_id` | `text` | NO | — | event id จาก inbox ใช้ dedup | เขียน reserved [T21](../plan/05-task-list.md#L237); อ่าน repository/API ที่ query ตาราง | reserved [T21](../plan/05-task-list.md#L237); append-only |
-| `created_at` | `timestamp with time zone` | NO | `now()` | เวลาที่บันทึก snapshot (UTC) | INSERT default now(); อ่าน repository/API ที่ query ตาราง | append-only; reserved [T21](../plan/05-task-list.md#L237) |
+| `id` | `uuid` | NO | — | รหัสประจำแถว (UUIDv7 ที่แอปสร้าง) | reserved — ไม่มี writer/reader บน main ([T21](../plan/05-task-list.md#L237)) | reserved [T21](../plan/05-task-list.md#L237) |
+| `tenant_id` | `uuid` | NO | — | รหัสร้านที่แถวนี้สังกัด ใช้กรองด้วย RLS | reserved — ไม่มี writer/reader บน main ([T21](../plan/05-task-list.md#L237)) | reserved [T21](../plan/05-task-list.md#L237) |
+| `order_id` | `uuid` | NO | — | ออเดอร์ที่แถวนี้สังกัด | reserved — ไม่มี writer/reader บน main ([T21](../plan/05-task-list.md#L237)) | reserved [T21](../plan/05-task-list.md#L237) |
+| `provider` | `text` | NO | — | ผู้ให้บริการชำระเงิน | reserved — ไม่มี writer/reader บน main ([T21](../plan/05-task-list.md#L237)) | enum: XENDIT, OPN; reserved [T21](../plan/05-task-list.md#L237) |
+| `provider_ref` | `text` | YES | — | อ้างอิงจาก payment provider | reserved — ไม่มี writer/reader บน main ([T21](../plan/05-task-list.md#L237)) | reserved [T21](../plan/05-task-list.md#L237) |
+| `status` | `text` | NO | — | สถานะดิบจาก provider (ไม่ enumerate ใน schema) | reserved — ไม่มี writer/reader บน main ([T21](../plan/05-task-list.md#L237)) | reserved [T21](../plan/05-task-list.md#L237) |
+| `amount` | `numeric` | NO | — | ยอดชำระ (บาท) | reserved — ไม่มี writer/reader บน main ([T21](../plan/05-task-list.md#L237)) | เงิน THB numeric(14,2); reserved [T21](../plan/05-task-list.md#L237) |
+| `refunded_amount` | `numeric` | NO | `0` | ยอดที่ refund แล้ว (บาท) | reserved — ไม่มี writer/reader บน main ([T21](../plan/05-task-list.md#L237)) | เงิน THB numeric(14,2); reserved [T21](../plan/05-task-list.md#L237) |
+| `currency` | `text` | NO | `'THB'::text` | สกุลเงินของ snapshot (schema คาด THB) | reserved — ไม่มี writer/reader บน main ([T21](../plan/05-task-list.md#L237)) | reserved [T21](../plan/05-task-list.md#L237) |
+| `paid_at` | `timestamp with time zone` | YES | — | เวลาชำระสำเร็จ (UTC) | reserved — ไม่มี writer/reader บน main ([T21](../plan/05-task-list.md#L237)) | reserved [T21](../plan/05-task-list.md#L237) |
+| `observed_at` | `timestamp with time zone` | NO | — | เวลาที่สะท้อนจาก provider (UTC) | reserved — ไม่มี writer/reader บน main ([T21](../plan/05-task-list.md#L237)) | reserved [T21](../plan/05-task-list.md#L237) |
+| `source_event_id` | `text` | NO | — | event id จาก inbox ใช้ dedup | reserved — ไม่มี writer/reader บน main ([T21](../plan/05-task-list.md#L237)) | reserved [T21](../plan/05-task-list.md#L237); append-only |
+| `created_at` | `timestamp with time zone` | NO | `now()` | เวลาที่บันทึก snapshot (UTC) | reserved — ไม่มี writer/reader บน main ([T21](../plan/05-task-list.md#L237)) | append-only; reserved [T21](../plan/05-task-list.md#L237) |
 
 ### `inbox_event`
 
@@ -1214,7 +1217,7 @@ erDiagram
 | `processed_at` | `timestamp with time zone` | YES | — | เวลาประมวลผลสำเร็จ (UTC) | อัปเดต `InboxWorker` เมื่อ PROCESSED | — |
 | `aggregate_version` | `bigint` | NO | `0` | เวอร์ชัน envelope; 0 = ผู้ส่งไม่ส่ง; กัน replay เก่า | INSERT `InboxIngestService`; อ่าน `InboxWorker` dedup | — |
 | `payload_sha256` | `bytea` | NO | `'\x'::bytea` | SHA-256 ของ body ครั้งแรก; event_id ซ้ำแต่ hash ต่างยังถือ duplicate | INSERT `InboxIngestService`; อ่าน `InboxIngestService` duplicate check | — |
-| `orphan_recorded_at` | `timestamp with time zone` | YES | — | เวลาที่บันทึกว่าเป็น orphan หลัง defer เกิน max | InboxWorker เมื่อเกิน max-defer | — |
+| `orphan_recorded_at` | `timestamp with time zone` | YES | — | เวลาที่บันทึกว่าเป็น orphan หลัง defer เกิน max | อัปเดต `InboxWorker` เมื่อเกิน max-defer | — |
 
 ### `outbox_event`
 
@@ -1267,13 +1270,13 @@ erDiagram
 
 | field | type | null | default | ความหมาย | ใช้ทำอะไร / ใครเขียน-ใครอ่าน | หมายเหตุ |
 |---|---|---|---|---|---|---|
-| `tenant_id` | `uuid` | NO | — | รหัสร้านที่แถวนี้สังกัด ใช้กรองด้วย RLS | INSERT ใส่ tenant ปัจจุบัน; RLS กรองทุก SELECT | reserved [T12C](../plan/05-task-list.md#L212) |
-| `channel_account_id` | `uuid` | NO | — | บัญชีช่องทางที่ cursor นี้ผูก | เขียน reserved [T12C](../plan/05-task-list.md#L212); อ่าน reserved T12C job | reserved [T12C](../plan/05-task-list.md#L212) |
-| `resource` | `text` | NO | — | ทรัพยากรที่ sync | เขียน reserved [T12C](../plan/05-task-list.md#L212); อ่าน reserved T12C job | enum: ORDERS, LISTINGS; reserved [T12C](../plan/05-task-list.md#L212) |
-| `cursor` | `text` | YES | — | ตำแหน่ง cursor ล่าสุด | เขียน reserved [T12C](../plan/05-task-list.md#L212); อ่าน reserved T12C job | reserved [T12C](../plan/05-task-list.md#L212) |
-| `last_success_at` | `timestamp with time zone` | YES | — | เวลา sync สำเร็จล่าสุด (UTC) | เขียน reserved [T12C](../plan/05-task-list.md#L212); อ่าน reserved T12C job | reserved [T12C](../plan/05-task-list.md#L212) |
-| `created_at` | `timestamp with time zone` | NO | `now()` | เวลาที่แถวถูกสร้าง (timestamptz UTC) | INSERT default now(); อ่าน reserved T12C job | reserved [T12C](../plan/05-task-list.md#L212) |
-| `updated_at` | `timestamp with time zone` | NO | `now()` | เวลาที่แถวถูกแก้ไขล่าสุด (timestamptz UTC) | อัปเดต reserved [T12C](../plan/05-task-list.md#L212); อ่าน reserved T12C job | reserved [T12C](../plan/05-task-list.md#L212) |
+| `tenant_id` | `uuid` | NO | — | รหัสร้านที่แถวนี้สังกัด ใช้กรองด้วย RLS | reserved — ไม่มี writer/reader บน main ([T12C](../plan/05-task-list.md#L212)) | reserved [T12C](../plan/05-task-list.md#L212) |
+| `channel_account_id` | `uuid` | NO | — | บัญชีช่องทางที่ cursor นี้ผูก | reserved — ไม่มี writer/reader บน main ([T12C](../plan/05-task-list.md#L212)) | reserved [T12C](../plan/05-task-list.md#L212) |
+| `resource` | `text` | NO | — | ทรัพยากรที่ sync | reserved — ไม่มี writer/reader บน main ([T12C](../plan/05-task-list.md#L212)) | enum: ORDERS, LISTINGS; reserved [T12C](../plan/05-task-list.md#L212) |
+| `cursor` | `text` | YES | — | ตำแหน่ง cursor ล่าสุด | reserved — ไม่มี writer/reader บน main ([T12C](../plan/05-task-list.md#L212)) | reserved [T12C](../plan/05-task-list.md#L212) |
+| `last_success_at` | `timestamp with time zone` | YES | — | เวลา sync สำเร็จล่าสุด (UTC) | reserved — ไม่มี writer/reader บน main ([T12C](../plan/05-task-list.md#L212)) | reserved [T12C](../plan/05-task-list.md#L212) |
+| `created_at` | `timestamp with time zone` | NO | `now()` | เวลาที่แถวถูกสร้าง (timestamptz UTC) | reserved — ไม่มี writer/reader บน main ([T12C](../plan/05-task-list.md#L212)) | reserved [T12C](../plan/05-task-list.md#L212) |
+| `updated_at` | `timestamp with time zone` | NO | `now()` | เวลาที่แถวถูกแก้ไขล่าสุด (timestamptz UTC) | reserved — ไม่มี writer/reader บน main ([T12C](../plan/05-task-list.md#L212)) | reserved [T12C](../plan/05-task-list.md#L212) |
 
 ### `idempotency_key`
 
@@ -1383,7 +1386,7 @@ erDiagram
 | `tenant_id` | `uuid` | NO | — | รหัสร้านที่แถวนี้สังกัด ใช้กรองด้วย RLS | INSERT ใส่ tenant ปัจจุบัน; RLS กรองทุก SELECT | — |
 | `actor_type` | `text` | NO | — | ประเภทผู้กระทำ | เขียน audit writers (ดูคอลัมน์ action); อ่าน repository/API ที่ query ตาราง | enum: USER, SYSTEM, TSF, PLATFORM_ADMIN; append-only — ห้าม UPDATE/DELETE |
 | `actor_id` | `text` | YES | — | รหัสผู้กระทำ (text) | เขียน audit writers (ดูคอลัมน์ action); อ่าน repository/API ที่ query ตาราง | append-only — ห้าม UPDATE/DELETE |
-| `action` | `text` | NO | — | รหัสการกระทำ — เช่น `auth.login`, `membership.changed`, `PRODUCT_CREATED`/`PRODUCT_UPDATED`/`PRODUCT_ARCHIVED`/`PRODUCT_DELETED`, `SKU_CREATED`/`SKU_UPDATED`/`SKU_DELETED`, `CATALOG_IMPORTED`, `CHANNEL_LISTING_MAPPED`/`CHANNEL_LISTING_UNMAPPED`, `ORDER_CANCEL_REQUESTED`, `ORDER_HOLD_RECHECKED`, `outbox.retry` | เขียน `TenantSessionService` (auth.login), `MembershipChangedHandler` (membership.changed), `CatalogAudit`/`ProductService`/`SkuService`/`CatalogImportService` (PRODUCT_*/SKU_*/CATALOG_IMPORTED), `ListingAudit` (CHANNEL_LISTING_MAPPED/UNMAPPED), `OrderAudit` (ORDER_CANCEL_REQUESTED, ORDER_HOLD_RECHECKED), `OutboxAdminService` (outbox.retry); อ่าน ops/SQL | append-only — ห้าม UPDATE/DELETE |
+| `action` | `text` | NO | — | รหัสการกระทำ — เช่น `auth.login`, `membership.changed`, `PRODUCT_CREATED`/`PRODUCT_UPDATED`/`PRODUCT_ARCHIVED`/`PRODUCT_DELETED`, `SKU_CREATED`/`SKU_UPDATED`/`SKU_DELETED`, `CATALOG_IMPORTED`, `CHANNEL_LISTING_MAPPED`/`CHANNEL_LISTING_UNMAPPED`, `ORDER_CANCEL_REQUESTED`, `ORDER_HOLD_RECHECKED`, `outbox.retry` | เขียน `TenantSessionService` (auth.login), `MembershipChangedHandler` (membership.changed), `CatalogAudit`, `ListingAudit`, `OrderAudit` (PRODUCT/SKU/CATALOG/CHANNEL_LISTING/ORDER_* constants), `OutboxAdminService` (outbox.retry); อ่าน ops/SQL | append-only — ห้าม UPDATE/DELETE |
 | `entity_type` | `text` | NO | — | ประเภท entity ที่ถูก audit | เขียน audit writers (ดูคอลัมน์ action); อ่าน repository/API ที่ query ตาราง | append-only — ห้าม UPDATE/DELETE |
 | `entity_id` | `text` | YES | — | รหัส entity | เขียน audit writers (ดูคอลัมน์ action); อ่าน repository/API ที่ query ตาราง | append-only — ห้าม UPDATE/DELETE |
 | `before` | `jsonb` | YES | — | snapshot ก่อนเปลี่ยน (JSON) | เขียน audit writers (ดูคอลัมน์ action); อ่าน repository/API ที่ query ตาราง | append-only — ห้าม UPDATE/DELETE |

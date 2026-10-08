@@ -1,4 +1,4 @@
-> **Generated** — แก้ที่ `docs/tools/modules_body.md` / `docs/tools/pages_body.md` แล้วรัน `python docs/tools/build_reference_docs.py`.
+> **Generated** — แก้ usage ที่ `docs/tools/generate_field_usage.py` (OVERRIDES) + meanings ที่ `docs/tools/field_meta/all_fields.py`; รัน `python docs/tools/generate_field_usage.py` แล้ว `python docs/tools/build_reference_docs.py`. หน้า PAGES/MODULES แก้ที่ `pages_body.md` / `modules_body.md`.
 
 # Backend modules
 

@@ -14,8 +14,9 @@ DEFAULT_SCHEMA = ROOT / "docs/schema/schema-ee4e425_39c6.sql"
 DEFAULT_COLS = ROOT / "docs/schema/columns-ee4e425_4276.tsv"
 REF = "อ้างอิง main @ ee4e425 (Flyway V13)"
 GENERATED_NOTE = (
-    "> **Generated** — แก้ที่ `docs/tools/modules_body.md` / `docs/tools/pages_body.md` "
-    "แล้วรัน `python docs/tools/build_reference_docs.py`.\n\n"
+    "> **Generated** — แก้ usage ที่ `docs/tools/generate_field_usage.py` (OVERRIDES) + meanings ที่ "
+    "`docs/tools/field_meta/all_fields.py`; รัน `python docs/tools/generate_field_usage.py` แล้ว "
+    "`python docs/tools/build_reference_docs.py`. หน้า PAGES/MODULES แก้ที่ `pages_body.md` / `modules_body.md`.\n\n"
 )
 
 sys.path.insert(0, str(ROOT / "docs/tools"))
@@ -242,7 +243,7 @@ def field_row(table: str, col: str, dtype: str, nullable: str, default: str, met
     meaning = fm["meaning"].strip()
     if not meaning or meaning == "—":
         raise ValueError(f"Blank meaning: {table}.{col}")
-    usage = fm.get("usage", "").strip() or USAGE.get(key, "").strip()
+    usage = USAGE.get(key, "").strip() or fm.get("usage", "").strip()
     if not usage:
         raise ValueError(f"Missing usage: {table}.{col}")
     notes_parts = []
@@ -379,7 +380,7 @@ def build_data_dictionary(schema_path: Path, cols_path: Path):
     columns = parse_columns(cols_path)
     col_types = {(t, c[1]): c[2] for t, cols in columns.items() for c in cols}
     parts = [
-        f"# OMS Data Dictionary\n\n{REF}\n",
+        f"# OMS Data Dictionary\n\n{REF}\n\n{GENERATED_NOTE}",
         "พจนานุกรมข้อมูลทุกคอลัมน์ธุรกิจ (329) จาก `docs/schema/schema-ee4e425_39c6.sql` / `columns-ee4e425_4276.tsv` "
         "cross-check กับ Flyway V1–V13 และ Java. หลักการ RLS/PII: [03-data-model.md](../plan/03-data-model.md).\n",
         "## ภาพรวมตาม domain\n",

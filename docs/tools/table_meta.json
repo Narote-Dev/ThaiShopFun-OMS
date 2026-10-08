@@ -136,36 +136,36 @@
     "purpose": "การจัดส่ง",
     "phase": "T18 Phase 3",
     "live": "placeholder read-only",
-    "writers": "reserved T18 — ยังไม่มี writer main",
+    "writers": "reserved [T18](../plan/05-task-list.md#L229) — ยังไม่มี writer main",
     "readers": "`OrderQueryService.loadShipments`"
   },
   "return_request": {
     "purpose": "คำขอคืน",
     "phase": "T20",
     "live": "reserved",
-    "writers": "reserved T20",
-    "readers": "reserved T20"
+    "writers": "reserved [T20](../plan/05-task-list.md#L233)",
+    "readers": "ไม่มี reader บน main"
   },
   "return_line": {
     "purpose": "บรรทัดคืน",
     "phase": "T20",
     "live": "reserved",
-    "writers": "reserved T20",
-    "readers": "reserved T20"
+    "writers": "reserved [T20](../plan/05-task-list.md#L233)",
+    "readers": "ไม่มี reader บน main"
   },
   "refund": {
     "purpose": "refund snapshot",
     "phase": "T21 / TSF-10",
     "live": "reserved",
-    "writers": "reserved T21",
-    "readers": "reserved T21"
+    "writers": "reserved [T21](../plan/05-task-list.md#L237)",
+    "readers": "ไม่มี reader บน main"
   },
   "payment_status_snapshot": {
     "purpose": "payment snapshot",
     "phase": "T21",
     "live": "reserved",
-    "writers": "reserved T21",
-    "readers": "derived `sales_order.payment_status`"
+    "writers": "reserved [T21](../plan/05-task-list.md#L237)",
+    "readers": "ไม่มี reader บน main"
   },
   "inbox_event": {
     "purpose": "คิว webhook",
@@ -185,8 +185,8 @@
     "purpose": "cursor sync",
     "phase": "T12C (#26)",
     "live": "reserved",
-    "writers": "reserved T12C",
-    "readers": "reserved T12C"
+    "writers": "reserved [T12C](../plan/05-task-list.md#L212)",
+    "readers": "ไม่มี reader บน main"
   },
   "idempotency_key": {
     "purpose": "idempotent API",

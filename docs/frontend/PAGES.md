@@ -1,4 +1,4 @@
-> **Generated** — แก้ที่ `docs/tools/modules_body.md` / `docs/tools/pages_body.md` แล้วรัน `python docs/tools/build_reference_docs.py`.
+> **Generated** — แก้ usage ที่ `docs/tools/generate_field_usage.py` (OVERRIDES) + meanings ที่ `docs/tools/field_meta/all_fields.py`; รัน `python docs/tools/generate_field_usage.py` แล้ว `python docs/tools/build_reference_docs.py`. หน้า PAGES/MODULES แก้ที่ `pages_body.md` / `modules_body.md`.
 
 # Frontend pages
 
@@ -90,7 +90,7 @@ Hash routing (`#/...`). สี/label: [`frontend/src/ui/status.ts`](../../fronte
 
 - **Hash params:** `channel_account_id`, `mapped` (`true`/`false`/`all`, default **unmapped**), `removed=true`, `q`, `offset` — เปิด chip removed บังคับ `mapped=all` **เฉพาะเมื่อ** filter เดิมเป็น unmapped (ถ้าเลือก mapped/all อยู่แล้วไม่เปลี่ยน)
 - **API:** `GET /api/v1/channel-accounts`, `GET /api/v1/channel-listings`, `PUT .../mapping`, `DELETE .../mapping`, `POST .../listing-syncs`
-- **ส่วน:** filter บัญชี, select mapped/unmapped/all, **chip removed** (`aria-pressed` toggle — เปิดแล้วบังคับ `mapped=all`), ค้นหา seller sku/name, ตาราง, ปุ่ม sync, dialog แมป SKU
+- **ส่วน:** filter บัญชี, select mapped/unmapped/all, **chip removed** (`aria-pressed` toggle — เปิดแล้วบังคับ `mapped=all` เฉพาะเมื่อ filter เดิมเป็น unmapped), ค้นหา seller sku/name, ตาราง, ปุ่ม sync, dialog แมป SKU
 - **Sync result (ไทยใน UI):** แสดงจำนวน inserted/updated/removed + `ReevalSummary` (released/outOfStock/stillHeld/deferred)
 - **Warning:** `removal_skipped` เมื่อ sync guard บล็อกการ mark removed มากเกิน (`max-removal-ratio`)
 - **Removed:** chip toggle กรอง `removed=true`; แถวที่ `removed_at` มี chip “removed” และ **ซ่อน**ปุ่ม Map/Unmap (`!row.removed_at`)

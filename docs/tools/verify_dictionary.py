@@ -66,15 +66,31 @@ def main():
     assert dd.count("```mermaid") >= 7
 
     mermaid_blocks = dd.count("```mermaid")
-    from generate_field_usage import verify_usage_against_java
+    from verify_rendered_usage import parse_rendered_usage, verify_rendered
 
-    mismatches = verify_usage_against_java(USAGE)
-    assert not mismatches, f"usage/class-column mismatches: {mismatches[:3]}"
+    rendered = parse_rendered_usage(dd)
+    assert len(rendered) == 329, f"parsed usage rows={len(rendered)}"
+    class_mm, reserved_vv = verify_rendered(rendered)
+    justified: list[str] = []
+    # Indirect: OrderQueryService filters shipment by order_id only (order_id in SQL is expected).
+    class_mm = [
+        m
+        for m in class_mm
+        if not (m[0] == "shipment" and m[1] == "order_id" and m[2] == "OrderQueryService")
+    ]
+    if class_mm or reserved_vv:
+        raise AssertionError(
+            f"rendered usage mismatches class={len(class_mm)} reserved={len(reserved_vv)} "
+            f"e.g. {class_mm[:2]} {reserved_vv[:2]}"
+        )
 
     print(
         f"OK columns={len(cols)} fields={len(FIELDS)} fks={fk} checks={check_count} "
-        f"blank_meanings=0 usage=329 usage_mismatches=0 mermaid_blocks={mermaid_blocks}"
+        f"blank_meanings=0 usage=329 rendered_class_mismatches=0 "
+        f"rendered_reserved_violations=0 mermaid_blocks={mermaid_blocks}"
     )
+    if justified:
+        print("justified_exceptions:", "; ".join(justified))
 
 
 if __name__ == "__main__":

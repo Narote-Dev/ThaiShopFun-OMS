@@ -43,7 +43,7 @@
 ### `stock_reservation`
 - `owner_type`: `CHECKOUT`, `ORDER`
 - `status`: `ACTIVE`, `CONSUMED`, `RELEASED`, `EXPIRED`
-- Lifecycle: CHECKOUT+TTL → adopt เป็น ORDER (`expires_at` NULL) ผ่าน `ReservationEngine`; expiry job ปล่อย CHECKOUT หมดอายุ
+- Lifecycle: CHECKOUT+TTL → adopt เป็น ORDER (`expires_at` NULL) ผ่าน `ReservationEngine`; `StockExpiryJob` ปล่อย CHECKOUT หมดอายุ (query `owner_type` ผ่าน `StockRepository`)
 
 ### `inventory_ledger.reason`
 `OPENING_BALANCE`, `RECEIVE`, `ADJUST_IN`, `ADJUST_OUT`, `COUNT_CORRECTION`, `DAMAGE_WRITE_OFF`, `RETURN_RESTOCK`, `SHIP`, `RESERVE`, `RELEASE`, `UNPACK`

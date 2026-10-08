@@ -11,7 +11,7 @@ JAVA = ROOT / "backend/src/main/java"
 sys.path.insert(0, str(ROOT / "docs/tools"))
 from field_meta.all_fields import FIELDS  # noqa: E402
 
-INTAKE_INSERT = "เขียน `SalesOrderRepository.insert` (caller OrderIntakeSupport)"
+INTAKE_INSERT = "เขียน `SalesOrderRepository.insert` (caller order intake handlers)"
 STATE_MACHINE = "เขียน `OrderStateMachine` ผ่าน `SalesOrderRepository.updateStatusFields`"
 READ_REPO = "อ่าน `SalesOrderRepository` (`findById` / `findByExternalId`)"
 READ_ORDERS_UI = "อ่าน `OrderQueryService` / orders UI"
@@ -19,6 +19,10 @@ READ_ORDERS_UI = "อ่าน `OrderQueryService` / orders UI"
 # Per (table, column) — verified against main @ ee4e425 Java/SQL
 OVERRIDES: dict[tuple[str, str], str] = {
     # --- app_user ---
+    ("app_user", "id"): "INSERT `upsert_app_user` (V2) จาก `IdentityProvisioner`; อ่าน join `tenant_membership`",
+    ("app_user", "tsf_user_id"): "INSERT/UPDATE `upsert_app_user` (V2) จาก `IdentityProvisioner`; ไม่มี reader บน main",
+    ("app_user", "email"): "INSERT/UPDATE `upsert_app_user` (V2) จาก `IdentityProvisioner`; ไม่มี reader บน main",
+    ("app_user", "display_name"): "INSERT/UPDATE `upsert_app_user` (V2) จาก `IdentityProvisioner`; ไม่มี reader บน main",
     ("app_user", "last_login_at"): "ตั้งโดย `upsert_app_user` (V2) ตอน JIT login; ไม่มี reader บน main",
     # --- tenant ---
     ("tenant", "id"): "INSERT `provision_tenant` (V2); อ่าน `MeService`, RLS",
@@ -38,7 +42,7 @@ OVERRIDES: dict[tuple[str, str], str] = {
     ("channel_account", "stock_sync_paused"): "ไม่มี writer บน main (default false); อ่าน `CheckoutRepository`",
     ("channel_account", "credentials_ref"): "reserved — ไม่มี writer/reader บน main",
     ("channel_account", "token_expires_at"): "reserved — ไม่มี writer/reader บน main",
-    ("channel_account", "last_synced_at"): "เขียน `ChannelListingSyncService` (`UPDATE channel_account SET last_synced_at`); อ่าน listings sync UI/API",
+    ("channel_account", "last_synced_at"): "เขียน `ChannelListingSyncService` (`UPDATE channel_account SET last_synced_at`); ไม่มี reader บน main",
     ("channel_account", "created_at"): "default ตอน INSERT `provision_tenant`; อ่าน `OrderDemoCatalogService` (ORDER BY created_at)",
     ("channel_account", "updated_at"): "trigger/default; ไม่มี writer แยกบน main",
     # --- channel_listing ---
@@ -110,9 +114,9 @@ OVERRIDES: dict[tuple[str, str], str] = {
     ("outbox_event", "payload"): "INSERT `OutboxAppender`; อ่าน `OutboxStore` / `OutboxHttpSender`",
     ("outbox_event", "event_type"): "INSERT `OutboxAppender` (เช่น order.status_changed)",
     ("order_hold_retry", "attempts"): "เขียน `OrderHoldRetryRepository.recordBackoff` (scheduled sweeper); ลบแถวเมื่อ RELEASED/OUT_OF_STOCK",
-    ("order_hold_retry", "next_attempt_at"): "เขียน `recordBackoff` จาก `OrderHoldResolverJob.persistRetryState`",
+    ("order_hold_retry", "next_attempt_at"): "เขียน `OrderHoldRetryRepository.recordBackoff` จาก scheduled hold-resolver job",
     ("order_hold_retry", "last_error"): "เขียน `recordBackoff` — โค้ด STILL_HELD | DEFERRED | simple name ของ exception (ไม่ใช่ message)",
-    ("order_hold_retry", "order_id"): "PK; เขียน/ลบ `OrderHoldResolverJob.persistRetryState`",
+    ("order_hold_retry", "order_id"): "PK; เขียน/ลบ `OrderHoldRetryRepository` จาก hold-resolver job",
     ("order_hold_retry", "tenant_id"): "PK; RLS",
     ("order_hold_retry", "updated_at"): "อัปเดต `OrderHoldRetryRepository`",
     ("inventory", "stock_version"): "อัปเดต `StockRepository` ทุกการเปลี่ยนสต็อก (+1 monotonic); อ่าน payload `stock.updated` ([T15](../plan/05-task-list.md#L216)) — ไม่ใช่ optimistic lock (lock แถว FOR UPDATE)",
@@ -122,7 +126,7 @@ OVERRIDES: dict[tuple[str, str], str] = {
     ("inventory", "updated_at"): "อัปเดต `StockRepository`",
     ("stock_reservation", "id"): "INSERT `StockRepository`; อ่าน `OrderQueryService`",
     ("stock_reservation", "tenant_id"): "INSERT `StockRepository`; RLS",
-    ("stock_reservation", "owner_type"): "INSERT/UPDATE `StockRepository`; อ่าน expiry job",
+    ("stock_reservation", "owner_type"): "INSERT/UPDATE `StockRepository`; อ่าน `StockRepository` (expiry queries)",
     ("stock_reservation", "owner_ref"): "INSERT/UPDATE `StockRepository`; อ่าน `OrderQueryService`",
     ("stock_reservation", "sku_id"): "INSERT `StockRepository` / `ReservationEngine`",
     ("stock_reservation", "warehouse_id"): "INSERT `StockRepository`",
@@ -132,14 +136,14 @@ OVERRIDES: dict[tuple[str, str], str] = {
     ("stock_reservation", "updated_at"): "อัปเดต `StockRepository`",
     ("order_status_history", "id"): "INSERT `OrderStatusHistoryRepository`; อ่าน `OrderQueryService` timeline",
     ("order_status_history", "tenant_id"): "INSERT `OrderStatusHistoryRepository`; RLS",
-    ("order_status_history", "order_id"): "INSERT `OrderStatusHistoryRepository` (caller OrderStateMachine)",
+    ("order_status_history", "order_id"): "INSERT `OrderStatusHistoryRepository` (caller order state machine)",
     ("order_status_history", "dimension"): "INSERT `OrderStatusHistoryRepository`; อ่าน `OrderQueryService`",
     ("order_status_history", "from_value"): "INSERT `OrderStatusHistoryRepository`",
     ("order_status_history", "to_value"): "INSERT `OrderStatusHistoryRepository`",
     ("order_status_history", "reason"): "INSERT `OrderStatusHistoryRepository`",
     ("order_status_history", "actor"): "INSERT `OrderStatusHistoryRepository`",
     ("order_status_history", "created_at"): "INSERT default; อ่าน timeline",
-    ("stock_reservation", "expires_at"): "ตั้ง `CheckoutReserveService`/`ReservationEngine` (CHECKOUT TTL); ORDER unpaid PREPAID = payment_expires_at + grace (`OrderIntakeSupport.adoptForOrder`); ล้าง NULL เมื่อ paid (`StockRepository`)",
+    ("stock_reservation", "expires_at"): "ตั้ง `CheckoutReserveService`/`ReservationEngine` (CHECKOUT TTL); ORDER unpaid PREPAID = payment_expires_at + grace (order intake adopt path); ล้าง NULL เมื่อ paid (`StockRepository`)",
     ("stock_reservation", "status"): "อัปเดต `ReservationEngine`, `StockExpiryJob` (EXPIRED), cancel/release paths",
     ("inbox_event", "id"): "INSERT `InboxIngestService`; อ่าน `InboxWorker`",
     ("inbox_event", "tenant_id"): "INSERT `InboxIngestService`; RLS กรอง",
@@ -179,7 +183,7 @@ OVERRIDES: dict[tuple[str, str], str] = {
     ("idempotency_key", "response_status"): "UPDATE `CheckoutIdempotency`, `StockIdempotency` complete",
     ("idempotency_key", "response_body"): "UPDATE `CheckoutIdempotency`, `StockIdempotency` complete",
     ("idempotency_key", "created_at"): "INSERT default; อ่าน ops",
-    ("audit_log", "action"): "เขียน `TenantSessionService` (auth.login), `MembershipChangedHandler` (membership.changed), `CatalogAudit`/`ProductService`/`SkuService`/`CatalogImportService` (PRODUCT_*/SKU_*/CATALOG_IMPORTED), `ListingAudit` (CHANNEL_LISTING_MAPPED/UNMAPPED), `OrderAudit` (ORDER_CANCEL_REQUESTED, ORDER_HOLD_RECHECKED), `OutboxAdminService` (outbox.retry); อ่าน ops/SQL",
+    ("audit_log", "action"): "เขียน `TenantSessionService` (auth.login), `MembershipChangedHandler` (membership.changed), `CatalogAudit`, `ListingAudit`, `OrderAudit` (PRODUCT/SKU/CATALOG/CHANNEL_LISTING/ORDER_* constants), `OutboxAdminService` (outbox.retry); อ่าน ops/SQL",
 }
 
 TABLE_HINT: dict[str, str] = {
@@ -208,7 +212,7 @@ TABLE_HINT: dict[str, str] = {
     "refund": "reserved [T21](../plan/05-task-list.md#L237)",
     "return_request": "reserved [T20](../plan/05-task-list.md#L233)",
     "return_line": "reserved [T20](../plan/05-task-list.md#L233)",
-    "sync_cursor": "reserved [T12C](../plan/05-task-list.md#L212)",
+    "sync_cursor": "reserved [T12C](../plan/05-task-list.md#L212) — ไม่มี writer/reader บน main",
 }
 
 READ_HINT: dict[str, str] = {
@@ -217,7 +221,7 @@ READ_HINT: dict[str, str] = {
     "order_line": "`OrderQueryService`",
     "inbox_event": "`InboxWorker`",
     "outbox_event": "`OutboxAdminService`",
-    "sync_cursor": "reserved T12C job",
+    "sync_cursor": "ไม่มี reader บน main ([T12C](../plan/05-task-list.md#L212))",
 }
 
 
@@ -225,6 +229,15 @@ def generic_usage(table: str, col: str) -> str:
     key = (table, col)
     if key in OVERRIDES:
         return OVERRIDES[key]
+    if table in ("payment_status_snapshot", "refund"):
+        link = "[T21](../plan/05-task-list.md#L237)"
+        return f"reserved — ไม่มี writer/reader บน main ({link})"
+    if table in ("return_request", "return_line"):
+        link = "[T20](../plan/05-task-list.md#L233)"
+        return f"reserved — ไม่มี writer/reader บน main ({link})"
+    if table == "sync_cursor":
+        link = "[T12C](../plan/05-task-list.md#L212)"
+        return f"reserved — ไม่มี writer/reader บน main ({link})"
     w = TABLE_HINT.get(table, f"service ของ `{table}`")
     r = READ_HINT.get(table, "repository/API ที่ query ตาราง")
     if col == "tenant_id":
