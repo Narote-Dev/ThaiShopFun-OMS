@@ -337,7 +337,7 @@ class OrderIntakeT13OutOfOrderAcceptanceTest {
     assertThat(historyAfterDup).isEqualTo(1);
   }
 
-  private void drainUntilProcessed(String eventId) {
+  private void drainUntilProcessed(String eventId) throws Exception {
     for (int round = 0; round < 40; round++) {
       if ("PROCESSED".equals(text("SELECT status FROM inbox_event WHERE event_id = ?", eventId))) {
         return;
