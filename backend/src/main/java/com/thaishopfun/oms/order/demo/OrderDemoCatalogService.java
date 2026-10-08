@@ -248,17 +248,18 @@ public class OrderDemoCatalogService {
             "SELECT id FROM warehouse WHERE tenant_id = ? AND is_default = true LIMIT 1",
             UUID.class,
             shop.tenantId());
-    Integer existing =
-        jdbc.queryForObject(
+    java.util.List<Integer> existingRows =
+        jdbc.query(
             """
             SELECT on_hand FROM inventory
             WHERE tenant_id = ? AND sku_id = ? AND warehouse_id = ?
             """,
-            Integer.class,
+            (rs, row) -> rs.getInt("on_hand"),
             shop.tenantId(),
             skuId,
             warehouse);
-    if (existing != null) {
+    if (!existingRows.isEmpty()) {
+      int existing = existingRows.get(0);
       int target = Math.max(onHand, reservedForSku(shop.tenantId(), skuId, warehouse));
       int delta = target - existing;
       jdbc.update(

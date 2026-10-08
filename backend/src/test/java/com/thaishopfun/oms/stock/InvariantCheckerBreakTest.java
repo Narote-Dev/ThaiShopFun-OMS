@@ -47,11 +47,9 @@ class InvariantCheckerBreakTest extends StockTestBase {
         () -> {
           jdbc.update(
               """
-              INSERT INTO inventory_ledger (
-                id, tenant_id, sku_id, warehouse_id, delta_on_hand, delta_reserved, reason, actor, ledger_seq
-              ) VALUES (?, ?, ?, ?, 1, 0, 'ADJUST_IN', 'break-test', 99999)
+              UPDATE inventory SET on_hand = on_hand + 1, stock_version = stock_version + 1
+              WHERE tenant_id = ? AND sku_id = ? AND warehouse_id = ?
               """,
-              UuidV7.generate(),
               shop.tenant(),
               sku,
               shop.warehouse());

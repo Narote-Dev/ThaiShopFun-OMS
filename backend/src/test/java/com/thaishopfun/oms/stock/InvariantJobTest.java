@@ -5,7 +5,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
-import com.thaishopfun.oms.auth.UuidV7;
 import com.thaishopfun.oms.invariant.InvariantCodes;
 import com.thaishopfun.oms.invariant.InvariantJob;
 import com.thaishopfun.oms.invariant.SkipInvariantCheck;
@@ -31,11 +30,9 @@ class InvariantJobTest extends StockTestBase {
         () -> {
           jdbc.update(
               """
-              INSERT INTO inventory_ledger (
-                id, tenant_id, sku_id, warehouse_id, delta_on_hand, delta_reserved, reason, actor, ledger_seq
-              ) VALUES (?, ?, ?, ?, 1, 0, 'ADJUST_IN', 'job-test', 99998)
+              UPDATE inventory SET on_hand = on_hand + 1, stock_version = stock_version + 1
+              WHERE tenant_id = ? AND sku_id = ? AND warehouse_id = ?
               """,
-              UuidV7.generate(),
               shop.tenant(),
               sku,
               shop.warehouse());

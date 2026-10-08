@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.lang.reflect.Method;
 import java.util.List;
+import java.util.UUID;
 import org.junit.jupiter.api.extension.AfterEachCallback;
 import org.junit.jupiter.api.extension.ExtensionContext;
 import org.springframework.test.context.junit.jupiter.SpringExtension;
@@ -20,7 +21,10 @@ public class VerifyInvariantsExtension implements AfterEachCallback {
       return;
     }
     InvariantChecker checker = applicationContext.getBean(InvariantChecker.class);
-    List<Violation> violations = checker.checkAll();
+    List<Violation> violations = new java.util.ArrayList<>(checker.checkSchema());
+    for (UUID tenantId : InvariantTestTenants.drain()) {
+      violations.addAll(checker.checkTenant(tenantId));
+    }
     assertThat(violations).as(InvariantChecker.formatFailures(violations)).isEmpty();
   }
 

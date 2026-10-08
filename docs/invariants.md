@@ -1,6 +1,6 @@
 # Invariants (T00)
 
-`InvariantChecker` (`com.thaishopfun.oms.invariant`) is the single entry point for stock/order consistency checks. Integration and acceptance tests call `checkAll()` after each case via `@VerifyInvariants`. The nightly job (`InvariantJob`, cron `oms.invariant.cron`, default **02:30 Asia/Bangkok**) runs `checkSchema()` once, then `checkTenant(tenantId)` for every id from `list_active_tenant_ids()`.
+`InvariantChecker` (`com.thaishopfun.oms.invariant`) is the single entry point for stock/order consistency checks. Integration and acceptance tests run `checkSchema()` plus `checkTenant` for each tenant registered during the test (`InvariantTestTenants`, via `StockFixture` / `OrderFixture`) after each case via `@VerifyInvariants` — equivalent to `checkAll()` without scanning unrelated tenants on the shared Testcontainers database. The nightly job (`InvariantJob`, cron `oms.invariant.cron`, default **02:30 Asia/Bangkok**) runs `checkSchema()` once, then `checkTenant(tenantId)` for every id from `list_active_tenant_ids()`.
 
 ## Nightly scope (MVP)
 

@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.thaishopfun.oms.auth.UuidV7;
 import com.thaishopfun.oms.invariant.InvariantChecker;
+import com.thaishopfun.oms.invariant.InvariantTestTenants;
 import com.thaishopfun.oms.tenant.TenantContext;
 import java.time.Instant;
 import java.time.OffsetDateTime;
@@ -86,6 +87,7 @@ public final class StockFixture {
               "WH-" + warehouse,
               defaultWarehouse);
         });
+    InvariantTestTenants.register(tenant);
     return new Shop(tenant, product, warehouse);
   }
 

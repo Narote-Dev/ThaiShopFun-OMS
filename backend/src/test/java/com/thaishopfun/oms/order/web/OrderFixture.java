@@ -2,6 +2,7 @@ package com.thaishopfun.oms.order.web;
 
 import com.thaishopfun.oms.auth.AuthTestSupport;
 import com.thaishopfun.oms.auth.UuidV7;
+import com.thaishopfun.oms.invariant.InvariantTestTenants;
 import com.thaishopfun.oms.order.OrderRecipientRepository;
 import com.thaishopfun.oms.order.OrderStatusHistoryRepository;
 import com.thaishopfun.oms.order.Recipient;
@@ -67,6 +68,7 @@ final class OrderFixture {
             httpShop.tenantId(),
             httpShop.shopId());
       }
+      InvariantTestTenants.register(httpShop.tenantId());
       return new Shop(httpShop.tenantId(), resolved, httpShop.shopId());
     }
   }

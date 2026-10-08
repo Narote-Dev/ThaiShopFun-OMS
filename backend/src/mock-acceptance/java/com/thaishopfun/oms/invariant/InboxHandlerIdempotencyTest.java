@@ -112,7 +112,7 @@ class InboxHandlerIdempotencyTest {
             root.path("aggregate_id").asString(),
             root.path("aggregate_version").asLong(),
             false,
-            root.path("data"));
+            root);
     fixture.runInTenant(tenantId, () -> handler.handle(message));
   }
 
