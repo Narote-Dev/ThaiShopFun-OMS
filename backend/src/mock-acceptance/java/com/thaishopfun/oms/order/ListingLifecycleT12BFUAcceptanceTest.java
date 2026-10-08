@@ -463,9 +463,11 @@ class ListingLifecycleT12BFUAcceptanceTest {
   class ReevalCapOne {
     @Test
     void ac06_deferredWithReevalCapOne() throws Exception {
-      StockFixture.Shop shop = fixture.shop("ACTIVE");
-      String shopId = fixture.tsfShopId(shop);
-      UUID account = fixture.tsfChannelAccount(shop, "ACTIVE", "CONNECTED");
+      StockFixture.Shop shop = ensureShopActive();
+      String shopId = "shop_active";
+      UUID account = fixture.channelAccount(shop, shopId, "ACTIVE", "CONNECTED");
+      TenantContext.set(shop.tenant(), null);
+      assertThat(catalog.ensureDemoCatalog().get("status")).isEqualTo("OK");
       assertThat(postListingSync(shopId, account).statusCode()).isEqualTo(202);
       ensureSellerSku(shop, "TSHIRT-BLK-M", 50);
       ensureSellerSku(shop, "MUG-WHT", 50);

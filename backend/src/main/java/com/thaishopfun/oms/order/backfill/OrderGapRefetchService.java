@@ -84,8 +84,21 @@ public class OrderGapRefetchService implements OrderGapRefetch {
                       .orElseThrow(
                           () -> new IllegalStateException("TSF account missing for shop")));
       var adapter = adapters.require(Channel.TSF);
-      OrderDetail detail = adapter.getOrder(ref, externalOrderId);
-      PaymentStatus payment = adapter.getPaymentStatus(ref, externalOrderId);
+      OrderDetail detail;
+      PaymentStatus payment;
+      try {
+        detail = adapter.getOrder(ref, externalOrderId);
+        payment = adapter.getPaymentStatus(ref, externalOrderId);
+      } catch (RuntimeException restFailure) {
+        if (orderExists(tenantId, externalOrderId)
+            && inboxPayload != null
+            && !inboxPayload.isNull()
+            && inboxEventType != null) {
+          return applyAuthoritativeGapInbox(
+              tenantId, shopId, externalOrderId, inboxEventType, inboxPayload, prefix);
+        }
+        throw restFailure;
+      }
       long snapshotVersion = detail.aggregateVersion();
       if ("order.updated".equals(inboxEventType)
           && inboxPayload != null

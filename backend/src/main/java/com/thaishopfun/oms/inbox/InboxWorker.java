@@ -13,7 +13,12 @@ import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import org.slf4j.Logger;
@@ -145,14 +150,21 @@ public class InboxWorker {
 
   public int processAvailable(int limit) {
     int bounded = Math.min(Math.max(limit, 1), 1000);
-    int handled = 0;
-    List<Claimed> claimed = claim(bounded);
+    return processClaimBatch(claim(bounded), bounded);
+  }
+
+  private int processClaimBatch(List<Claimed> claimed, int bounded) {
     if (claimed.isEmpty()) {
       return 0;
     }
+    BatchPartition partition = partitionBatch(claimed);
+    for (Claimed skipped : partition.yielded()) {
+      releaseClaim(skipped);
+    }
+    int handled = 0;
     boolean gapRetry = false;
     boolean progressed = false;
-    for (Claimed row : claimed) {
+    for (Claimed row : partition.toProcess()) {
       try {
         ClaimOutcome outcome = processClaim(row);
         if (outcome.countsAsHandled()) {
@@ -166,16 +178,7 @@ public class InboxWorker {
     }
     // One follow-up pass when a gap defer (1ms) ran alongside a sibling that finished PROCESSED.
     if (gapRetry && progressed) {
-      for (Claimed row : claim(bounded)) {
-        try {
-          ClaimOutcome outcome = processClaim(row);
-          if (outcome.countsAsHandled()) {
-            handled++;
-          }
-        } catch (RuntimeException ex) {
-          log.error("inbox event {} was not completed", row.id(), ex);
-        }
-      }
+      handled += processClaimBatch(claim(bounded), bounded);
     }
     return handled;
   }
@@ -349,9 +352,6 @@ public class InboxWorker {
     // Step 5: One aggregate at a time, then drop a version that is already applied.
     // Events ordered by ent_ver are not part of this history, and do not use it.
     lockAggregate(row);
-    if (waitingForOrderBootstrap(row)) {
-      throw new InboxDeferException(properties.getDeferDelay());
-    }
     if ("order.updated".equals(row.eventType()) && blockedByNewerPending(row)) {
       throw new InboxDeferException(NEWER_PENDING_DEFER);
     }
@@ -471,29 +471,62 @@ public class InboxWorker {
     aggregateLock.lock(jdbc, row.tenantId(), row.source(), row.aggregateId());
   }
 
-  private boolean waitingForOrderBootstrap(InboxRow row) {
-    if (!"order.cancelled".equals(row.eventType())) {
-      return false;
-    }
-    String orderId = row.payload().path("data").path("order_id").asString(null);
-    if (orderId == null || orderId.isBlank()) {
-      orderId = row.aggregateId();
-    }
-    if (orderId == null || orderId.isBlank()) {
-      return false;
-    }
-    Boolean exists =
-        jdbc.queryForObject(
+  private BatchPartition partitionBatch(List<Claimed> claimed) {
+    UUID[] ids = claimed.stream().map(Claimed::id).toArray(UUID[]::new);
+    List<ClaimMeta> metas =
+        jdbc.query(
             """
-            SELECT EXISTS (
-              SELECT 1 FROM sales_order
-              WHERE tenant_id = ? AND external_order_id = ?
-            )
+            SELECT id, aggregate_id, event_type
+            FROM inbox_event
+            WHERE id = ANY (?)
             """,
-            Boolean.class,
-            row.tenantId(),
-            orderId);
-    return !Boolean.TRUE.equals(exists);
+            ps -> ps.setArray(1, ps.getConnection().createArrayOf("uuid", ids)),
+            (rs, row) ->
+                new ClaimMeta(
+                    rs.getObject("id", UUID.class),
+                    rs.getString("aggregate_id"),
+                    rs.getString("event_type")));
+    Set<String> aggregatesWithCreated = new HashSet<>();
+    Map<UUID, ClaimMeta> metaById = new HashMap<>();
+    for (ClaimMeta meta : metas) {
+      metaById.put(meta.id(), meta);
+      if ("order.created".equals(meta.eventType())) {
+        aggregatesWithCreated.add(meta.aggregateId());
+      }
+    }
+    if (aggregatesWithCreated.isEmpty()) {
+      return new BatchPartition(claimed, List.of());
+    }
+    List<Claimed> toProcess = new ArrayList<>();
+    List<Claimed> yielded = new ArrayList<>();
+    for (Claimed claim : claimed) {
+      ClaimMeta meta = metaById.get(claim.id());
+      if (meta != null
+          && aggregatesWithCreated.contains(meta.aggregateId())
+          && !"order.created".equals(meta.eventType())) {
+        yielded.add(claim);
+      } else {
+        toProcess.add(claim);
+      }
+    }
+    return new BatchPartition(toProcess, yielded);
+  }
+
+  private void releaseClaim(Claimed claimed) {
+    failureTx.executeWithoutResult(
+        status -> {
+          InboxRow row = lock(claimed.id());
+          if (row == null) {
+            return;
+          }
+          if (!"RECEIVED".equals(row.status()) && !"FAILED".equals(row.status())) {
+            return;
+          }
+          if (!leaseMatches(row.nextAttemptAt(), claimed.leaseUntil())) {
+            return;
+          }
+          pushBack(row, Duration.ZERO);
+        });
   }
 
   private boolean blockedByNewerPending(InboxRow row) {
@@ -760,6 +793,10 @@ public class InboxWorker {
   }
 
   private record Claimed(UUID id, UUID tenantId, OffsetDateTime leaseUntil) {}
+
+  private record ClaimMeta(UUID id, String aggregateId, String eventType) {}
+
+  private record BatchPartition(List<Claimed> toProcess, List<Claimed> yielded) {}
 
   private record InboxRow(
       UUID id,
