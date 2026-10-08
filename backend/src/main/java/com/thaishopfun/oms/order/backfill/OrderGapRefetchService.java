@@ -7,6 +7,7 @@ import com.thaishopfun.oms.channel.api.OrderDetail;
 import com.thaishopfun.oms.channel.api.PaymentStatus;
 import com.thaishopfun.oms.inbox.InboxAggregateLock;
 import com.thaishopfun.oms.order.ChannelAccountLookup;
+import com.thaishopfun.oms.order.SalesOrderRepository;
 import com.thaishopfun.oms.order.intake.OrderRestSnapshotApplier;
 import com.thaishopfun.oms.order.intake.OrderRestSnapshotApplier.Outcome;
 import com.thaishopfun.oms.tenant.TenantContext;
@@ -30,6 +31,7 @@ public class OrderGapRefetchService implements OrderGapRefetch {
   private final ChannelAdapterRegistry adapters;
   private final ChannelAccountLookup channels;
   private final OrderRestSnapshotApplier applier;
+  private final SalesOrderRepository orders;
   private final InboxAggregateLock aggregateLock;
   private final JdbcTemplate jdbc;
   private final TransactionTemplate tenantReadTx;
@@ -40,6 +42,7 @@ public class OrderGapRefetchService implements OrderGapRefetch {
       ChannelAdapterRegistry adapters,
       ChannelAccountLookup channels,
       OrderRestSnapshotApplier applier,
+      SalesOrderRepository orders,
       InboxAggregateLock aggregateLock,
       JdbcTemplate jdbc,
       PlatformTransactionManager transactions,
@@ -47,6 +50,7 @@ public class OrderGapRefetchService implements OrderGapRefetch {
     this.adapters = adapters;
     this.channels = channels;
     this.applier = applier;
+    this.orders = orders;
     this.aggregateLock = aggregateLock;
     this.jdbc = jdbc;
     this.tenantReadTx = new TransactionTemplate(transactions);
@@ -93,6 +97,19 @@ public class OrderGapRefetchService implements OrderGapRefetch {
                 return applier.apply(tenantId, shopId, detail, payment, prefix);
               });
       outcome = finalizeDeferred(tenantId, externalOrderId, shopId, detail, payment, prefix, outcome);
+      if (outcome == Outcome.SKIPPED && inboxAggregateVersion > 0) {
+        long stored =
+            tenantReadTx.execute(
+                status ->
+                    channels
+                        .tsfByExternalShopId(shopId)
+                        .flatMap(account -> orders.findByExternalId(account.id(), externalOrderId))
+                        .map(o -> o.externalVersion() == null ? 0L : o.externalVersion())
+                        .orElse(0L));
+        if (stored < inboxAggregateVersion) {
+          throw new GapSnapshotNotReadyException(snapshotVersion, inboxAggregateVersion);
+        }
+      }
       if (outcome == Outcome.APPLIED) {
         gapRefetches.increment();
       }

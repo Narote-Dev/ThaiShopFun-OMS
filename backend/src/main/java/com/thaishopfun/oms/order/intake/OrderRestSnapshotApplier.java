@@ -89,15 +89,23 @@ public class OrderRestSnapshotApplier {
       touchExternalVersion(account.id(), detail.orderId(), snapshotVersion);
       return Outcome.APPLIED;
     }
-    applyRecipientIfPresent(tenantId, shopId, account, detail, eventIdPrefix, snapshotVersion, knownVersion);
+    boolean changed = createdInThisApply;
+    if (applyRecipientIfPresent(
+        tenantId, shopId, account, detail, eventIdPrefix, snapshotVersion, knownVersion)) {
+      changed = true;
+    }
     if (needsPaidCatchUp(payment, currentOrder(account, detail.orderId()))) {
       if (createdInThisApply) {
         return Outcome.APPLIED_NEEDS_PAID_CATCHUP;
       }
       applyPaidInTx(tenantId, shopId, account, detail, eventIdPrefix, snapshotVersion);
+      changed = true;
     }
-    touchExternalVersion(account.id(), detail.orderId(), snapshotVersion);
-    return Outcome.APPLIED;
+    if (changed) {
+      touchExternalVersion(account.id(), detail.orderId(), snapshotVersion);
+      return Outcome.APPLIED;
+    }
+    return Outcome.SKIPPED;
   }
 
   public Outcome applyPaidCatchUp(
@@ -133,7 +141,7 @@ public class OrderRestSnapshotApplier {
     return Outcome.APPLIED;
   }
 
-  private void applyRecipientIfPresent(
+  private boolean applyRecipientIfPresent(
       UUID tenantId,
       String shopId,
       TsfAccount account,
@@ -142,7 +150,7 @@ public class OrderRestSnapshotApplier {
       long snapshotVersion,
       long knownVersion) {
     if (detail.recipient() == null || snapshotVersion <= knownVersion) {
-      return;
+      return false;
     }
     ObjectNode updatedData = json.createObjectNode();
     updatedData.put("order_id", detail.orderId());
@@ -156,6 +164,7 @@ public class OrderRestSnapshotApplier {
             snapshotVersion,
             envelope(shopId, detail.orderId(), snapshotVersion, "order.updated", updatedData));
     support.handleUpdated(updated);
+    return true;
   }
 
   private void applyPaidInTx(
