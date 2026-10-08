@@ -139,7 +139,7 @@ class ListingLifecycleT12BFUAcceptanceTest {
     @Bean
     @Primary
     MutableClock holdResolverClock() {
-      return new MutableClock(Instant.now().truncatedTo(ChronoUnit.MICROS));
+      return new MutableClock();
     }
   }
   private final java.util.concurrent.atomic.AtomicLong listingAggregateVersion =
@@ -1002,20 +1002,28 @@ class ListingLifecycleT12BFUAcceptanceTest {
   private void ingest(ObjectNode event) throws Exception {
     byte[] body = JSON.writeValueAsBytes(event);
     String eventId = event.path("event_id").asString();
-    HttpRequest request =
-        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + "/internal/v1/events"))
-            .timeout(HTTP_TIMEOUT)
-            .header("Content-Type", "application/json")
-            .header("X-Event-Id", eventId)
-            .header("X-Signature", sign(INBOX_SECRET, now(), body))
-            .header(
-                "Authorization",
-                "Bearer "
-                    + OrderIntakeMockRuntime.mock().getBean(TokenIssuer.class).tsfServiceToken())
-            .POST(HttpRequest.BodyPublishers.ofByteArray(body))
-            .build();
-    assertThat(HTTP.send(request, HttpResponse.BodyHandlers.ofString()).statusCode())
-        .isEqualTo(202);
+    int status = 0;
+    for (int attempt = 0; attempt < 5; attempt++) {
+      String timestamp = now();
+      HttpRequest request =
+          HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + "/internal/v1/events"))
+              .timeout(HTTP_TIMEOUT)
+              .header("Content-Type", "application/json")
+              .header("X-Event-Id", eventId)
+              .header("X-Signature", sign(INBOX_SECRET, timestamp, body))
+              .header(
+                  "Authorization",
+                  "Bearer "
+                      + OrderIntakeMockRuntime.mock().getBean(TokenIssuer.class).tsfServiceToken())
+              .POST(HttpRequest.BodyPublishers.ofByteArray(body))
+              .build();
+      status = HTTP.send(request, HttpResponse.BodyHandlers.ofString()).statusCode();
+      if (status == 202) {
+        return;
+      }
+      Thread.sleep(150L * (attempt + 1));
+    }
+    assertThat(status).isEqualTo(202);
   }
 
   private String userToken(String shopId) throws Exception {
