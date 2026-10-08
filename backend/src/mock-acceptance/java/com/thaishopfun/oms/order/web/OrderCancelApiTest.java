@@ -9,6 +9,7 @@ import com.thaishopfun.oms.auth.AuthTestSupport;
 import com.thaishopfun.oms.catalog.CatalogHttp;
 import com.thaishopfun.oms.inbox.InboxWorker;
 import com.thaishopfun.oms.invariant.PiiLogAssertions;
+import com.thaishopfun.oms.order.MockTsfCatalogSync;
 import com.thaishopfun.oms.order.OrderRecipientRepository;
 import com.thaishopfun.oms.order.OrderStatusHistoryRepository;
 import com.thaishopfun.oms.order.SalesOrder;
@@ -549,6 +550,7 @@ class OrderCancelApiTest extends OrderIntegrationTest {
   }
 
   private void ingest(ObjectNode event) throws Exception {
+    MockTsfCatalogSync.note(event);
     byte[] body = JSON.writeValueAsBytes(event);
     String eventId = event.path("event_id").asString();
     HttpRequest request =

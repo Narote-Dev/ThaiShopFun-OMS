@@ -20,6 +20,7 @@ import java.util.HexFormat;
 import java.util.UUID;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -92,6 +93,11 @@ class OrderBackfillT12CAcceptanceTest {
     postMock("/control/webhooks", "{\"enabled\":false}");
   }
 
+  @AfterEach
+  void restoreWebhooks() throws Exception {
+    postMock("/control/webhooks", "{\"enabled\":true}");
+  }
+
   @Test
   void defaultIntervalIsFifteenMinutes() {
     assertThat(backfillProperties.getInterval()).isEqualTo(Duration.ofMinutes(15));
@@ -100,11 +106,14 @@ class OrderBackfillT12CAcceptanceTest {
   @Test
   void webhooksOffBulkOrdersBackfillCreatesAllWithoutDuplicates() throws Exception {
     StockFixture.Shop shop = fixture.shop("ACTIVE");
-    fixture.setTsfShopId(shop, "shop_active");
+    String shopId = "shop_bf_" + UUID.randomUUID().toString().replace("-", "").substring(0, 12);
+    fixture.setTsfShopId(shop, shopId);
     UUID account = fixture.tsfChannelAccount(shop, "ACTIVE", "CONNECTED");
     UUID sku = fixture.sku(shop, 500);
     fixture.channelListing(shop, account, "tsf_sku_7781", sku, true);
-    postMock("/control/orders/bulk", "{\"count\":50,\"payment\":\"PREPAID\",\"paid\":true}");
+    postMock(
+        "/control/orders/bulk",
+        "{\"count\":50,\"payment\":\"PREPAID\",\"paid\":true,\"shop_id\":\"" + shopId + "\"}");
     backfill.runOnce();
     long count =
         fixture.inTenant(
@@ -122,15 +131,15 @@ class OrderBackfillT12CAcceptanceTest {
   @Test
   void gapRefetchAppliesPaidSnapshot() throws Exception {
     StockFixture.Shop shop = fixture.shop("ACTIVE");
-    fixture.setTsfShopId(shop, "shop_active");
-    String shopId = "shop_active";
+    String shopId = "shop_bf_" + UUID.randomUUID().toString().replace("-", "").substring(0, 12);
+    fixture.setTsfShopId(shop, shopId);
     UUID account = fixture.tsfChannelAccount(shop, "ACTIVE", "CONNECTED");
     UUID sku = fixture.sku(shop, 10);
     fixture.channelListing(shop, account, "L-gap", sku, true);
     String orderId = "TSF-GAP-" + UUID.randomUUID();
     postMock(
         "/control/orders/register",
-        "{\"shop_id\":\"shop_active\",\"order_id\":\"" + orderId + "\"}");
+        "{\"shop_id\":\"" + shopId + "\",\"order_id\":\"" + orderId + "\"}");
     ingest(
         OrderIntakeScenarioSupport.orderCreated(
             JSON, orderId, shopId, UUID.randomUUID().toString(), "PREPAID", "L-gap", 1, 1));
@@ -150,6 +159,7 @@ class OrderBackfillT12CAcceptanceTest {
   }
 
   private void ingest(ObjectNode event) throws Exception {
+    MockTsfCatalogSync.note(event);
     byte[] body = JSON.writeValueAsBytes(event);
     String eventId = event.path("event_id").asString();
     String now = Long.toString(Instant.now().getEpochSecond());

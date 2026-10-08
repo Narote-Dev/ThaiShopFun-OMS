@@ -121,6 +121,27 @@ public class OrderRestSnapshotApplier {
                   json.createObjectNode().put("order_id", detail.orderId())));
       support.handlePaid(paid);
     }
+    // Step 5: Apply REST recipient snapshot when aggregate moved ahead of OMS.
+    SalesOrder afterPayment = orders.findByExternalId(account.id(), detail.orderId()).orElse(null);
+    if (afterPayment != null
+        && detail.aggregateVersion() > knownVersion
+        && detail.recipient() != null) {
+      InboxMessage updated =
+          message(
+              tenantId,
+              eventIdPrefix + ":updated:" + detail.aggregateVersion(),
+              "order.updated",
+              detail.orderId(),
+              inboxAggregateVersion > 0 ? inboxAggregateVersion : detail.aggregateVersion(),
+              envelope(
+                  shopId,
+                  detail.orderId(),
+                  detail.aggregateVersion(),
+                  "order.updated",
+                  detailData(detail)));
+      support.handleUpdated(updated);
+      return Outcome.APPLIED;
+    }
     touchExternalVersion(account.id(), detail.orderId(), detail.aggregateVersion());
     return Outcome.APPLIED;
   }

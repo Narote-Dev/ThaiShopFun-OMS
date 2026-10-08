@@ -266,6 +266,7 @@ class OrderIntakeT13OutOfOrderAcceptanceTest {
   }
 
   private void ingest(ObjectNode event) throws Exception {
+    MockTsfCatalogSync.note(event);
     byte[] body = JSON.writeValueAsBytes(event);
     String eventId = event.path("event_id").asString();
     HttpRequest request =

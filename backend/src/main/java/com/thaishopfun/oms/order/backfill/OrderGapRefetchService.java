@@ -21,7 +21,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.databind.JsonNode;
 
 @Service
-public class OrderGapRefetchService {
+public class OrderGapRefetchService implements OrderGapRefetch {
 
   public static final String GAP_METRIC = "oms.order.gap_refetch";
 
@@ -51,6 +51,7 @@ public class OrderGapRefetchService {
     this.gapRefetches = Counter.builder(GAP_METRIC).register(meters);
   }
 
+  @Override
   public void refetchAndApply(
       UUID tenantId,
       String shopId,

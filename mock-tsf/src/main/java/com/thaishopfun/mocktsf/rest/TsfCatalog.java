@@ -29,6 +29,7 @@ public class TsfCatalog {
   private final AtomicLong sequence = new AtomicLong(1);
   private final ConcurrentHashMap<String, CopyOnWriteArrayList<CancelHit>> cancelHits =
       new ConcurrentHashMap<>();
+  private final Set<String> extraShops = ConcurrentHashMap.newKeySet();
 
   public record CancelHit(String idempotencyKey, Instant at) {}
 
@@ -64,11 +65,16 @@ public class TsfCatalog {
   }
 
   public boolean knownShop(String shopId) {
-    return SHOPS.contains(shopId);
+    return SHOPS.contains(shopId) || extraShops.contains(shopId);
+  }
+
+  public void registerShop(String shopId) {
+    extraShops.add(shopId);
   }
 
   public synchronized List<String> createBulkOrders(
       String shopId, int count, String paymentMethod, boolean paid) {
+    registerShop(shopId);
     if (!knownShop(shopId)) {
       throw new IllegalArgumentException("unknown shop");
     }
@@ -96,6 +102,7 @@ public class TsfCatalog {
   }
 
   public synchronized void registerOrder(String shopId, String orderId) {
+    registerShop(shopId);
     if (order(orderId).isPresent()) {
       return;
     }
@@ -125,13 +132,26 @@ public class TsfCatalog {
 
   public synchronized void noteOrderEvent(tools.jackson.databind.JsonNode event) {
     String type = event.path("event_type").asString("");
+    String shopId = event.path("tsf_shop_id").asString("shop_active");
     String orderId = event.path("data").path("order_id").asString(null);
     if (orderId == null) {
       return;
     }
+    tools.jackson.databind.JsonNode data = event.path("data");
     Optional<Order> existing = order(orderId);
     if ("order.created".equals(type) && existing.isEmpty()) {
-      ensureDemoOrder(orderId);
+      long version = event.path("aggregate_version").asLong(1);
+      Instant updated = Instant.now();
+      Map<String, Object> detail = orderDetailFromEvent(data, orderId, updated, version);
+      String paymentMethod = data.path("payment_method").asString("COD");
+      detail.put("payment_method", paymentMethod);
+      if ("PREPAID".equals(paymentMethod)) {
+        detail.put("payment_expires_at", updated.plusSeconds(3600).toString());
+      } else {
+        detail.remove("payment_expires_at");
+      }
+      orders.add(
+          new Order(shopId, orderId, updated, version, detail, payment(orderId, "UNPAID")));
       return;
     }
     if (existing.isEmpty()) {
@@ -143,6 +163,9 @@ public class TsfCatalog {
     Map<String, Object> detail = new LinkedHashMap<>(current.detail());
     detail.put("aggregate_version", version);
     detail.put("updated_at", updated.toString());
+    if (data.has("recipient") && data.get("recipient").isObject()) {
+      detail.put("recipient", jsonToMap(data.get("recipient")));
+    }
     if ("order.cancelled".equals(type)) {
       detail.put("status", "CANCELLED");
     }
@@ -151,6 +174,32 @@ public class TsfCatalog {
       pay.put("status", "PAID");
     }
     replaceOrder(new Order(current.shopId(), orderId, updated, version, detail, pay));
+  }
+
+  private static Map<String, Object> orderDetailFromEvent(
+      tools.jackson.databind.JsonNode data, String orderId, Instant updated, long version) {
+    Map<String, Object> detail = base(orderId, data.path("reservation_id").asString("rsv_" + orderId), updated, version);
+    if (data.has("lines") && data.get("lines").isArray()) {
+      detail.put("lines", jsonToList(data.get("lines")));
+    }
+    if (data.has("recipient") && data.get("recipient").isObject()) {
+      detail.put("recipient", jsonToMap(data.get("recipient")));
+    }
+    return detail;
+  }
+
+  @SuppressWarnings("unchecked")
+  private static Map<String, Object> jsonToMap(tools.jackson.databind.JsonNode node) {
+    return new tools.jackson.databind.json.JsonMapper().convertValue(node, Map.class);
+  }
+
+  @SuppressWarnings("unchecked")
+  private static List<Map<String, Object>> jsonToList(tools.jackson.databind.JsonNode node) {
+    List<Map<String, Object>> lines = new ArrayList<>();
+    for (tools.jackson.databind.JsonNode line : node) {
+      lines.add(jsonToMap(line));
+    }
+    return lines;
   }
 
   private void replaceOrder(Order replacement) {

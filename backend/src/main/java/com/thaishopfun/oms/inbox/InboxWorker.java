@@ -2,7 +2,7 @@ package com.thaishopfun.oms.inbox;
 
 import com.thaishopfun.oms.order.OrderOptimisticLockException;
 import com.thaishopfun.oms.order.ReconciliationIssueRepository;
-import com.thaishopfun.oms.order.backfill.OrderGapRefetchService;
+import com.thaishopfun.oms.order.backfill.OrderGapRefetch;
 import com.thaishopfun.oms.stock.StockBusyException;
 import com.thaishopfun.oms.stock.StockConflictException;
 import com.thaishopfun.oms.stock.StockRetry;
@@ -95,7 +95,7 @@ public class InboxWorker {
   private final InboxEntitlementPolicy policy;
   private final ReconciliationIssueRepository reconciliation;
   private final InboxAggregateLock aggregateLock;
-  private final OrderGapRefetchService gapRefetch;
+  private final OrderGapRefetch gapRefetch;
   private final JdbcTemplate jdbc;
   private final TransactionTemplate claimTx;
   private final TransactionTemplate applyTx;
@@ -110,7 +110,7 @@ public class InboxWorker {
       InboxEntitlementPolicy policy,
       ReconciliationIssueRepository reconciliation,
       InboxAggregateLock aggregateLock,
-      OrderGapRefetchService gapRefetch,
+      OrderGapRefetch gapRefetch,
       JdbcTemplate jdbc,
       PlatformTransactionManager transactions,
       JsonMapper json,

@@ -2,6 +2,7 @@ package com.thaishopfun.oms.db;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.thaishopfun.oms.auth.AuthTestSupport;
 import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.Statement;
@@ -19,16 +20,14 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 @Testcontainers
 class FlywayV14OrderBackfillTest {
 
+  @DynamicPropertySource
+  static void properties(DynamicPropertyRegistry registry) {
+    AuthTestSupport.register(registry);
+  }
+
   @Container
   static PostgreSQLContainer postgres =
       new PostgreSQLContainer("postgres:16-alpine").withInitScript("db/test-oms-app-login.sql");
-
-  @DynamicPropertySource
-  static void datasource(DynamicPropertyRegistry registry) {
-    registry.add("spring.datasource.url", postgres::getJdbcUrl);
-    registry.add("spring.datasource.username", () -> "oms_app");
-    registry.add("spring.datasource.password", () -> "oms-app-test-only");
-  }
 
   @Test
   void listTenantsForOrderBackfillIsDefinerAndGrantedToApp() throws Exception {

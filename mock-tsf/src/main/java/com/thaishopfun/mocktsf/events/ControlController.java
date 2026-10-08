@@ -104,6 +104,19 @@ public class ControlController {
         .body(json.writeValueAsString(Map.of("order_id", orderId, "aggregate_version", version)));
   }
 
+  @PostMapping("/catalog/note-event")
+  public ResponseEntity<String> noteCatalogEvent(HttpServletRequest request) throws IOException {
+    JsonNode body = readObject(request);
+    JsonNode event = body.get("event");
+    if (event == null || !event.isObject()) {
+      throw ApiException.schema("event object is required");
+    }
+    catalog.noteOrderEvent(event);
+    return ResponseEntity.ok()
+        .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+        .body(json.writeValueAsString(Map.of("ok", true)));
+  }
+
   @PostMapping("/webhooks")
   public ResponseEntity<String> webhooks(HttpServletRequest request) throws IOException {
     JsonNode body = readObject(request);
