@@ -14,7 +14,6 @@ import com.thaishopfun.oms.tenant.TenantContext;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.util.UUID;
-import tools.jackson.databind.JsonNode;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -81,9 +80,7 @@ public class OrderGapRefetchService implements OrderGapRefetch {
               status ->
                   channels
                       .tsfByExternalShopId(shopId)
-                      .map(
-                          account ->
-                              new ChannelAccountRef(tenantId, account.id(), shopId))
+                      .map(account -> new ChannelAccountRef(tenantId, account.id(), shopId))
                       .orElseThrow(
                           () -> new IllegalStateException("TSF account missing for shop")));
       var adapter = adapters.require(Channel.TSF);
@@ -125,8 +122,7 @@ public class OrderGapRefetchService implements OrderGapRefetch {
       }
       if (outcome == Outcome.APPLIED) {
         if ("order.paid".equals(inboxEventType)) {
-          applyTx.executeWithoutResult(
-              status -> applier.retryReadyToPick(shopId, externalOrderId));
+          applyTx.executeWithoutResult(status -> applier.retryReadyToPick(shopId, externalOrderId));
         }
         gapRefetches.increment();
         return true;

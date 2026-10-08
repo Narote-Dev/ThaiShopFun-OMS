@@ -179,8 +179,7 @@ class OrderBackfillT12CAcceptanceTest {
             shop.tenant(),
             () ->
                 jdbc.queryForObject(
-                    "SELECT count(*) FROM sales_order WHERE payment_method = 'COD'",
-                    Long.class));
+                    "SELECT count(*) FROM sales_order WHERE payment_method = 'COD'", Long.class));
     assertThat(prepaidPaid).isEqualTo(20);
     assertThat(prepaidUnpaid).isEqualTo(15);
     assertThat(cod).isEqualTo(15);
@@ -208,7 +207,14 @@ class OrderBackfillT12CAcceptanceTest {
     long versionBefore = externalVersion(shop.tenant(), orderId);
     ObjectNode created =
         OrderIntakeScenarioSupport.orderCreated(
-            JSON, orderId, shopId, "evt-late-replay-" + UUID.randomUUID(), "PREPAID", "tsf_sku_7781", 1, 1);
+            JSON,
+            orderId,
+            shopId,
+            "evt-late-replay-" + UUID.randomUUID(),
+            "PREPAID",
+            "tsf_sku_7781",
+            1,
+            1);
     ingest(created);
     assertThat(worker.processAvailable(5)).isEqualTo(1);
     assertThat(externalVersion(shop.tenant(), orderId)).isEqualTo(versionBefore);
@@ -249,11 +255,7 @@ class OrderBackfillT12CAcceptanceTest {
                 """,
                 shop.tenant(),
                 account,
-                "{\"updated_since\":\""
-                    + watermark
-                    + "\",\"page_cursor\":\""
-                    + pageCursor
-                    + "\"}",
+                "{\"updated_since\":\"" + watermark + "\",\"page_cursor\":\"" + pageCursor + "\"}",
                 java.sql.Timestamp.from(watermark)));
     backfill.runOnceForTenant(shop.tenant());
     long count =
@@ -286,8 +288,7 @@ class OrderBackfillT12CAcceptanceTest {
         fixture.inTenant(
             shop.tenant(),
             () ->
-                jdbc
-                    .queryForObject(
+                jdbc.queryForObject(
                         "SELECT updated_at FROM sync_cursor WHERE channel_account_id = ?",
                         java.sql.Timestamp.class,
                         account)
@@ -305,8 +306,7 @@ class OrderBackfillT12CAcceptanceTest {
         fixture.inTenant(
             shop.tenant(),
             () ->
-                jdbc
-                    .queryForObject(
+                jdbc.queryForObject(
                         "SELECT updated_at FROM sync_cursor WHERE channel_account_id = ?",
                         java.sql.Timestamp.class,
                         account)
@@ -391,7 +391,9 @@ class OrderBackfillT12CAcceptanceTest {
         "{\"count\":2,\"payment\":\"PREPAID\",\"paid\":true,\"shop_id\":\"" + shopId + "\"}");
     backfill.runOnceForTenant(shop.tenant());
     String joined =
-        backfillLogs.list.stream().map(ILoggingEvent::getFormattedMessage).reduce("", String::concat);
+        backfillLogs.list.stream()
+            .map(ILoggingEvent::getFormattedMessage)
+            .reduce("", String::concat);
     assertThat(joined).doesNotContain("0890000000");
     assertThat(joined).doesNotContain("Bulk Buyer");
   }
@@ -454,7 +456,8 @@ class OrderBackfillT12CAcceptanceTest {
       wakeInboxRetries();
       processedAfterMarkPaid += worker.processAvailable(5);
       if (gapRefetchCount() >= gapsBefore + 1
-          && "PROCESSED".equals(inboxStatus(shop.tenant(), paidEarly.path("event_id").asString()))) {
+          && "PROCESSED"
+              .equals(inboxStatus(shop.tenant(), paidEarly.path("event_id").asString()))) {
         break;
       }
     }
@@ -466,8 +469,7 @@ class OrderBackfillT12CAcceptanceTest {
     assertThat(paymentStatus(shop.tenant(), orderId)).isEqualTo("PAID");
     assertThat(externalVersion(shop.tenant(), orderId)).isEqualTo(3L);
 
-    ObjectNode stale =
-        OrderIntakeScenarioSupport.orderUpdated(JSON, orderId, shopId, 2);
+    ObjectNode stale = OrderIntakeScenarioSupport.orderUpdated(JSON, orderId, shopId, 2);
     stale.put("event_id", "evt-stale-gap-" + UUID.randomUUID());
     ingest(stale);
     assertThat(worker.processAvailable(5)).isEqualTo(1);

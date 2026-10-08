@@ -19,6 +19,7 @@ public class InboxProperties {
   private double jitterRatio = 0.2;
   private Duration deferDelay = Duration.ofSeconds(30);
   private Duration maxDefer = Duration.ofHours(24);
+
   /** When false, order.paid version gaps use the inbox handler instead of REST gap refetch. */
   private boolean gapRefetchOrderPaid = true;
 

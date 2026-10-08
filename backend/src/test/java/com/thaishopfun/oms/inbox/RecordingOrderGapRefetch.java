@@ -4,10 +4,10 @@ import com.thaishopfun.oms.order.backfill.OrderGapRefetch;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
-import tools.jackson.databind.JsonNode;
 import org.springframework.context.annotation.Primary;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
+import tools.jackson.databind.JsonNode;
 
 /** Inbox API tests stub TSF REST; they only need gap detection to mark rows processed. */
 @Profile("inbox-api-test")

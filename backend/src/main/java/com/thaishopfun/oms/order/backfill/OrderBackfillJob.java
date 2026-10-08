@@ -184,7 +184,8 @@ public class OrderBackfillJob {
         fetched.increment();
         try {
           if (needsApply(account.id(), summary)) {
-            int applied = applyOne(tenantId, ref, account.externalShopId(), adapter, summary.orderId());
+            int applied =
+                applyOne(tenantId, ref, account.externalShopId(), adapter, summary.orderId());
             touched += applied;
             if (applied > 0) {
               appliedThisRun = true;
@@ -248,7 +249,8 @@ public class OrderBackfillJob {
               return applier.apply(tenantId, shopId, detail, payment, "backfill:" + orderId);
             });
     outcome =
-        finalizeDeferred(tenantId, orderId, shopId, detail, payment, "backfill:" + orderId, outcome);
+        finalizeDeferred(
+            tenantId, orderId, shopId, detail, payment, "backfill:" + orderId, outcome);
     if (outcome == Outcome.APPLIED) {
       applied.increment();
       return 1;

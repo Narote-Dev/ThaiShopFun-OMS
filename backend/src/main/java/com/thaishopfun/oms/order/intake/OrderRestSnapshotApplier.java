@@ -80,7 +80,8 @@ public class OrderRestSnapshotApplier {
               "order.created",
               detail.orderId(),
               createVersion,
-              envelope(shopId, detail.orderId(), createVersion, "order.created", detailData(detail)));
+              envelope(
+                  shopId, detail.orderId(), createVersion, "order.created", detailData(detail)));
       support.handleCreated(created);
       createdInThisApply = true;
       existing = orders.findByExternalId(account.id(), detail.orderId());
@@ -133,11 +134,7 @@ public class OrderRestSnapshotApplier {
 
   /** Applies the gap inbox webhook when REST is behind or missing fields from the snapshot. */
   public Outcome applyGapInboxEvent(
-      UUID tenantId,
-      String shopId,
-      String eventType,
-      JsonNode payload,
-      String eventIdPrefix) {
+      UUID tenantId, String shopId, String eventType, JsonNode payload, String eventIdPrefix) {
     if (payload == null || payload.isNull() || eventType == null || eventType.isBlank()) {
       return Outcome.SKIPPED;
     }
@@ -166,14 +163,7 @@ public class OrderRestSnapshotApplier {
     }
     ObjectNode envelope = payload.isObject() ? (ObjectNode) payload : json.valueToTree(payload);
     String eventId = payload.path("event_id").asString(eventIdPrefix + ":inbox");
-    InboxMessage message =
-        message(
-            tenantId,
-            eventId,
-            eventType,
-            orderId,
-            version,
-            envelope);
+    InboxMessage message = message(tenantId, eventId, eventType, orderId, version, envelope);
     switch (eventType) {
       case "order.updated":
         support.handleUpdated(message);
@@ -198,10 +188,7 @@ public class OrderRestSnapshotApplier {
   }
 
   public Outcome applyCancelCatchUp(
-      UUID tenantId,
-      String shopId,
-      OrderDetail detail,
-      String eventIdPrefix) {
+      UUID tenantId, String shopId, OrderDetail detail, String eventIdPrefix) {
     TsfAccount account =
         channels
             .tsfByExternalShopId(shopId)

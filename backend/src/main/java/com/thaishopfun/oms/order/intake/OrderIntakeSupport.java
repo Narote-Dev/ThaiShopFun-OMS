@@ -264,7 +264,8 @@ public class OrderIntakeSupport {
     if ("PAID".equals(order.paymentStatus())) {
       // Change: gap REST may mark PAID before this inbox event; still advance fulfillment.
       List<ReserveItem> items = mappedReserveItems(order.id());
-      holdEffects.maybeReadyToPick(orders.findById(order.id()).orElseThrow(), account, items, paidAt);
+      holdEffects.maybeReadyToPick(
+          orders.findById(order.id()).orElseThrow(), account, items, paidAt);
       bumpExternalVersion(account, order, message);
       return;
     }
