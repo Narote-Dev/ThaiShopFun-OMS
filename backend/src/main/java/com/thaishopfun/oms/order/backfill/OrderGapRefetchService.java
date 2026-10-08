@@ -9,6 +9,7 @@ import com.thaishopfun.oms.inbox.InboxAggregateLock;
 import com.thaishopfun.oms.order.ChannelAccountLookup;
 import com.thaishopfun.oms.order.intake.OrderRestSnapshotApplier;
 import com.thaishopfun.oms.order.intake.OrderRestSnapshotApplier.Outcome;
+import com.thaishopfun.oms.tenant.TenantContext;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.util.UUID;
@@ -31,6 +32,7 @@ public class OrderGapRefetchService implements OrderGapRefetch {
   private final OrderRestSnapshotApplier applier;
   private final InboxAggregateLock aggregateLock;
   private final JdbcTemplate jdbc;
+  private final TransactionTemplate tenantReadTx;
   private final TransactionTemplate applyTx;
   private final Counter gapRefetches;
 
@@ -47,6 +49,9 @@ public class OrderGapRefetchService implements OrderGapRefetch {
     this.applier = applier;
     this.aggregateLock = aggregateLock;
     this.jdbc = jdbc;
+    this.tenantReadTx = new TransactionTemplate(transactions);
+    this.tenantReadTx.setReadOnly(true);
+    this.tenantReadTx.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
     this.applyTx = new TransactionTemplate(transactions);
     this.applyTx.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
     this.gapRefetches = Counter.builder(GAP_METRIC).register(meters);
@@ -60,33 +65,67 @@ public class OrderGapRefetchService implements OrderGapRefetch {
       long inboxAggregateVersion,
       String prefix) {
     assertNoActiveTransaction("refetchAndApply");
-    ChannelAccountRef ref =
-        channels
-            .tsfByExternalShopId(shopId)
-            .map(account -> new ChannelAccountRef(tenantId, account.id(), shopId))
-            .orElseThrow(() -> new IllegalStateException("TSF account missing for shop"));
-    var adapter = adapters.require(Channel.TSF);
-    OrderDetail detail = adapter.getOrder(ref, externalOrderId);
-    PaymentStatus payment = adapter.getPaymentStatus(ref, externalOrderId);
-    Outcome outcome =
-        applyTx.execute(
-            status -> {
-              aggregateLock.lockOrder(jdbc, tenantId, externalOrderId);
-              return applier.apply(
-                  tenantId, shopId, detail, payment, prefix, inboxAggregateVersion);
-            });
+    UUID previousTenant = TenantContext.tenantId();
+    UUID previousUser = TenantContext.userId();
+    try {
+      TenantContext.set(tenantId, null);
+      ChannelAccountRef ref =
+          tenantReadTx.execute(
+              status ->
+                  channels
+                      .tsfByExternalShopId(shopId)
+                      .map(
+                          account ->
+                              new ChannelAccountRef(tenantId, account.id(), shopId))
+                      .orElseThrow(
+                          () -> new IllegalStateException("TSF account missing for shop")));
+      var adapter = adapters.require(Channel.TSF);
+      OrderDetail detail = adapter.getOrder(ref, externalOrderId);
+      PaymentStatus payment = adapter.getPaymentStatus(ref, externalOrderId);
+      long snapshotVersion = detail.aggregateVersion();
+      if (inboxAggregateVersion > 0 && snapshotVersion < inboxAggregateVersion) {
+        throw new GapSnapshotNotReadyException(snapshotVersion, inboxAggregateVersion);
+      }
+      Outcome outcome =
+          applyTx.execute(
+              status -> {
+                aggregateLock.lockOrder(jdbc, tenantId, externalOrderId);
+                return applier.apply(tenantId, shopId, detail, payment, prefix);
+              });
+      outcome = finalizeDeferred(tenantId, externalOrderId, shopId, detail, payment, prefix, outcome);
+      if (outcome == Outcome.APPLIED) {
+        gapRefetches.increment();
+      }
+    } finally {
+      restoreTenant(previousTenant, previousUser);
+    }
+  }
+
+  private Outcome finalizeDeferred(
+      UUID tenantId,
+      String externalOrderId,
+      String shopId,
+      OrderDetail detail,
+      PaymentStatus payment,
+      String prefix,
+      Outcome outcome) {
+    if (outcome == Outcome.APPLIED_NEEDS_CANCEL_CATCHUP) {
+      outcome =
+          applyTx.execute(
+              status -> {
+                aggregateLock.lockOrder(jdbc, tenantId, externalOrderId);
+                return applier.applyCancelCatchUp(tenantId, shopId, detail, prefix);
+              });
+    }
     if (outcome == Outcome.APPLIED_NEEDS_PAID_CATCHUP) {
       outcome =
           applyTx.execute(
               status -> {
                 aggregateLock.lockOrder(jdbc, tenantId, externalOrderId);
-                return applier.applyPaidCatchUp(
-                    tenantId, shopId, detail, payment, prefix, inboxAggregateVersion);
+                return applier.applyPaidCatchUp(tenantId, shopId, detail, payment, prefix);
               });
     }
-    if (outcome == Outcome.APPLIED) {
-      gapRefetches.increment();
-    }
+    return outcome;
   }
 
   public static String shopId(JsonNode payload) {
@@ -100,6 +139,14 @@ public class OrderGapRefetchService implements OrderGapRefetch {
   private static void assertNoActiveTransaction(String operation) {
     if (TransactionSynchronizationManager.isActualTransactionActive()) {
       throw new IllegalStateException(operation + " must run outside a transaction");
+    }
+  }
+
+  private static void restoreTenant(UUID tenantId, UUID userId) {
+    if (tenantId == null) {
+      TenantContext.clear();
+    } else {
+      TenantContext.set(tenantId, userId);
     }
   }
 }

@@ -87,7 +87,8 @@ public class ControlController {
     JsonNode body = readObject(request);
     String shopId = text(body, "shop_id");
     String orderId = text(body, "order_id");
-    catalog.registerOrder(shopId, orderId);
+    String status = body.path("status").asString("ACTIVE");
+    catalog.registerOrder(shopId, orderId, status);
     return ResponseEntity.ok()
         .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
         .body(json.writeValueAsString(Map.of("order_id", orderId)));

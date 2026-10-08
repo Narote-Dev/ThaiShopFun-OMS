@@ -15,12 +15,14 @@ import com.thaishopfun.oms.order.intake.OrderRestSnapshotApplier;
 import com.thaishopfun.oms.order.intake.OrderRestSnapshotApplier.Outcome;
 import com.thaishopfun.oms.tenant.TenantContext;
 import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicLong;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -55,6 +57,7 @@ public class OrderBackfillJob {
   private final Counter applied;
   private final Counter skipped;
   private final Counter failed;
+  private final AtomicLong lagSeconds = new AtomicLong(0);
 
   public OrderBackfillJob(
       OrderBackfillProperties properties,
@@ -85,6 +88,7 @@ public class OrderBackfillJob {
     this.applied = Counter.builder(APPLIED).register(meters);
     this.skipped = Counter.builder(SKIPPED).register(meters);
     this.failed = Counter.builder(FAILED).register(meters);
+    Gauge.builder(LAG, lagSeconds, AtomicLong::get).register(meters);
   }
 
   public int runOnce() {
@@ -141,7 +145,12 @@ public class OrderBackfillJob {
     }
     int touched = 0;
     for (AccountRow account : accounts) {
-      touched += runAccount(tenantId, account);
+      try {
+        touched += runAccount(tenantId, account);
+      } catch (RuntimeException ex) {
+        failed.increment();
+        log.warn("order backfill account {} failed; cursor retained", account.id(), ex);
+      }
     }
     return touched;
   }
@@ -153,42 +162,54 @@ public class OrderBackfillJob {
     }
     ChannelAccountRef ref = new ChannelAccountRef(tenantId, account.id(), account.externalShopId());
     OrderSyncCursorRepository.State state =
-        cursors
-            .load(tenantId, account.id())
-            .orElse(new OrderSyncCursorRepository.State(Instant.EPOCH, null));
+        tenantReadTx.execute(
+            status ->
+                cursors
+                    .load(tenantId, account.id())
+                    .orElse(new OrderSyncCursorRepository.State(Instant.EPOCH, null)));
     Instant watermark = state.updatedSince() == null ? Instant.EPOCH : state.updatedSince();
     Instant since = watermark.minus(properties.getOverlap());
     String pageCursor = state.pageCursor();
     Instant runStart = clock.instant();
     int touched = 0;
-    try {
-      while (true) {
-        assertNoActiveTransaction("listOrders");
-        OrderPage page = adapter.listOrders(ref, since, pageCursor, properties.getPageLimit());
-        for (OrderSummary summary : page.orders()) {
-          fetched.increment();
+    boolean sawOrders = false;
+    while (true) {
+      assertNoActiveTransaction("listOrders");
+      OrderPage page = adapter.listOrders(ref, since, pageCursor, properties.getPageLimit());
+      if (!page.orders().isEmpty()) {
+        sawOrders = true;
+      }
+      for (OrderSummary summary : page.orders()) {
+        fetched.increment();
+        try {
           if (needsApply(account.id(), summary)) {
-            touched +=
-                applyOne(tenantId, ref, account.externalShopId(), adapter, summary.orderId());
+            touched += applyOne(tenantId, ref, account.externalShopId(), adapter, summary.orderId());
           } else {
             skipped.increment();
           }
-        }
-        pageCursor = page.nextCursor();
-        String savedCursor = pageCursor;
-        tenantWriteTx.executeWithoutResult(
-            status -> cursors.saveProgress(tenantId, account.id(), watermark, savedCursor));
-        if (pageCursor == null || pageCursor.isBlank()) {
-          break;
+        } catch (RuntimeException ex) {
+          failed.increment();
+          log.warn(
+              "order backfill order {} on account {} failed; continuing",
+              summary.orderId(),
+              account.id(),
+              ex);
         }
       }
+      pageCursor = page.nextCursor();
+      String savedCursor = pageCursor;
+      if (sawOrders) {
+        tenantWriteTx.executeWithoutResult(
+            status -> cursors.saveProgress(tenantId, account.id(), watermark, savedCursor));
+      }
+      if (pageCursor == null || pageCursor.isBlank()) {
+        break;
+      }
+    }
+    if (sawOrders) {
       tenantWriteTx.executeWithoutResult(
           status -> cursors.commitSuccess(tenantId, account.id(), runStart));
-      metersLag(watermark, runStart);
-    } catch (RuntimeException ex) {
-      failed.increment();
-      log.warn("order backfill account {} failed; cursor retained", account.id(), ex);
-      throw ex;
+      recordLag(watermark, runStart);
     }
     return touched;
   }
@@ -201,7 +222,13 @@ public class OrderBackfillJob {
       return true;
     }
     long known = existing.get().externalVersion() == null ? 0L : existing.get().externalVersion();
-    return summary.aggregateVersion() > known;
+    if (summary.aggregateVersion() > known) {
+      return true;
+    }
+    SalesOrder order = existing.get();
+    return "PREPAID".equals(order.paymentMethod())
+        && !"PAID".equals(order.paymentStatus())
+        && !"CANCELLED".equals(order.orderStatus());
   }
 
   private int applyOne(
@@ -213,16 +240,10 @@ public class OrderBackfillJob {
         tenantWriteTx.execute(
             status -> {
               aggregateLock.lockOrder(jdbc, tenantId, orderId);
-              return applier.apply(tenantId, shopId, detail, payment, "backfill:" + orderId, 0);
+              return applier.apply(tenantId, shopId, detail, payment, "backfill:" + orderId);
             });
-    if (outcome == Outcome.APPLIED_NEEDS_PAID_CATCHUP) {
-      tenantWriteTx.executeWithoutResult(
-          status -> {
-            aggregateLock.lockOrder(jdbc, tenantId, orderId);
-            applier.applyPaidCatchUp(tenantId, shopId, detail, payment, "backfill:" + orderId, 0);
-          });
-      outcome = Outcome.APPLIED;
-    }
+    outcome =
+        finalizeDeferred(tenantId, orderId, shopId, detail, payment, "backfill:" + orderId, outcome);
     if (outcome == Outcome.APPLIED) {
       applied.increment();
       return 1;
@@ -231,12 +252,40 @@ public class OrderBackfillJob {
     return 0;
   }
 
-  private void metersLag(Instant watermark, Instant now) {
+  private Outcome finalizeDeferred(
+      UUID tenantId,
+      String orderId,
+      String shopId,
+      OrderDetail detail,
+      PaymentStatus payment,
+      String prefix,
+      Outcome outcome) {
+    if (outcome == Outcome.APPLIED_NEEDS_CANCEL_CATCHUP) {
+      outcome =
+          tenantWriteTx.execute(
+              status -> {
+                aggregateLock.lockOrder(jdbc, tenantId, orderId);
+                return applier.applyCancelCatchUp(tenantId, shopId, detail, prefix);
+              });
+    }
+    if (outcome == Outcome.APPLIED_NEEDS_PAID_CATCHUP) {
+      outcome =
+          tenantWriteTx.execute(
+              status -> {
+                aggregateLock.lockOrder(jdbc, tenantId, orderId);
+                return applier.applyPaidCatchUp(tenantId, shopId, detail, payment, prefix);
+              });
+    }
+    return outcome;
+  }
+
+  private void recordLag(Instant watermark, Instant now) {
     if (watermark == null) {
       return;
     }
     long seconds = Math.max(0, now.getEpochSecond() - watermark.getEpochSecond());
-    log.debug("order backfill {} lag_seconds={}", LAG, seconds);
+    lagSeconds.set(seconds);
+    log.debug("order backfill lag_seconds={}", seconds);
   }
 
   private List<UUID> listTenants() {

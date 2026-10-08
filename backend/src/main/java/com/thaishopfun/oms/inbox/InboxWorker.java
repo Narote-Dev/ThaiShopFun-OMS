@@ -361,6 +361,8 @@ public class InboxWorker {
             }
             markProcessed(row);
           });
+    } catch (com.thaishopfun.oms.order.backfill.GapSnapshotNotReadyException notReady) {
+      recordFailure(claimed, notReady);
     } catch (RuntimeException ex) {
       recordFailure(claimed, ex);
     }

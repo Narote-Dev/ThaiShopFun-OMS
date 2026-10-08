@@ -79,7 +79,8 @@ public class SalesOrderRepository {
     jdbc.update(
         """
         UPDATE sales_order
-        SET external_version = ?, updated_at = pg_catalog.now()
+        SET external_version = GREATEST(COALESCE(external_version, 0), ?),
+            updated_at = pg_catalog.now()
         WHERE channel_account_id = ? AND external_order_id = ?
         """,
         externalVersion,

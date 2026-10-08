@@ -33,6 +33,7 @@ When `aggregate_version` skips ahead of the last PROCESSED version, `InboxWorker
 ## Metrics
 
 - `oms.order.backfill.fetched|applied|skipped|failed`
+- `oms.order.backfill.lag_seconds` (gauge: watermark lag after a successful run)
 - `oms.order.gap_refetch`
 
 Logs include order ids only (no recipient PII).

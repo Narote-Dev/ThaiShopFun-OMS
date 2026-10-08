@@ -354,7 +354,7 @@ class OrderCancelApiTest extends OrderIntegrationTest {
             "COD",
             "L-demo-bundle",
             5));
-    ingest(orderPaid("DEMO-READY", shop, 2));
+    ingest(orderPaid("DEMO-READY", shop, 6));
     ingest(
         orderCreated(
             "DEMO-CANCELLED",

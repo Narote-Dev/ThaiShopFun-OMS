@@ -24,6 +24,8 @@ public class OrderRestSnapshotApplier {
     APPLIED,
     /** Create committed; caller must run {@link #applyPaidCatchUp} in a new transaction. */
     APPLIED_NEEDS_PAID_CATCHUP,
+    /** Create committed; caller must run {@link #applyCancelCatchUp} in a new transaction. */
+    APPLIED_NEEDS_CANCEL_CATCHUP,
     SKIPPED
   }
 
@@ -48,9 +50,7 @@ public class OrderRestSnapshotApplier {
       String shopId,
       OrderDetail detail,
       PaymentStatus payment,
-      String eventIdPrefix,
-      long inboxAggregateVersion) {
-    // Step 1: Resolve channel account and compare channel aggregate version.
+      String eventIdPrefix) {
     TsfAccount account =
         channels
             .tsfByExternalShopId(shopId)
@@ -58,166 +58,172 @@ public class OrderRestSnapshotApplier {
     Optional<SalesOrder> existing = orders.findByExternalId(account.id(), detail.orderId());
     long knownVersion =
         existing.map(o -> o.externalVersion() == null ? 0L : o.externalVersion()).orElse(0L);
-    // Step 1b: Version 0 means the REST body did not carry aggregate_version; still apply snapshot.
-    if (detail.aggregateVersion() > 0 && detail.aggregateVersion() <= knownVersion) {
+    long snapshotVersion = detail.aggregateVersion();
+    boolean cancelled = "CANCELLED".equalsIgnoreCase(nullToEmpty(detail.status()));
+    if (snapshotVersion > 0 && snapshotVersion <= knownVersion) {
+      if (needsPaidCatchUp(payment, currentOrder(account, detail.orderId()))) {
+        return Outcome.APPLIED_NEEDS_PAID_CATCHUP;
+      }
       return Outcome.SKIPPED;
     }
-    // Step 2: Create when missing.
     boolean createdInThisApply = false;
     if (existing.isEmpty()) {
+      long createVersion = createdAggregateVersion(snapshotVersion, payment, cancelled);
       InboxMessage created =
           message(
               tenantId,
-              eventIdPrefix + ":created:" + detail.aggregateVersion(),
+              eventIdPrefix + ":created:" + createVersion,
               "order.created",
               detail.orderId(),
-              detail.aggregateVersion(),
-              envelope(
-                  shopId,
-                  detail.orderId(),
-                  detail.aggregateVersion(),
-                  "order.created",
-                  detailData(detail)));
+              createVersion,
+              envelope(shopId, detail.orderId(), createVersion, "order.created", detailData(detail)));
       support.handleCreated(created);
       createdInThisApply = true;
       existing = orders.findByExternalId(account.id(), detail.orderId());
     }
-    // Step 3: Cancellation from optional REST status (unknown when absent).
-    if ("CANCELLED".equalsIgnoreCase(nullToEmpty(detail.status()))) {
-      SalesOrder current = orders.findByExternalId(account.id(), detail.orderId()).orElseThrow();
-      if (!"CANCELLED".equals(current.orderStatus())) {
-        InboxMessage cancelled =
-            message(
-                tenantId,
-                eventIdPrefix + ":cancelled:" + detail.aggregateVersion(),
-                "order.cancelled",
-                detail.orderId(),
-                inboxAggregateVersion > 0 ? inboxAggregateVersion : detail.aggregateVersion(),
-                envelope(
-                    shopId,
-                    detail.orderId(),
-                    detail.aggregateVersion(),
-                    "order.cancelled",
-                    json.createObjectNode().put("order_id", detail.orderId())));
-        support.handleCancelled(cancelled);
+    if (cancelled) {
+      if (createdInThisApply) {
+        return Outcome.APPLIED_NEEDS_CANCEL_CATCHUP;
       }
-      touchExternalVersion(account.id(), detail.orderId(), detail.aggregateVersion());
+      applyCancelInTx(tenantId, shopId, account, detail, eventIdPrefix, snapshotVersion);
+      touchExternalVersion(account.id(), detail.orderId(), snapshotVersion);
       return Outcome.APPLIED;
     }
-    // Step 4: Payment catch-up (defer to a second transaction when create just ran).
-    boolean pendingPaidCatchUp =
-        applyPaidCatchUpIfDue(
-            tenantId,
-            shopId,
-            account,
-            detail,
-            payment,
-            eventIdPrefix,
-            inboxAggregateVersion,
-            currentOrder(account, detail.orderId()),
-            createdInThisApply);
-    // Step 5: Apply REST recipient snapshot when aggregate moved ahead of OMS.
-    SalesOrder afterPayment = orders.findByExternalId(account.id(), detail.orderId()).orElse(null);
-    if (afterPayment != null
-        && detail.aggregateVersion() > knownVersion
-        && detail.recipient() != null) {
-      ObjectNode updatedData = json.createObjectNode();
-      updatedData.put("order_id", detail.orderId());
-      updatedData.set("recipient", json.valueToTree(detail.recipient()));
-      InboxMessage updated =
-          message(
-              tenantId,
-              eventIdPrefix + ":updated:" + detail.aggregateVersion(),
-              "order.updated",
-              detail.orderId(),
-              inboxAggregateVersion > 0 ? inboxAggregateVersion : detail.aggregateVersion(),
-              envelope(
-                  shopId,
-                  detail.orderId(),
-                  detail.aggregateVersion(),
-                  "order.updated",
-                  updatedData));
-      support.handleUpdated(updated);
-      return pendingPaidCatchUp ? Outcome.APPLIED_NEEDS_PAID_CATCHUP : Outcome.APPLIED;
+    applyRecipientIfPresent(tenantId, shopId, account, detail, eventIdPrefix, snapshotVersion, knownVersion);
+    if (needsPaidCatchUp(payment, currentOrder(account, detail.orderId()))) {
+      if (createdInThisApply) {
+        return Outcome.APPLIED_NEEDS_PAID_CATCHUP;
+      }
+      applyPaidInTx(tenantId, shopId, account, detail, eventIdPrefix, snapshotVersion);
     }
-    touchExternalVersion(account.id(), detail.orderId(), detail.aggregateVersion());
-    return pendingPaidCatchUp ? Outcome.APPLIED_NEEDS_PAID_CATCHUP : Outcome.APPLIED;
+    touchExternalVersion(account.id(), detail.orderId(), snapshotVersion);
+    return Outcome.APPLIED;
   }
 
-  /**
-   * Step 4 only, after {@link Outcome#APPLIED_NEEDS_PAID_CATCHUP} was returned from {@link #apply}.
-   */
   public Outcome applyPaidCatchUp(
       UUID tenantId,
       String shopId,
       OrderDetail detail,
       PaymentStatus payment,
-      String eventIdPrefix,
-      long inboxAggregateVersion) {
+      String eventIdPrefix) {
     TsfAccount account =
         channels
             .tsfByExternalShopId(shopId)
             .orElseThrow(() -> new IllegalStateException("TSF account missing for shop"));
     SalesOrder current = currentOrder(account, detail.orderId());
-    if (!applyPaidCatchUpIfDue(
-        tenantId,
-        shopId,
-        account,
-        detail,
-        payment,
-        eventIdPrefix,
-        inboxAggregateVersion,
-        current,
-        false)) {
+    if (!needsPaidCatchUp(payment, current)) {
       return Outcome.SKIPPED;
     }
+    applyPaidInTx(tenantId, shopId, account, detail, eventIdPrefix, detail.aggregateVersion());
     touchExternalVersion(account.id(), detail.orderId(), detail.aggregateVersion());
     return Outcome.APPLIED;
+  }
+
+  public Outcome applyCancelCatchUp(
+      UUID tenantId,
+      String shopId,
+      OrderDetail detail,
+      String eventIdPrefix) {
+    TsfAccount account =
+        channels
+            .tsfByExternalShopId(shopId)
+            .orElseThrow(() -> new IllegalStateException("TSF account missing for shop"));
+    applyCancelInTx(tenantId, shopId, account, detail, eventIdPrefix, detail.aggregateVersion());
+    touchExternalVersion(account.id(), detail.orderId(), detail.aggregateVersion());
+    return Outcome.APPLIED;
+  }
+
+  private void applyRecipientIfPresent(
+      UUID tenantId,
+      String shopId,
+      TsfAccount account,
+      OrderDetail detail,
+      String eventIdPrefix,
+      long snapshotVersion,
+      long knownVersion) {
+    if (detail.recipient() == null || snapshotVersion <= knownVersion) {
+      return;
+    }
+    ObjectNode updatedData = json.createObjectNode();
+    updatedData.put("order_id", detail.orderId());
+    updatedData.set("recipient", json.valueToTree(detail.recipient()));
+    InboxMessage updated =
+        message(
+            tenantId,
+            eventIdPrefix + ":updated:" + snapshotVersion,
+            "order.updated",
+            detail.orderId(),
+            snapshotVersion,
+            envelope(shopId, detail.orderId(), snapshotVersion, "order.updated", updatedData));
+    support.handleUpdated(updated);
+  }
+
+  private void applyPaidInTx(
+      UUID tenantId,
+      String shopId,
+      TsfAccount account,
+      OrderDetail detail,
+      String eventIdPrefix,
+      long snapshotVersion) {
+    InboxMessage paid =
+        message(
+            tenantId,
+            eventIdPrefix + ":paid:" + snapshotVersion,
+            "order.paid",
+            detail.orderId(),
+            snapshotVersion,
+            envelope(
+                shopId,
+                detail.orderId(),
+                snapshotVersion,
+                "order.paid",
+                json.createObjectNode().put("order_id", detail.orderId())));
+    support.handlePaid(paid);
+  }
+
+  private void applyCancelInTx(
+      UUID tenantId,
+      String shopId,
+      TsfAccount account,
+      OrderDetail detail,
+      String eventIdPrefix,
+      long snapshotVersion) {
+    SalesOrder current = orders.findByExternalId(account.id(), detail.orderId()).orElseThrow();
+    if ("CANCELLED".equals(current.orderStatus())) {
+      return;
+    }
+    InboxMessage cancelled =
+        message(
+            tenantId,
+            eventIdPrefix + ":cancelled:" + snapshotVersion,
+            "order.cancelled",
+            detail.orderId(),
+            snapshotVersion,
+            envelope(
+                shopId,
+                detail.orderId(),
+                snapshotVersion,
+                "order.cancelled",
+                json.createObjectNode().put("order_id", detail.orderId())));
+    support.handleCancelled(cancelled);
+  }
+
+  private static boolean needsPaidCatchUp(PaymentStatus payment, SalesOrder current) {
+    return payment != null
+        && "PAID".equals(payment.status())
+        && current != null
+        && !"PAID".equals(current.paymentStatus())
+        && !"CANCELLED".equals(current.orderStatus());
   }
 
   private SalesOrder currentOrder(TsfAccount account, String externalOrderId) {
     return orders.findByExternalId(account.id(), externalOrderId).orElse(null);
   }
 
-  private boolean applyPaidCatchUpIfDue(
-      UUID tenantId,
-      String shopId,
-      TsfAccount account,
-      OrderDetail detail,
-      PaymentStatus payment,
-      String eventIdPrefix,
-      long inboxAggregateVersion,
-      SalesOrder current,
-      boolean deferBecauseCreatedInSameApply) {
-    if (payment == null
-        || !"PAID".equals(payment.status())
-        || current == null
-        || "PAID".equals(current.paymentStatus())
-        || "CANCELLED".equals(current.orderStatus())) {
-      return false;
-    }
-    if (deferBecauseCreatedInSameApply) {
-      return true;
-    }
-    InboxMessage paid =
-        message(
-            tenantId,
-            eventIdPrefix + ":paid:" + detail.aggregateVersion(),
-            "order.paid",
-            detail.orderId(),
-            inboxAggregateVersion > 0 ? inboxAggregateVersion : detail.aggregateVersion(),
-            envelope(
-                shopId,
-                detail.orderId(),
-                detail.aggregateVersion(),
-                "order.paid",
-                json.createObjectNode().put("order_id", detail.orderId())));
-    support.handlePaid(paid);
-    return false;
-  }
-
   private void touchExternalVersion(UUID channelAccountId, String externalOrderId, long version) {
-    orders.updateExternalVersion(channelAccountId, externalOrderId, version);
+    if (version > 0) {
+      orders.updateExternalVersion(channelAccountId, externalOrderId, version);
+    }
   }
 
   private InboxMessage message(
@@ -259,5 +265,23 @@ public class OrderRestSnapshotApplier {
 
   private static String nullToEmpty(String value) {
     return value == null ? "" : value;
+  }
+
+  /**
+   * REST create must not commit the snapshot aggregate version before paid/cancel catch-up; intake
+   * would otherwise skip retries when catch-up fails.
+   */
+  private static long createdAggregateVersion(
+      long snapshotVersion, PaymentStatus payment, boolean cancelled) {
+    if (snapshotVersion <= 1) {
+      return snapshotVersion;
+    }
+    if (cancelled) {
+      return 1L;
+    }
+    if (payment != null && "PAID".equals(payment.status())) {
+      return 1L;
+    }
+    return snapshotVersion;
   }
 }

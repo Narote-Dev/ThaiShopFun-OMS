@@ -102,12 +102,19 @@ public class TsfCatalog {
   }
 
   public synchronized void registerOrder(String shopId, String orderId) {
+    registerOrder(shopId, orderId, "ACTIVE");
+  }
+
+  public synchronized void registerOrder(String shopId, String orderId, String lifecycleStatus) {
     registerShop(shopId);
     if (order(orderId).isPresent()) {
       return;
     }
     Instant updated = Instant.now();
     Map<String, Object> detail = base(orderId, "rsv_" + orderId, updated, 1);
+    if ("CANCELLED".equalsIgnoreCase(lifecycleStatus)) {
+      detail.put("status", "CANCELLED");
+    }
     detail.put(
         "lines", List.of(line("L1", "tsf_sku_7781", "TSHIRT-BLK-M", "เสื้อยืดดำ M", 1, 100)));
     detail.put("totals", totals(100, 0, 0, 100));
