@@ -68,6 +68,10 @@ public class OrderRestSnapshotApplier {
     }
     boolean createdInThisApply = false;
     if (existing.isEmpty()) {
+      // Step: Inbox gap refetch must not bootstrap from REST before order.created lands in OMS.
+      if (eventIdPrefix.startsWith("gap:")) {
+        return Outcome.SKIPPED;
+      }
       long createVersion = createdAggregateVersion(snapshotVersion, payment, cancelled);
       InboxMessage created =
           message(
