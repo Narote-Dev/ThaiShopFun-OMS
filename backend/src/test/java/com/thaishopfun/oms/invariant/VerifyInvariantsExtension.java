@@ -20,9 +20,13 @@ public class VerifyInvariantsExtension implements AfterEachCallback {
     if (!applicationContext.containsBean("invariantChecker")) {
       return;
     }
+    VerifyInvariants annotation = findAnnotation(context.getRequiredTestClass());
+    if (annotation == null) {
+      InvariantTestTenants.drain();
+      return;
+    }
     InvariantChecker checker = applicationContext.getBean(InvariantChecker.class);
-    VerifyInvariants.Scope scope =
-        context.getRequiredTestClass().getAnnotation(VerifyInvariants.class).scope();
+    VerifyInvariants.Scope scope = annotation.scope();
     List<Violation> violations = new java.util.ArrayList<>(checker.checkSchema());
     for (UUID tenantId : InvariantTestTenants.drain()) {
       violations.addAll(
@@ -31,6 +35,16 @@ public class VerifyInvariantsExtension implements AfterEachCallback {
               : checker.checkTenant(tenantId));
     }
     assertThat(violations).as(InvariantChecker.formatFailures(violations)).isEmpty();
+  }
+
+  private static VerifyInvariants findAnnotation(Class<?> type) {
+    for (Class<?> current = type; current != null; current = current.getSuperclass()) {
+      VerifyInvariants annotation = current.getAnnotation(VerifyInvariants.class);
+      if (annotation != null) {
+        return annotation;
+      }
+    }
+    return null;
   }
 
   private static boolean skip(ExtensionContext context) {
