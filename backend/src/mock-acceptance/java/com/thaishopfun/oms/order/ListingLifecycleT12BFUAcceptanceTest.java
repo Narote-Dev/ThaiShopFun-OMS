@@ -704,7 +704,7 @@ class ListingLifecycleT12BFUAcceptanceTest {
                   shop.tenant(),
                   sellerSku);
           if (!ids.isEmpty()) {
-            return;
+            return null;
           }
           UUID sku = UuidV7.generate();
           jdbc.update(
@@ -723,6 +723,7 @@ class ListingLifecycleT12BFUAcceptanceTest {
               sku,
               shop.warehouse(),
               onHand);
+          return null;
         });
   }
 
