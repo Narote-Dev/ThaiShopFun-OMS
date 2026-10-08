@@ -3,6 +3,7 @@ package com.thaishopfun.oms.inbox;
 import java.time.Clock;
 import java.time.DateTimeException;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.Set;
 import tools.jackson.databind.JsonNode;
 
@@ -76,7 +77,7 @@ final class MembershipPayload {
       throw new NonRetryableInboxException("membership.changed is invalid");
     }
     try {
-      return Instant.parse(value.asString());
+      return Instant.parse(value.asString()).truncatedTo(ChronoUnit.MICROS);
     } catch (DateTimeException ex) {
       throw new NonRetryableInboxException("membership.changed is invalid");
     }

@@ -21,7 +21,19 @@ public class InvariantDevController {
 
   @PostMapping("/invariants-check")
   public ResponseEntity<Map<String, Object>> runOnce() {
-    int violations = job.runOnce();
-    return ResponseEntity.ok(Map.of("status", "OK", "violations", violations));
+    InvariantJobResult result = job.runOnce();
+    String status = result.healthy() ? "OK" : result.checkFailed() > 0 ? "FAILED" : "VIOLATIONS";
+    var body =
+        Map.<String, Object>of(
+            "status",
+            status,
+            "violations",
+            result.violations(),
+            "checkFailed",
+            result.checkFailed());
+    if (result.checkFailed() > 0) {
+      return ResponseEntity.status(503).body(body);
+    }
+    return ResponseEntity.ok(body);
   }
 }

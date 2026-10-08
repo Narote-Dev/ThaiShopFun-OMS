@@ -23,14 +23,17 @@ public final class PiiLogAssertions implements AutoCloseable {
           SENTINEL_EMAIL,
           SENTINEL_NAME,
           "0812341234",
+          "66812341234",
           "081-234-5678",
           "+66812345678",
           "66812345678",
           "812345678");
 
+  private final Logger logger;
   private final ListAppender<ILoggingEvent> appender;
 
-  private PiiLogAssertions(ListAppender<ILoggingEvent> appender) {
+  private PiiLogAssertions(Logger logger, ListAppender<ILoggingEvent> appender) {
+    this.logger = logger;
     this.appender = appender;
   }
 
@@ -39,7 +42,7 @@ public final class PiiLogAssertions implements AutoCloseable {
     ListAppender<ILoggingEvent> appender = new ListAppender<>();
     appender.start();
     logger.addAppender(appender);
-    return new PiiLogAssertions(appender);
+    return new PiiLogAssertions(logger, appender);
   }
 
   public void assertNoPii() {
@@ -57,6 +60,7 @@ public final class PiiLogAssertions implements AutoCloseable {
 
   @Override
   public void close() {
+    logger.detachAppender(appender);
     appender.stop();
   }
 }

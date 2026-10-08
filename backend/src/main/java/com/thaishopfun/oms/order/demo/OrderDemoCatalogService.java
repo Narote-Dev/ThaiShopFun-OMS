@@ -253,6 +253,7 @@ public class OrderDemoCatalogService {
             """
             SELECT on_hand FROM inventory
             WHERE tenant_id = ? AND sku_id = ? AND warehouse_id = ?
+            FOR UPDATE
             """,
             (rs, row) -> rs.getInt("on_hand"),
             shop.tenantId(),

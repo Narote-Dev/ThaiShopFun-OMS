@@ -25,9 +25,7 @@ class PiiLogAssertionsTest {
       LOG.info("debug leak phone=0812341234");
       assertThatThrownBy(logs::assertNoPii)
           .isInstanceOf(AssertionError.class)
-          .satisfies(
-              err ->
-                  assertThat(err.getMessage()).contains("0812341234"));
+          .satisfies(err -> assertThat(err.getMessage()).contains("0812341234"));
     }
   }
 }

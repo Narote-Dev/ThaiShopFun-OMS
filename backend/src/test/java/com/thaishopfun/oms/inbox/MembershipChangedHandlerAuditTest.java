@@ -23,7 +23,8 @@ import tools.jackson.databind.node.ObjectNode;
 class MembershipChangedHandlerAuditTest extends StockTestBase {
 
   private static final JsonMapper JSON = JsonMapper.builder().build();
-  private static final Instant EXPIRES = Instant.now().plus(30, ChronoUnit.DAYS);
+  private static final Instant EXPIRES =
+      Instant.now().plus(30, ChronoUnit.DAYS).truncatedTo(ChronoUnit.MICROS);
 
   @Autowired MembershipChangedHandler handler;
 
@@ -33,13 +34,13 @@ class MembershipChangedHandlerAuditTest extends StockTestBase {
   }
 
   @Test
-  void jitProvisionThenInboxWritesOneAuditPerEntVerAndReplayIsIdempotent() {
+  void jitProvisionThenInboxWritesOneAuditPerEntVerAndReplayIsIdempotent() throws Exception {
     StockFixture.Shop shop = fixture.shop("ACTIVE");
     long priorVer = 3;
     long nextVer = 4;
     UUID tenantId = shop.tenant();
 
-    fixture.inTenant(
+    fixture.runInTenant(
         tenantId,
         () -> {
           jdbc.update(
@@ -66,28 +67,56 @@ class MembershipChangedHandlerAuditTest extends StockTestBase {
         });
 
     // Login JIT applied ent_ver N+1 without a membership.changed audit for that version.
-    try (var admin = AuthTestSupport.admin()) {
-      admin.setAutoCommit(false);
-      try (var ps =
-          admin.prepareStatement(
-              """
-              SELECT provision_tenant(?, 'Shop', 'PRO', 'ACTIVE', ?, ?)
-              """)) {
-        ps.setString(1, fixture.tsfShopId(shop));
-        ps.setObject(2, OffsetDateTime.ofInstant(EXPIRES, ZoneOffset.UTC));
-        ps.setLong(3, nextVer);
-        ps.execute();
-      }
-      admin.commit();
+    try (var app = AuthTestSupport.app();
+        var ps =
+            app.prepareStatement(
+                """
+                SELECT provision_tenant(?, ?, ?, ?, ?, ?)
+                """)) {
+      ps.setString(1, fixture.tsfShopId(shop));
+      ps.setString(2, "Shop");
+      ps.setString(3, "PRO");
+      ps.setString(4, "ACTIVE");
+      ps.setObject(5, OffsetDateTime.ofInstant(EXPIRES, ZoneOffset.UTC));
+      ps.setLong(6, nextVer);
+      ps.executeQuery();
     }
 
-    ObjectNode payload = membershipPayload(nextVer);
+    ObjectNode payload = membershipPayload(nextVer, EXPIRES.toString());
     deliver(handler, tenantId, payload, "evt-" + UUID.randomUUID());
     assertAuditCount(tenantId, nextVer, 1);
 
     deliver(handler, tenantId, payload, "evt-replay-" + UUID.randomUUID());
     assertAuditCount(tenantId, nextVer, 1);
     assertAuditCount(tenantId, priorVer, 1);
+  }
+
+  @Test
+  void nanosecondExpiresAtMatchesDbMicrosAndReplayWritesOneAudit() throws Exception {
+    StockFixture.Shop shop = fixture.shop("ACTIVE");
+    long entVer = 7;
+    UUID tenantId = shop.tenant();
+    String payloadExpiry = EXPIRES.toString() + "123";
+
+    fixture.runInTenant(
+        tenantId,
+        () ->
+            jdbc.update(
+                """
+                UPDATE tenant
+                SET membership_tier = 'PRO', entitlement_status = 'ACTIVE',
+                    entitlement_expires_at = ?, ent_ver = ?
+                WHERE id = ?
+                """,
+                OffsetDateTime.ofInstant(EXPIRES, ZoneOffset.UTC),
+                entVer,
+                tenantId));
+
+    ObjectNode payload = membershipPayload(entVer, payloadExpiry);
+    deliver(handler, tenantId, payload, "evt-nano-1");
+    assertAuditCount(tenantId, entVer, 1);
+    deliver(handler, tenantId, payload, "evt-nano-2");
+    assertAuditCount(tenantId, entVer, 1);
   }
 
   private void deliver(
@@ -110,30 +139,31 @@ class MembershipChangedHandlerAuditTest extends StockTestBase {
     fixture.runInTenant(tenantId, () -> handler.handle(message));
   }
 
-  private static ObjectNode membershipPayload(long entVer) {
+  private static ObjectNode membershipPayload(long entVer, String expiresAt) {
     ObjectNode data = JSON.createObjectNode();
     data.put("tier", "PRO");
     data.put("status", "ACTIVE");
     data.put("ent_ver", entVer);
-    data.put("expires_at", EXPIRES.toString());
+    data.put("expires_at", expiresAt);
     return data;
   }
 
   private void assertAuditCount(UUID tenantId, long entVer, int expected) {
-    Long count =
-        fixture.inTenant(
-            tenantId,
-            () ->
-                jdbc.queryForObject(
-                    """
-                    SELECT count(*) FROM audit_log
-                    WHERE tenant_id = ?
-                      AND action = 'membership.changed'
-                      AND ("after"->>'ent_ver')::bigint = ?
-                    """,
-                    Long.class,
-                    tenantId,
-                    entVer));
-    assertThat(count).isEqualTo(expected);
+    fixture.runInTenant(
+        tenantId,
+        () -> {
+          Long count =
+              jdbc.queryForObject(
+                  """
+                  SELECT count(*) FROM audit_log
+                  WHERE tenant_id = ?
+                    AND action = 'membership.changed'
+                    AND ("after"->>'ent_ver')::bigint = ?
+                  """,
+                  Long.class,
+                  tenantId,
+                  entVer);
+          assertThat(count).isEqualTo((long) expected);
+        });
   }
 }

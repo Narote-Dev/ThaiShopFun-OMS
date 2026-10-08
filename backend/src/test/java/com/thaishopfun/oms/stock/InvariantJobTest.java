@@ -51,8 +51,9 @@ class InvariantJobTest extends StockTestBase {
             .tag("code", InvariantCodes.STOCK_LEDGER_MISMATCH)
             .counter();
     double before = counter == null ? 0 : counter.count();
-    int violations = job.runOnce();
-    assertThat(violations).isGreaterThan(0);
+    var result = job.runOnce();
+    assertThat(result.violations()).isGreaterThan(0);
+    assertThat(result.checkFailed()).isZero();
     counter =
         meters
             .find(InvariantJob.VIOLATIONS_METRIC)

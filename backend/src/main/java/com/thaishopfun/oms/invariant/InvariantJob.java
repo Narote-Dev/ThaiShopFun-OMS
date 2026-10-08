@@ -35,7 +35,7 @@ public class InvariantJob {
   }
 
   /** One full pass: schema once, then each ACTIVE tenant. */
-  public int runOnce() {
+  public InvariantJobResult runOnce() {
     if (TransactionSynchronizationManager.isActualTransactionActive()) {
       throw new IllegalStateException("invariant job must run outside a transaction");
     }
@@ -71,7 +71,7 @@ public class InvariantJob {
             checkFailed,
             tenants.size());
       }
-      return violationCount;
+      return new InvariantJobResult(violationCount, checkFailed);
     } finally {
       if (previousTenant != null) {
         TenantContext.set(previousTenant, previousUser);
