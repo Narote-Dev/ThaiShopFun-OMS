@@ -355,7 +355,7 @@ public class OrderRestSnapshotApplier {
     if (cancelled) {
       return 1L;
     }
-    if (payment != null && "PAID".equals(payment.status())) {
+    if (payment != null && paidHappenedOnChannel(payment.status())) {
       return 1L;
     }
     return snapshotVersion;

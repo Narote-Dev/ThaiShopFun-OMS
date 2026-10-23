@@ -18,7 +18,8 @@ OMS pulls TSF orders on a schedule and refetches full snapshots when inbox `aggr
 
 - `updated_since`: watermark for `GET /shops/{shopId}/orders?updated_since=` (minus a 2-minute overlap for clock skew)
 - `page_cursor`: paging token while a run is in progress
-- `last_success_at`: committed watermark time after a full successful run
+- `last_success_at`: committed watermark time after a full successful run, including empty scans and scans where all orders were already current
+- A failed order leaves the watermark unchanged and retains the cursor at the start of its page; the next run retries that page before advancing.
 
 HTTP list/get runs **outside** DB transactions. Each applied order runs in a new tenant transaction with `InboxAggregateLock.lockOrder`.
 
@@ -26,7 +27,7 @@ HTTP list/get runs **outside** DB transactions. Each applied order runs in a new
 
 When `aggregate_version` skips ahead of the last PROCESSED version on the aggregate (any order event type, including `order.updated`), `InboxWorker` does not apply the webhook delta alone. It refetches `GET /orders/{id}` (+ payment status) outside the inbox transaction, then applies the REST snapshot through the same intake handlers as webhooks.
 
-`order.updated` deltas are **not** dropped when a newer inbox row exists for another event type on the same order; stale skipping is per `event_type` only.
+`order.updated` deltas are **not** dropped when a newer inbox row exists for another event type on the same order; stale skipping is per `event_type` only. A later `order.paid` waits for queued older recipient updates before advancing the order version. Batch ordering and released leases are tenant-scoped under RLS, keyed by tenant, source, and aggregate.
 
 If REST is behind the inbox version, the gap row uses the normal inbox failure backoff ladder (with jitter) until `oms.inbox.max-defer` age or max attempts. After that budget, OMS applies the gap inbox payload for `order.paid` / `order.cancelled` / `order.updated`, or marks the row `DEAD` with reconciliation rule `GAP_SNAPSHOT_STALE`.
 

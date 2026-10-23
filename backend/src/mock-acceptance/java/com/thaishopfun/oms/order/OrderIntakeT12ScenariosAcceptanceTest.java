@@ -596,7 +596,17 @@ class OrderIntakeT12ScenariosAcceptanceTest {
     JsonNode report = control("/control/events/shuffle", body);
     assertThat(report.path("sent")).hasSize(2);
 
-    assertThat(worker.processAvailable(10)).isEqualTo(2);
+    assertThat(worker.processAvailable(10)).isEqualTo(1);
+    assertThat(
+            text(
+                "SELECT status FROM inbox_event WHERE event_id = ?",
+                paid.path("event_id").asString()))
+        .isEqualTo("RECEIVED");
+    assertThat(
+            count(
+                "SELECT attempts FROM inbox_event WHERE event_id = ?",
+                paid.path("event_id").asString()))
+        .isZero();
     rewind(paid.path("event_id").asString());
     assertThat(worker.processAvailable(10)).isEqualTo(1);
     assertThat(

@@ -1,5 +1,6 @@
 --
 -- PostgreSQL database dump
+-- Schema includes Flyway V14: list_tenants_for_order_backfill() and its EXECUTE grants.
 --
 
 \restrict m7Zwlhr0g7ENX4EqLEGo362bkyShWQAQbmrrqD7bvI5BMZKVFgIQOE5VlLiSIqP

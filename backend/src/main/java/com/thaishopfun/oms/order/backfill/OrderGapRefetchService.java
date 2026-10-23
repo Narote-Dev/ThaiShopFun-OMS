@@ -100,23 +100,6 @@ public class OrderGapRefetchService implements OrderGapRefetch {
         throw restFailure;
       }
       long snapshotVersion = detail.aggregateVersion();
-      if ("order.updated".equals(inboxEventType)
-          && inboxPayload != null
-          && !inboxPayload.isNull()
-          && snapshotVersion < inboxAggregateVersion
-          && orderExists(tenantId, externalOrderId)) {
-        Outcome updatedInbox =
-            applyTx.execute(
-                status -> {
-                  aggregateLock.lockOrder(jdbc, tenantId, externalOrderId);
-                  return applier.applyGapInboxEvent(
-                      tenantId, shopId, inboxEventType, inboxPayload, prefix);
-                });
-        if (updatedInbox == Outcome.APPLIED) {
-          gapRefetches.increment();
-          return true;
-        }
-      }
       if ("order.paid".equals(inboxEventType)
           && !GapPaymentSnapshot.indicatesPaidHappened(payment)) {
         if (snapshotVersion >= inboxAggregateVersion

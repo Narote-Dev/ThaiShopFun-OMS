@@ -99,7 +99,12 @@ class OrderCancelApiTest extends OrderIntegrationTest {
   }
 
   @BeforeEach
-  void fixture() {
+  void fixture() throws Exception {
+    // Each test owns its worker queue; prior suites can leave unrelated deferred rows.
+    try (Connection admin = AuthTestSupport.admin();
+        var statement = admin.createStatement()) {
+      statement.execute("TRUNCATE TABLE inbox_event");
+    }
     mock.getBean(OmsEndpoint.class).setBaseUrl("http://127.0.0.1:" + port);
     fixture = new OrderFixture(orders, recipients, history, transactions);
   }

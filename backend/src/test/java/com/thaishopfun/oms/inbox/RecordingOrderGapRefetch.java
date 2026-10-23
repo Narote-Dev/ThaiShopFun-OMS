@@ -1,5 +1,6 @@
 package com.thaishopfun.oms.inbox;
 
+import com.thaishopfun.oms.order.backfill.GapSnapshotNotReadyException;
 import com.thaishopfun.oms.order.backfill.OrderGapRefetch;
 import java.util.ArrayList;
 import java.util.List;
@@ -18,6 +19,9 @@ public class RecordingOrderGapRefetch implements OrderGapRefetch {
   public record Call(UUID tenantId, String shopId, String externalOrderId, long aggregateVersion) {}
 
   private final List<Call> calls = new ArrayList<>();
+  boolean snapshotReady = true;
+  boolean fallbackApplied = true;
+  int fallbacks;
 
   @Override
   public boolean refetchAndApply(
@@ -29,6 +33,9 @@ public class RecordingOrderGapRefetch implements OrderGapRefetch {
       String inboxEventType,
       JsonNode inboxPayload) {
     calls.add(new Call(tenantId, shopId, externalOrderId, inboxAggregateVersion));
+    if (!snapshotReady) {
+      throw new GapSnapshotNotReadyException(1, inboxAggregateVersion);
+    }
     return true;
   }
 
@@ -47,10 +54,14 @@ public class RecordingOrderGapRefetch implements OrderGapRefetch {
     calls.add(
         new Call(
             tenantId, shopId, externalOrderId, inboxPayload.path("aggregate_version").asLong(0)));
-    return true;
+    fallbacks++;
+    return fallbackApplied;
   }
 
   public void reset() {
     calls.clear();
+    snapshotReady = true;
+    fallbackApplied = true;
+    fallbacks = 0;
   }
 }

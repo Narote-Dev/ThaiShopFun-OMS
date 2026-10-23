@@ -150,10 +150,10 @@ public class InboxWorker {
 
   public int processAvailable(int limit) {
     int bounded = Math.min(Math.max(limit, 1), 1000);
-    return processClaimBatch(claim(bounded), bounded);
+    return processClaimBatch(claim(bounded));
   }
 
-  private int processClaimBatch(List<Claimed> claimed, int bounded) {
+  private int processClaimBatch(List<Claimed> claimed) {
     if (claimed.isEmpty()) {
       return 0;
     }
@@ -162,23 +162,15 @@ public class InboxWorker {
       releaseClaim(skipped);
     }
     int handled = 0;
-    boolean gapRetry = false;
-    boolean progressed = false;
     for (Claimed row : partition.toProcess()) {
       try {
         ClaimOutcome outcome = processClaim(row);
         if (outcome.countsAsHandled()) {
           handled++;
         }
-        gapRetry |= outcome == ClaimOutcome.GAP_RETRY;
-        progressed |= outcome == ClaimOutcome.PROCESSED;
       } catch (RuntimeException ex) {
         log.error("inbox event {} was not completed", row.id(), ex);
       }
-    }
-    // One follow-up pass when a gap defer (1ms) ran alongside a sibling that finished PROCESSED.
-    if (gapRetry && progressed) {
-      handled += processClaimBatch(claim(bounded), bounded);
     }
     return handled;
   }
@@ -191,11 +183,10 @@ public class InboxWorker {
   private enum ClaimOutcome {
     PROCESSED,
     HANDLED,
-    GAP_RETRY,
     NOOP;
 
     boolean countsAsHandled() {
-      return this == PROCESSED || this == HANDLED || this == GAP_RETRY;
+      return this == PROCESSED || this == HANDLED;
     }
   }
 
@@ -355,6 +346,10 @@ public class InboxWorker {
     if ("order.updated".equals(row.eventType()) && blockedByNewerPending(row)) {
       throw new InboxDeferException(NEWER_PENDING_DEFER);
     }
+    if ("order.paid".equals(row.eventType()) && blockedByOlderPendingUpdate(row)) {
+      // Payment advances external_version; finish queued recipient deltas before that happens.
+      throw new InboxDeferException(NEWER_PENDING_DEFER);
+    }
     Long lastForStale = lastProcessedVersionForStale(row);
     Long lastAggregate = lastProcessedVersionAggregate(row);
     boolean entVerOrdered = InboxEntitlementPolicy.ordersByEntVer(row.eventType());
@@ -473,60 +468,111 @@ public class InboxWorker {
 
   private BatchPartition partitionBatch(List<Claimed> claimed) {
     UUID[] ids = claimed.stream().map(Claimed::id).toArray(UUID[]::new);
-    List<ClaimMeta> metas =
-        jdbc.query(
-            """
-            SELECT id, aggregate_id, event_type
-            FROM inbox_event
-            WHERE id = ANY (?)
-            """,
-            ps -> ps.setArray(1, ps.getConnection().createArrayOf("uuid", ids)),
-            (rs, row) ->
-                new ClaimMeta(
-                    rs.getObject("id", UUID.class),
-                    rs.getString("aggregate_id"),
-                    rs.getString("event_type")));
-    Set<String> aggregatesWithCreated = new HashSet<>();
+    List<ClaimMeta> metas = new ArrayList<>();
+    UUID previousTenant = TenantContext.tenantId();
+    UUID previousUser = TenantContext.userId();
+    try {
+      // claim_inbox_batch is SECURITY DEFINER; its metadata must still be read under RLS.
+      for (UUID tenantId : claimed.stream().map(Claimed::tenantId).distinct().toList()) {
+        TenantContext.set(tenantId, null);
+        metas.addAll(
+            applyTx.execute(
+                status ->
+                    jdbc.query(
+                        "SELECT id, source, aggregate_id, event_type FROM inbox_event WHERE id = ANY (?)",
+                        ps -> ps.setArray(1, ps.getConnection().createArrayOf("uuid", ids)),
+                        (rs, row) ->
+                            new ClaimMeta(
+                                rs.getObject("id", UUID.class),
+                                new AggregateKey(
+                                    tenantId, rs.getString("source"), rs.getString("aggregate_id")),
+                                rs.getString("event_type")))));
+      }
+    } finally {
+      if (previousTenant == null) {
+        TenantContext.clear();
+      } else {
+        TenantContext.set(previousTenant, previousUser);
+      }
+    }
+    Set<AggregateKey> aggregatesWithCreated = new HashSet<>();
     Map<UUID, ClaimMeta> metaById = new HashMap<>();
     for (ClaimMeta meta : metas) {
       metaById.put(meta.id(), meta);
       if ("order.created".equals(meta.eventType())) {
-        aggregatesWithCreated.add(meta.aggregateId());
+        aggregatesWithCreated.add(meta.aggregate());
       }
-    }
-    if (aggregatesWithCreated.isEmpty()) {
-      return new BatchPartition(claimed, List.of());
     }
     List<Claimed> toProcess = new ArrayList<>();
     List<Claimed> yielded = new ArrayList<>();
     for (Claimed claim : claimed) {
       ClaimMeta meta = metaById.get(claim.id());
       if (meta != null
-          && aggregatesWithCreated.contains(meta.aggregateId())
+          && aggregatesWithCreated.contains(meta.aggregate())
           && !"order.created".equals(meta.eventType())) {
         yielded.add(claim);
       } else {
         toProcess.add(claim);
       }
     }
+    // Stable priority: recipient deltas queued with payment must land before external_version
+    // moves.
+    toProcess.sort(
+        java.util.Comparator.comparingInt(
+            claim -> {
+              ClaimMeta meta = metaById.get(claim.id());
+              return meta != null && "order.updated".equals(meta.eventType()) ? 0 : 1;
+            }));
     return new BatchPartition(toProcess, yielded);
   }
 
   private void releaseClaim(Claimed claimed) {
-    failureTx.executeWithoutResult(
-        status -> {
-          InboxRow row = lock(claimed.id());
-          if (row == null) {
-            return;
-          }
-          if (!"RECEIVED".equals(row.status()) && !"FAILED".equals(row.status())) {
-            return;
-          }
-          if (!leaseMatches(row.nextAttemptAt(), claimed.leaseUntil())) {
-            return;
-          }
-          pushBack(row, Duration.ZERO);
-        });
+    UUID previousTenant = TenantContext.tenantId();
+    UUID previousUser = TenantContext.userId();
+    TenantContext.set(claimed.tenantId(), null);
+    try {
+      failureTx.executeWithoutResult(
+          status -> {
+            InboxRow row = lock(claimed.id());
+            if (row == null) {
+              return;
+            }
+            if (!"RECEIVED".equals(row.status()) && !"FAILED".equals(row.status())) {
+              return;
+            }
+            if (!leaseMatches(row.nextAttemptAt(), claimed.leaseUntil())) {
+              return;
+            }
+            pushBack(row, Duration.ZERO);
+          });
+    } finally {
+      if (previousTenant == null) {
+        TenantContext.clear();
+      } else {
+        TenantContext.set(previousTenant, previousUser);
+      }
+    }
+  }
+
+  private boolean blockedByOlderPendingUpdate(InboxRow row) {
+    if (row.aggregateVersion() <= 0) {
+      return false;
+    }
+    return Boolean.TRUE.equals(
+        jdbc.queryForObject(
+            """
+        SELECT EXISTS (
+          SELECT 1 FROM inbox_event
+          WHERE tenant_id = ? AND source = ? AND aggregate_id = ?
+            AND event_type = 'order.updated' AND status IN ('RECEIVED', 'FAILED')
+            AND aggregate_version > 0 AND aggregate_version < ?
+        )
+        """,
+            Boolean.class,
+            row.tenantId(),
+            row.source(),
+            row.aggregateId(),
+            row.aggregateVersion()));
   }
 
   private boolean blockedByNewerPending(InboxRow row) {
@@ -597,13 +643,26 @@ public class InboxWorker {
             }
             return;
           }
-          pushBack(row, properties.getDeferDelay());
+          // Keep the claim attempt: stale REST snapshots consume the normal retry budget.
+          // Generic defers refund their attempt and would otherwise poll forever here.
+          Duration delay = jitter(BACKOFF[Math.max(1, row.attempts()) - 1]);
+          jdbc.update(
+              """
+              UPDATE inbox_event
+              SET next_attempt_at = pg_catalog.now() + (? * interval '1 millisecond'),
+                  last_error = 'GAP_SNAPSHOT_STALE'
+              WHERE id = ? AND next_attempt_at = ?
+                AND status IN ('RECEIVED', 'FAILED')
+              """,
+              delay.toMillis(),
+              row.id(),
+              row.nextAttemptAt());
         });
     return outcome[0];
   }
 
   private boolean gapDeferExhausted(InboxRow row) {
-    if (row.attempts() > BACKOFF.length + 1) {
+    if (row.attempts() >= BACKOFF.length + 1) {
       return true;
     }
     Instant received = row.receivedAt();
@@ -794,7 +853,9 @@ public class InboxWorker {
 
   private record Claimed(UUID id, UUID tenantId, OffsetDateTime leaseUntil) {}
 
-  private record ClaimMeta(UUID id, String aggregateId, String eventType) {}
+  private record AggregateKey(UUID tenantId, String source, String aggregateId) {}
+
+  private record ClaimMeta(UUID id, AggregateKey aggregate, String eventType) {}
 
   private record BatchPartition(List<Claimed> toProcess, List<Claimed> yielded) {}
 

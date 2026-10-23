@@ -247,17 +247,43 @@ class OrderIntakeT13OutOfOrderAcceptanceTest {
     address.put("postcode", "10110");
     recipient.set("address", address);
     ((ObjectNode) updated.path("data")).set("recipient", recipient);
-    ingest(updated);
+    ingest(updated, false);
 
     ObjectNode paid = OrderIntakeScenarioSupport.orderPaid(JSON, externalOrderId, shopId, 3);
     paid.put("event_id", "evt-paid-after-upd-" + UUID.randomUUID());
     ingest(paid);
 
-    int handled = 0;
-    for (int round = 0; round < 10 && handled < 2; round++) {
-      handled += worker.processAvailable(10);
-    }
-    assertThat(handled).isGreaterThanOrEqualTo(2);
+    // Force the later payment to be claimed first, with REST missing the recipient delta.
+    fixture.inTenant(
+        shop.tenant(),
+        () ->
+            jdbc.update(
+                "UPDATE inbox_event SET received_at = now() - interval '2 seconds' WHERE event_id = ?",
+                paid.path("event_id").asString()));
+    assertThat(worker.processAvailable(1)).isEqualTo(1);
+    assertThat(
+            text(
+                "SELECT status FROM inbox_event WHERE event_id = ?",
+                paid.path("event_id").asString()))
+        .isEqualTo("RECEIVED");
+    assertThat(worker.processAvailable(1)).isEqualTo(1);
+    assertThat(
+            text(
+                "SELECT status FROM inbox_event WHERE event_id = ?",
+                updated.path("event_id").asString()))
+        .isEqualTo("PROCESSED");
+    fixture.inTenant(
+        shop.tenant(),
+        () ->
+            jdbc.update(
+                "UPDATE inbox_event SET next_attempt_at = now() - interval '1 second' WHERE event_id = ?",
+                paid.path("event_id").asString()));
+    assertThat(worker.processAvailable(1)).isEqualTo(1);
+    assertThat(
+            text(
+                "SELECT status FROM inbox_event WHERE event_id = ?",
+                paid.path("event_id").asString()))
+        .isEqualTo("PROCESSED");
 
     String province =
         fixture.inTenant(
@@ -362,7 +388,13 @@ class OrderIntakeT13OutOfOrderAcceptanceTest {
   }
 
   private void ingest(ObjectNode event) throws Exception {
-    MockTsfCatalogSync.note(event);
+    ingest(event, true);
+  }
+
+  private void ingest(ObjectNode event, boolean syncCatalog) throws Exception {
+    if (syncCatalog) {
+      MockTsfCatalogSync.note(event);
+    }
     byte[] body = JSON.writeValueAsBytes(event);
     String eventId = event.path("event_id").asString();
     HttpRequest request =

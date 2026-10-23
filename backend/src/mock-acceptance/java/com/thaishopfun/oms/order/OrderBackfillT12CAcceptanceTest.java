@@ -270,7 +270,7 @@ class OrderBackfillT12CAcceptanceTest {
   }
 
   @Test
-  void backfillWithNoNewOrdersDoesNotRewriteSyncCursor() throws Exception {
+  void backfillWithNoNewOrdersCommitsWatermark() throws Exception {
     StockFixture.Shop shop = fixture.shop("ACTIVE");
     String shopId = fixture.tsfShopId(shop);
     UUID account = fixture.tsfChannelAccount(shop, "ACTIVE", "CONNECTED");
@@ -315,7 +315,9 @@ class OrderBackfillT12CAcceptanceTest {
                         java.sql.Timestamp.class,
                         account)
                     .toInstant());
-    assertThat(cursorAfter).isEqualTo(cursorBefore);
+    assertThat(Instant.parse(JSON.readTree(cursorAfter).path("updated_since").asString()))
+        .isAfter(Instant.parse(JSON.readTree(cursorBefore).path("updated_since").asString()));
+    assertThat(JSON.readTree(cursorAfter).path("page_cursor").isNull()).isTrue();
     assertThat(updatedAfter).isAfterOrEqualTo(updatedBefore);
   }
 
@@ -497,14 +499,21 @@ class OrderBackfillT12CAcceptanceTest {
             JSON, orderId, shopId, UUID.randomUUID().toString(), "COD", "L-gap-cancel", 1, 1));
     assertThat(worker.processAvailable(5)).isEqualTo(1);
 
-    ObjectNode cancelOnly = OrderIntakeScenarioSupport.orderCancelled(JSON, orderId, shopId, 3);
-    cancelOnly.put("event_id", "evt-cancel-catalog-only-" + UUID.randomUUID());
-    MockTsfCatalogSync.note(cancelOnly);
-
     ObjectNode updated = OrderIntakeScenarioSupport.orderUpdated(JSON, orderId, shopId, 3);
     updated.put("event_id", "evt-upd-gap-" + UUID.randomUUID());
     ingest(updated, false);
     assertThat(worker.processAvailable(5)).isEqualTo(1);
+    assertThat(inboxStatus(shop.tenant(), updated.path("event_id").asString()))
+        .isEqualTo("RECEIVED");
+    assertThat(orderStatus(shop.tenant(), orderId)).isNotEqualTo("CANCELLED");
+
+    ObjectNode cancelOnly = OrderIntakeScenarioSupport.orderCancelled(JSON, orderId, shopId, 3);
+    cancelOnly.put("event_id", "evt-cancel-catalog-only-" + UUID.randomUUID());
+    MockTsfCatalogSync.note(cancelOnly);
+    wakeInboxRetries();
+    assertThat(worker.processAvailable(5)).isEqualTo(1);
+    assertThat(inboxStatus(shop.tenant(), updated.path("event_id").asString()))
+        .isEqualTo("PROCESSED");
 
     assertThat(
             fixture.inTenant(
@@ -519,6 +528,7 @@ class OrderBackfillT12CAcceptanceTest {
 
   @Test
   void backfillRetriesOrderAfterTransientRestFault() throws Exception {
+    backfillProperties.setPageLimit(1);
     StockFixture.Shop shop = fixture.shop("ACTIVE");
     String shopId = fixture.tsfShopId(shop);
     UUID account = fixture.tsfChannelAccount(shop, "ACTIVE", "CONNECTED");
@@ -555,19 +565,52 @@ class OrderBackfillT12CAcceptanceTest {
             shop.tenant(),
             () -> jdbc.queryForObject("SELECT count(*) FROM sales_order", Long.class));
     assertThat(afterFault).isEqualTo(1);
-    long afterRetry = afterFault;
-    for (int attempt = 0; attempt < 8 && afterRetry < 2; attempt++) {
-      backfill.runOnceForTenant(shop.tenant());
-      afterRetry =
-          fixture.inTenant(
-              shop.tenant(),
-              () -> jdbc.queryForObject("SELECT count(*) FROM sales_order", Long.class));
-    }
-    assertThat(afterRetry).isEqualTo(2);
+    String failedCursor =
+        fixture.inTenant(
+            shop.tenant(),
+            () ->
+                jdbc.queryForObject(
+                    "SELECT cursor::text FROM sync_cursor WHERE channel_account_id = ?",
+                    String.class,
+                    account));
+    assertThat(JSON.readTree(failedCursor).path("updated_since").asString())
+        .isEqualTo(Instant.EPOCH.toString());
+    assertThat(
+            new String(
+                Base64.getUrlDecoder()
+                    .decode(JSON.readTree(failedCursor).path("page_cursor").asString()),
+                StandardCharsets.US_ASCII))
+        .isEqualTo("1");
+    assertThat(
+            fixture.inTenant(
+                shop.tenant(),
+                () ->
+                    jdbc.queryForObject(
+                        "SELECT last_success_at FROM sync_cursor WHERE channel_account_id = ?",
+                        java.sql.Timestamp.class,
+                        account)))
+        .isNull();
+    backfill.runOnceForTenant(shop.tenant());
+    assertThat(
+            fixture.inTenant(
+                shop.tenant(),
+                () -> jdbc.queryForObject("SELECT count(*) FROM sales_order", Long.class)))
+        .isEqualTo(2L);
+    String successfulCursor =
+        fixture.inTenant(
+            shop.tenant(),
+            () ->
+                jdbc.queryForObject(
+                    "SELECT cursor::text FROM sync_cursor WHERE channel_account_id = ?",
+                    String.class,
+                    account));
+    assertThat(JSON.readTree(successfulCursor).path("page_cursor").isNull()).isTrue();
+    assertThat(Instant.parse(JSON.readTree(successfulCursor).path("updated_since").asString()))
+        .isAfter(Instant.EPOCH);
   }
 
   @Test
-  void gapRefetchRestFailureEventuallyDead() throws Exception {
+  void gapRefetchRestFailureAppliesAuthoritativePaidInbox() throws Exception {
     StockFixture.Shop shop = fixture.shop("ACTIVE");
     String shopId = fixture.tsfShopId(shop);
     UUID account = fixture.tsfChannelAccount(shop, "ACTIVE", "CONNECTED");
@@ -594,12 +637,100 @@ class OrderBackfillT12CAcceptanceTest {
       wakeInboxRetries();
       worker.processAvailable(5);
       String status = inboxStatus(shop.tenant(), paidEventId);
-      if ("DEAD".equals(status)) {
+      if ("PROCESSED".equals(status)) {
         break;
       }
     }
-    assertThat(inboxStatus(shop.tenant(), paidEventId)).isEqualTo("DEAD");
-    assertThat(paymentStatus(shop.tenant(), orderId)).isEqualTo("PENDING");
+    assertThat(inboxStatus(shop.tenant(), paidEventId)).isEqualTo("PROCESSED");
+    assertThat(paymentStatus(shop.tenant(), orderId)).isEqualTo("PAID");
+  }
+
+  @Test
+  void emptySuccessfulRunInitializesCursorAndTenantLagGauges() {
+    var catalog =
+        OrderIntakeMockRuntime.mock().getBean(com.thaishopfun.mocktsf.rest.TsfCatalog.class);
+    StockFixture.Shop first = fixture.shop("ACTIVE");
+    StockFixture.Shop second = fixture.shop("ACTIVE");
+    catalog.registerShop(fixture.tsfShopId(first));
+    catalog.registerShop(fixture.tsfShopId(second));
+    UUID firstAccount = fixture.tsfChannelAccount(first, "ACTIVE", "CONNECTED");
+    fixture.tsfChannelAccount(second, "ACTIVE", "CONNECTED");
+    backfill.runOnceForTenant(first.tenant());
+    backfill.runOnceForTenant(second.tenant());
+    fixture.inTenant(
+        first.tenant(),
+        () ->
+            jdbc.update(
+                "UPDATE sync_cursor SET cursor = '{\"updated_since\":\"2000-01-01T00:00:00Z\",\"page_cursor\":null}' WHERE channel_account_id = ?",
+                firstAccount));
+    backfill.runOnceForTenant(first.tenant());
+    var firstGauge =
+        meters.find(OrderBackfillJob.LAG).tag("tenant_id", first.tenant().toString()).gauge();
+    var secondGauge =
+        meters.find(OrderBackfillJob.LAG).tag("tenant_id", second.tenant().toString()).gauge();
+    assertThat(firstGauge).isNotNull();
+    assertThat(secondGauge).isNotNull();
+    assertThat(firstGauge.value()).isGreaterThan(1000);
+    assertThat(secondGauge.value()).isGreaterThan(firstGauge.value());
+    fixture.inTenant(
+        first.tenant(),
+        () -> {
+          String cursor =
+              jdbc.queryForObject(
+                  "SELECT cursor::text FROM sync_cursor WHERE channel_account_id = ?",
+                  String.class,
+                  firstAccount);
+          assertThat(Instant.parse(JSON.readTree(cursor).path("updated_since").asString()))
+              .isAfter(Instant.now().minusSeconds(60));
+          assertThat(
+                  jdbc.queryForObject(
+                      "SELECT last_success_at FROM sync_cursor WHERE channel_account_id = ?",
+                      java.sql.Timestamp.class,
+                      firstAccount))
+              .isNotNull();
+          return null;
+        });
+  }
+
+  @Test
+  void exhaustedOlderRestSnapshotAppliesPaidInboxWithoutRegressingOnBackfill() throws Exception {
+    StockFixture.Shop shop = fixture.shop("ACTIVE");
+    String shopId = fixture.tsfShopId(shop);
+    UUID account = fixture.tsfChannelAccount(shop, "ACTIVE", "CONNECTED");
+    UUID sku = fixture.sku(shop, 10);
+    fixture.channelListing(shop, account, "L-old-rest", sku, true);
+    String orderId = "OLD-REST-" + UUID.randomUUID();
+    postMock(
+        "/control/orders/register",
+        "{\"shop_id\":\"" + shopId + "\",\"order_id\":\"" + orderId + "\"}");
+    ingest(
+        OrderIntakeScenarioSupport.orderCreated(
+            JSON, orderId, shopId, UUID.randomUUID().toString(), "PREPAID", "L-old-rest", 1, 1));
+    worker.processAvailable(5);
+    ObjectNode paid = OrderIntakeScenarioSupport.orderPaid(JSON, orderId, shopId, 3);
+    ingest(paid, false);
+    for (int attempt = 0; attempt < 8; attempt++) {
+      wakeInboxRetries();
+      worker.processAvailable(5);
+    }
+    assertThat(inboxStatus(shop.tenant(), paid.path("event_id").asString())).isEqualTo("PROCESSED");
+    assertThat(paymentStatus(shop.tenant(), orderId)).isEqualTo("PAID");
+    assertThat(externalVersion(shop.tenant(), orderId)).isEqualTo(3);
+    String before = orderStatus(shop.tenant(), orderId);
+    backfill.runOnceForTenant(shop.tenant());
+    assertThat(paymentStatus(shop.tenant(), orderId)).isEqualTo("PAID");
+    assertThat(orderStatus(shop.tenant(), orderId)).isEqualTo(before);
+    assertThat(externalVersion(shop.tenant(), orderId)).isEqualTo(3);
+  }
+
+  private String orderStatus(UUID tenantId, String orderId) {
+    return fixture.inTenant(
+        tenantId,
+        () ->
+            jdbc.queryForObject(
+                "SELECT order_status FROM sales_order WHERE external_order_id = ?",
+                String.class,
+                orderId));
   }
 
   private double gapRefetchCount() {
