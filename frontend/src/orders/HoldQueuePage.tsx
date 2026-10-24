@@ -40,6 +40,9 @@ function fixActionLinks(group: HoldGroup) {
       </a>
     )
   }
+  if (group.hold_reason === 'CHANNEL_CANCEL_PENDING') {
+    return <a href="#/orders?hold_reason=CHANNEL_CANCEL_PENDING" className="font-medium text-brand-700 hover:underline">ดูออเดอร์รอยกเลิก ({group.count})</a>
+  }
   if (group.hold_detail) {
     return (
       <a

@@ -114,8 +114,26 @@ describe('StockDocumentsPage', () => {
 })
 
 describe('StockDocumentPage', () => {
+  it.each([
+    ['Post', 'DRAFT', 'ลงบัญชีเอกสารสต็อก'],
+    ['Delete draft', 'DRAFT', 'ลบเอกสารฉบับร่าง'],
+    ['Void', 'POSTED', 'ยกเลิกเอกสารสต็อก'],
+  ])('cancels %s through Dialog without an API mutation', async (button, status, title) => {
+    const { fetchImpl, calls } = stubFetch(({ url }) => {
+      if (url === '/api/v1/warehouses') return { body: warehouses }
+      return { body: doc({ status }) }
+    })
+    configureApi({ getAccessToken: () => 't', fetchImpl })
+    render(<StockDocumentPage id={DOC_ID} access={stockAccess(me('OWNER'))} />)
+    fireEvent.click(await screen.findByRole('button', { name: button }))
+    expect(screen.getByRole('dialog', { name: title })).toBeInTheDocument()
+    expect(calls.filter((call) => call.method !== 'GET')).toHaveLength(0)
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'ยกเลิก' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(calls.filter((call) => call.method !== 'GET')).toHaveLength(0)
+  })
+
   it('adds a line by SKU code and shows BELOW_RESERVED on the line that caused it', async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
     const { fetchImpl, calls } = stubFetch(({ url, method }) => {
       if (url === '/api/v1/warehouses') return { body: warehouses }
       if (url.startsWith('/api/v1/skus')) return { body: { items: [], total: 0, limit: 10, offset: 0 } }
@@ -159,9 +177,9 @@ describe('StockDocumentPage', () => {
 
     // Step 2: Post after confirming; the per-line problem appears in that row.
     fireEvent.click(await screen.findByRole('button', { name: 'Post' }))
+    fireEvent.click(within(screen.getByRole('dialog', { name: 'ลงบัญชีเอกสารสต็อก' })).getByRole('button', { name: 'ยืนยัน' }))
     const lines = screen.getByRole('table', { name: 'Lines' })
     expect(await within(lines).findByRole('alert')).toHaveTextContent('BELOW_RESERVED: on_hand 5 + -2 would be below reserved 4')
-    expect(window.confirm).toHaveBeenCalled()
   })
 
   it('hides Post from STAFF on an adjustment and everything in a read-only shop', async () => {
@@ -184,7 +202,6 @@ describe('StockDocumentPage', () => {
   })
 
   it('starts a count, edits the counted column, and voids a posted document after confirming', async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
     let current = doc({ type: 'COUNT', lines: [line({ qty: 0, reason_code: null, counted_qty: null })] })
     const { fetchImpl, calls } = stubFetch(({ url, method }) => {
       if (url === '/api/v1/warehouses') return { body: warehouses }
@@ -217,6 +234,7 @@ describe('StockDocumentPage', () => {
     current = doc({ type: 'COUNT', status: 'POSTED', posted_at: '2026-09-30T05:00:00Z' })
     render(<StockDocumentPage id={DOC_ID} access={stockAccess(me('ADMIN'))} />)
     fireEvent.click(await screen.findByRole('button', { name: 'Void' }))
+    fireEvent.click(within(screen.getByRole('dialog', { name: 'ยกเลิกเอกสารสต็อก' })).getByRole('button', { name: 'ยืนยัน' }))
     expect(await screen.findByRole('status')).toHaveTextContent('Voided. 1 reversing entries written.')
   })
 })

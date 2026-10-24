@@ -16,8 +16,8 @@ import {
   DataTableRow,
   DataTableTh,
 } from '../ui/DataTable'
-import { Input } from '../ui/Input'
-import { Label } from '../ui/Label'
+import { ConfirmationDialog } from '../ui/ConfirmationDialog'
+import { CancelRequestDialog } from './CancelRequestDialog'
 import { PageContent } from '../ui/PageContent'
 import { OrderDisplayBadge } from '../ui/OrderDisplayBadge'
 import { StatusBadge } from '../ui/StatusBadge'
@@ -64,7 +64,8 @@ export default function OrderDetailPage({ id, me }: { id: string; me: Me }) {
   const access: OrdersAccess = ordersAccess(me)
   const [order, setOrder] = useState<OrderDetail | null>(null)
   const [error, setError] = useState('')
-  const [reason, setReason] = useState('')
+  const [cancelOpen, setCancelOpen] = useState(false)
+  const [recheckOpen, setRecheckOpen] = useState(false)
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
@@ -87,8 +88,6 @@ export default function OrderDetailPage({ id, me }: { id: string; me: Me }) {
 
   async function holdRecheck() {
     if (!order) return
-    const ok = window.confirm('Re-check hold and try to reserve stock again?')
-    if (!ok) return
     setBusy(true)
     setError('')
     try {
@@ -103,18 +102,17 @@ export default function OrderDetailPage({ id, me }: { id: string; me: Me }) {
     }
   }
 
-  async function requestCancel() {
-    if (!order) return
-    const ok = window.confirm('Send a cancel request to the sales channel?')
-    if (!ok) return
+  async function requestCancel(reason: string) {
+    if (!order || !access.canRequestCancel(order) || order.hold_reason === 'CHANNEL_CANCEL_PENDING' || busy) return
     setBusy(true)
     setError('')
     try {
       await ordersApi.requestCancel(order.id, reason.trim())
+      setCancelOpen(false)
       const refreshed = await ordersApi.detail(id)
       setOrder(refreshed)
     } catch (err: unknown) {
-      setError(ordersMessage(err, 'Cancel request failed'))
+      setError(ordersMessage(err, 'ส่งคำขอยกเลิกไม่สำเร็จ'))
     } finally {
       setBusy(false)
     }
@@ -149,6 +147,12 @@ export default function OrderDetailPage({ id, me }: { id: string; me: Me }) {
   const showCancel = access.canRequestCancel(order)
   const showRecheck = access.canHoldRecheck(order)
   const onHold = order.hold_reason !== 'NONE'
+  const cancelPending = order.hold_reason === 'CHANNEL_CANCEL_PENDING'
+  const requestedAt = order.timeline
+    .filter((entry) => entry.dimension === 'HOLD' && entry.to_value === 'CHANNEL_CANCEL_PENDING')
+    .map((entry) => entry.at)
+    .sort()
+    .at(-1)
 
   return (
     <PageContent wide>
@@ -187,6 +191,11 @@ export default function OrderDetailPage({ id, me }: { id: string; me: Me }) {
         </div>
       </div>
 
+      {cancelPending ? (
+        <AlertBanner className="mt-5" variant="warning" title="รอ TSF ตัดสินคำขอยกเลิก">
+          {requestedAt ? `ส่งคำขอเมื่อ ${formatBangkokDateTime(requestedAt)}` : null}
+        </AlertBanner>
+      ) : null}
       {onHold ? (
         <div role="status" className="mt-4">
         <AlertBanner
@@ -201,7 +210,7 @@ export default function OrderDetailPage({ id, me }: { id: string; me: Me }) {
           actions={
             <>
               {showRecheck ? (
-                <Button type="button" variant="secondary" disabled={busy} onClick={() => void holdRecheck()}>
+                <Button type="button" variant="secondary" disabled={busy} onClick={() => setRecheckOpen(true)}>
                   Re-check hold
                 </Button>
               ) : null}
@@ -451,7 +460,7 @@ export default function OrderDetailPage({ id, me }: { id: string; me: Me }) {
 
       {showRecheck && order.hold_reason === 'NONE' ? (
         <section className="mt-4" aria-label="Hold recheck actions">
-          <Button type="button" variant="secondary" disabled={busy} onClick={() => void holdRecheck()}>
+          <Button type="button" variant="secondary" disabled={busy} onClick={() => setRecheckOpen(true)}>
             Re-check hold
           </Button>
         </section>
@@ -459,25 +468,21 @@ export default function OrderDetailPage({ id, me }: { id: string; me: Me }) {
 
       {showCancel ? (
         <Card className="mt-6">
-          <CardHeader title="Request cancel" />
+          <CardHeader title="ขอยกเลิกออเดอร์" />
           <CardBody>
-            <section aria-label="Request cancel" className="space-y-3">
-              <div>
-                <Label htmlFor="cancel-reason">Reason</Label>
-                <Input id="cancel-reason" value={reason} onChange={(e) => setReason(e.target.value)} required />
-              </div>
-              <Button
-                type="button"
-                variant="danger"
-                disabled={busy || reason.trim().length === 0}
-                onClick={() => void requestCancel()}
-              >
-                Request cancel
-              </Button>
-            </section>
+            <Button type="button" variant="danger" disabled={busy || cancelPending}
+              onClick={() => { setError(''); setCancelOpen(true) }}>
+              {cancelPending ? 'ส่งคำขอแล้ว' : 'ขอยกเลิก'}
+            </Button>
           </CardBody>
         </Card>
       ) : null}
+      {cancelOpen && showCancel && !cancelPending ? <CancelRequestDialog
+        busy={busy} error={error} onClose={() => setCancelOpen(false)}
+        onSubmit={(reason) => void requestCancel(reason)} /> : null}
+      <ConfirmationDialog open={recheckOpen} onOpenChange={setRecheckOpen}
+        title="ตรวจสอบออเดอร์ค้างอีกครั้ง" description="ตรวจสอบออเดอร์ค้างและลองจองสต็อกอีกครั้ง?"
+        onConfirm={() => void holdRecheck()} />
       {error ? (
         <p role="alert" className="mt-4 text-[13px] text-red-700">
           {error}

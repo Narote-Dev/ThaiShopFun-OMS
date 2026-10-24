@@ -158,6 +158,16 @@ export const ordersApi = {
 }
 
 export function ordersMessage(err: unknown, fallback: string): string {
-  if (err instanceof ApiError) return err.message || fallback
+  if (err instanceof ApiError) {
+    const messages: Record<string, string> = {
+      CAPABILITY_UNSUPPORTED: 'ช่องทางนี้ไม่รองรับคำขอยกเลิก',
+      ORDER_NOT_CANCELLABLE: 'ออเดอร์นี้ไม่สามารถขอยกเลิกได้',
+      CANCEL_REQUEST_CONFLICT: 'คำขอยกเลิกขัดแย้งกับสถานะออเดอร์ กรุณาโหลดใหม่',
+    }
+    if (messages[err.code]) return messages[err.code]
+    if (err.status === 429) return 'ส่งคำขอถี่เกินไป กรุณาลองอีกครั้งภายหลัง'
+    if (err.status === 502 || err.status === 503) return 'ช่องทางไม่พร้อมให้บริการ กรุณาลองอีกครั้งภายหลัง'
+    return err.message || fallback
+  }
   return fallback
 }

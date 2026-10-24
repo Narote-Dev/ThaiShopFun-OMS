@@ -75,12 +75,20 @@ test('owner browses orders, opens detail with masked phone, requests cancel', as
   await page.getByRole('link', { name: 'DEMO-COD' }).click()
   await expect(page.getByRole('heading', { name: 'Order DEMO-COD' })).toBeVisible()
 
-  const cancel = page.getByRole('button', { name: 'Request cancel' })
+  const cancel = page.getByRole('button', { name: 'ขอยกเลิก', exact: true })
   await expect(cancel).toBeVisible({ timeout: 60_000 })
-  page.once('dialog', (dialog) => void dialog.accept())
-  await page.getByLabel('Reason').fill('E2E cancel')
   await cancel.click()
+  const dialog = page.getByRole('dialog', { name: 'ขอยกเลิกออเดอร์' })
+  await dialog.getByLabel('เหตุผล', { exact: true }).selectOption('อื่นๆ')
+  await dialog.getByLabel('เหตุผลอื่นๆ').fill('E2E cancel')
+  await dialog.getByRole('button', { name: 'ส่งคำขอยกเลิก' }).click()
   await expect(page.getByRole('status')).toContainText('CHANNEL_CANCEL_PENDING', { timeout: 30_000 })
+  await expect(page.getByText('รอ TSF ตัดสินคำขอยกเลิก', { exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'ส่งคำขอแล้ว' })).toBeDisabled()
+  await page.getByRole('link', { name: '← Orders' }).click()
+  await page.getByRole('button', { name: /^รอยกเลิก/ }).click()
+  await expect(page.getByRole('link', { name: 'DEMO-COD' })).toBeVisible()
+
 })
 
 test('owner sync listings shows removed zero for demo catalog', async ({ page, request }) => {

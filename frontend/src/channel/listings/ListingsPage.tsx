@@ -3,6 +3,7 @@ import type { Me } from '../../auth/AuthContext'
 import { catalogApi, type Sku } from '../../catalog/api'
 import { Badge } from '../../ui/Badge'
 import { Button } from '../../ui/Button'
+import { ConfirmationDialog } from '../../ui/ConfirmationDialog'
 import { Card } from '../../ui/Card'
 import { Dialog } from '../../ui/Dialog'
 import {
@@ -104,6 +105,7 @@ export default function ListingsPage({ me }: { me: Me }) {
   const [skuHits, setSkuHits] = useState<Sku[]>([])
   const [activeListing, setActiveListing] = useState<ChannelListing | null>(null)
   const [busy, setBusy] = useState(false)
+  const [unmapListing, setUnmapListing] = useState<ChannelListing | null>(null)
   const searchDebounceBoot = useRef(true)
   const channelAccountLoadBoot = useRef(false)
 
@@ -223,8 +225,7 @@ export default function ListingsPage({ me }: { me: Me }) {
   }
 
   async function unmap(listing: ChannelListing) {
-    const ok = window.confirm(`Unmap ${listing.external_sku_id}?`)
-    if (!ok) return
+    if (busy) return
     setBusy(true)
     try {
       await listingsApi.deleteMapping(listing.id)
@@ -423,7 +424,7 @@ export default function ListingsPage({ me }: { me: Me }) {
                         Map
                       </Button>
                       {row.sku_id ? (
-                        <Button type="button" size="sm" variant="ghost" onClick={() => void unmap(row)}>
+                        <Button type="button" size="sm" variant="ghost" onClick={() => setUnmapListing(row)}>
                           Unmap
                         </Button>
                       ) : null}
@@ -503,6 +504,9 @@ export default function ListingsPage({ me }: { me: Me }) {
           </div>
         </div>
       </Dialog>
+      <ConfirmationDialog open={unmapListing !== null} onOpenChange={(open) => { if (!open) setUnmapListing(null) }} danger
+        title="ยกเลิกการจับคู่ SKU" description={`ยกเลิกการจับคู่ ${unmapListing?.external_sku_id ?? ''}?`}
+        onConfirm={() => { if (unmapListing) void unmap(unmapListing) }} />
     </PageContent>
   )
 }

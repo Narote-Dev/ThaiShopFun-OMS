@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { configureApi, resetApiForTests } from '../../api/client'
 import type { Me } from '../../auth/AuthContext'
@@ -25,6 +25,21 @@ afterEach(() => {
 })
 
 describe('ListingsPage', () => {
+  it('opens an unmap Dialog and cancelling makes no API call', async () => {
+    const { fetchImpl, calls } = stubFetch(({ url }) => {
+      if (url.includes('/channel-accounts')) return { body: { items: [{ id: 'ca-1', channel: 'TSF', external_shop_id: 'shop', status: 'CONNECTED' }] } }
+      return { body: { items: [{ id: 'l1', channel_account_id: 'ca-1', external_sku_id: 'L-x', seller_sku: 'X', name: 'Item', sku_id: 'sku-1', sku_code: 'SKU-1', mapping_source: 'MANUAL', mapped_at: null, stock_control: true, held_orders: 0 }], total: 1, limit: 25, offset: 0 } }
+    })
+    configureApi({ getAccessToken: () => 't', fetchImpl })
+    render(<ListingsPage me={owner} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Unmap' }))
+    expect(screen.getByRole('dialog', { name: 'ยกเลิกการจับคู่ SKU' })).toHaveTextContent('L-x')
+    expect(calls.filter((call) => call.method !== 'GET')).toHaveLength(0)
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'ยกเลิก' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(calls.filter((call) => call.method !== 'GET')).toHaveLength(0)
+  })
+
   it('maps filters to query string and hides write controls for STAFF', async () => {
     const { fetchImpl, calls } = stubFetch(({ url, init }) => {
       if (url.includes('/channel-accounts') && !url.includes('listing-syncs')) {

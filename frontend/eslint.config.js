@@ -15,6 +15,10 @@ export default defineConfig([
       reactHooks.configs.flat.recommended,
       reactRefresh.configs.vite,
     ],
+    rules: {
+      'no-restricted-globals': ['error', { name: 'confirm', message: 'Use ui/Dialog for confirmations.' }],
+      'no-restricted-properties': ['error', { property: 'confirm', message: 'Use ui/Dialog for confirmations.' }],
+    },
     languageOptions: {
       ecmaVersion: 2023,
       globals: globals.browser,

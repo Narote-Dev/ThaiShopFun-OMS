@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import BundleEditor from './BundleEditor'
 import { Button } from '../ui/Button'
+import { ConfirmationDialog } from '../ui/ConfirmationDialog'
 import { Card } from '../ui/Card'
 import { Input } from '../ui/Input'
 import { Label } from '../ui/Label'
@@ -51,6 +52,7 @@ export default function SkuFormPage({ id, canWrite }: { id: string | null; canWr
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [busy, setBusy] = useState(false)
+  const [deleteOpen, setDeleteOpen] = useState(false)
   const [loaded, setLoaded] = useState(false)
 
   // Step 1: Load the product list and, when editing, the SKU with its components.
@@ -119,7 +121,7 @@ export default function SkuFormPage({ id, canWrite }: { id: string | null; canWr
   }
 
   async function remove() {
-    if (!sku || !window.confirm(`Delete ${sku.sku_code}?`)) return
+    if (!sku || busy || !canWrite) return
     setBusy(true)
     setError('')
     try {
@@ -238,7 +240,7 @@ export default function SkuFormPage({ id, canWrite }: { id: string | null; canWr
                 {sku ? 'Save' : 'Create SKU'}
               </Button>
               {sku ? (
-                <Button type="button" variant="danger" disabled={busy} onClick={() => void remove()}>
+                <Button type="button" variant="danger" disabled={busy} onClick={() => setDeleteOpen(true)}>
                   Delete
                 </Button>
               ) : null}
@@ -251,6 +253,8 @@ export default function SkuFormPage({ id, canWrite }: { id: string | null; canWr
           <BundleEditor key={sku.id} sku={sku} canWrite={canWrite} onSaved={setSku} />
         </div>
       ) : null}
+      <ConfirmationDialog open={deleteOpen} onOpenChange={setDeleteOpen} danger
+        title="ลบ SKU" description={`ลบ ${sku?.sku_code ?? ''}?`} onConfirm={() => void remove()} />
     </PageContent>
   )
 }

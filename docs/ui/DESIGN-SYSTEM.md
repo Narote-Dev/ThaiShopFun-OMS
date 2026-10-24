@@ -36,3 +36,7 @@ New screens must use **AppShell** (via signed-in layout), **PageHeader**, and `u
 ## Components
 
 `Button`, `Badge`, `StatusBadge`, `Card`, `KpiCard`, `DataTable`, `AlertBanner`, `Input`, `Label`, `Select`, `PageContent`, `PageHeader`, `EmptyState`, `TablePager`.
+
+## Confirmations
+
+Always use `ui/Dialog` (or `ui/ConfirmationDialog`) for confirmations. Never use `window.confirm` or the global `confirm`. Keep titles, explanations and actions in Thai. Use a danger button for destructive actions; cancellation, Escape and closing the dialog must make no API call. Dialog provides focus trapping and Escape handling.

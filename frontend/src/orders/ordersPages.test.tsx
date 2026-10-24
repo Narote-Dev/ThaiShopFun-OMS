@@ -173,9 +173,7 @@ describe('OrderDetailPage', () => {
     expect(screen.getByRole('heading', { name: 'Shipments' })).toBeInTheDocument()
     expect(screen.getByRole('list', { name: 'Status timeline' })).toHaveTextContent('fulfillment_status')
     expect(screen.getByRole('button', { name: 'Re-check hold' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Request cancel' })).toBeDisabled()
-    fireEvent.change(screen.getByLabelText('Reason'), { target: { value: 'buyer changed mind' } })
-    expect(screen.getByRole('button', { name: 'Request cancel' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'ขอยกเลิก' })).toBeEnabled()
   })
 })
 

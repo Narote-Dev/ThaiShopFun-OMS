@@ -42,7 +42,7 @@ import {
   type OrdersTabId,
 } from './orderViews'
 
-const TAB_IDS: OrdersTabId[] = ['all', 'ready', 'hold', 'cancelled']
+const TAB_IDS: OrdersTabId[] = ['all', 'ready', 'hold', 'cancelled', 'cancel_pending']
 
 function filtersFromHash(): OrderFilters {
   const hash = window.location.hash

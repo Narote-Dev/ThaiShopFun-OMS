@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { catalogApi, type Sku, type Warehouse } from '../catalog/api'
 import { Button } from '../ui/Button'
+import { ConfirmationDialog } from '../ui/ConfirmationDialog'
 import { Card } from '../ui/Card'
 import {
   DataTable,
@@ -61,6 +62,7 @@ export default function StockDocumentPage({ id, access }: { id: string; access: 
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [busy, setBusy] = useState(false)
+  const [confirmation, setConfirmation] = useState<'post' | 'void' | 'delete' | null>(null)
   const [version, setVersion] = useState(0)
 
   // Step 1: Load the document and the warehouses (the first list creates MAIN).
@@ -157,7 +159,7 @@ export default function StockDocumentPage({ id, access }: { id: string; access: 
   }
 
   function post() {
-    if (!doc || !window.confirm(`Post this ${TYPE_LABELS[doc.type].toLowerCase()}? Stock changes right away.`)) return
+    if (!doc || busy) return
     void run(async () => {
       const result = await stockApi.post(id)
       setNotice(`Posted. ${result.movements.length} ledger entries written.`)
@@ -165,7 +167,7 @@ export default function StockDocumentPage({ id, access }: { id: string; access: 
   }
 
   function voidDocument() {
-    if (!doc || !window.confirm('Void this document? Every stock change it made is reversed.')) return
+    if (!doc || busy) return
     void run(async () => {
       const result = await stockApi.voidDocument(id)
       setNotice(`Voided. ${result.movements.length} reversing entries written.`)
@@ -173,7 +175,7 @@ export default function StockDocumentPage({ id, access }: { id: string; access: 
   }
 
   async function remove() {
-    if (!window.confirm('Delete this draft?')) return
+    if (busy) return
     if (await run(() => stockApi.deleteDocument(id), 'Could not delete the draft')) window.location.hash = '#/stock/documents'
   }
 
@@ -428,7 +430,7 @@ export default function StockDocumentPage({ id, access }: { id: string; access: 
           </Button>
         ) : null}
         {draft && access.canPost(doc.type) ? (
-          <Button type="button" variant="primary" disabled={busy || lines.length === 0} onClick={post}>
+          <Button type="button" variant="primary" disabled={busy || lines.length === 0} onClick={() => setConfirmation('post')}>
             Post
           </Button>
         ) : null}
@@ -436,16 +438,21 @@ export default function StockDocumentPage({ id, access }: { id: string; access: 
           <span className="text-[13px] text-stone-600">Only an OWNER or ADMIN can post this document.</span>
         ) : null}
         {doc.status === 'POSTED' && access.canVoid ? (
-          <Button type="button" variant="danger" disabled={busy} onClick={voidDocument}>
+          <Button type="button" variant="danger" disabled={busy} onClick={() => setConfirmation('void')}>
             Void
           </Button>
         ) : null}
         {editable ? (
-          <Button type="button" variant="ghost" disabled={busy} onClick={() => void remove()}>
+          <Button type="button" variant="ghost" disabled={busy} onClick={() => setConfirmation('delete')}>
             Delete draft
           </Button>
         ) : null}
       </div>
+      <ConfirmationDialog open={confirmation !== null} onOpenChange={(open) => { if (!open) setConfirmation(null) }}
+        title={confirmation === 'post' ? 'ลงบัญชีเอกสารสต็อก' : confirmation === 'void' ? 'ยกเลิกเอกสารสต็อก' : 'ลบเอกสารฉบับร่าง'}
+        description={confirmation === 'post' ? 'ลงบัญชีเอกสารนี้? สต็อกจะเปลี่ยนทันที' : confirmation === 'void' ? 'ยกเลิกเอกสารนี้? การเปลี่ยนแปลงสต็อกทั้งหมดจากเอกสารนี้จะถูกย้อนกลับ' : 'ลบเอกสารฉบับร่างนี้?'}
+        danger={confirmation !== 'post'}
+        onConfirm={() => { if (confirmation === 'post') post(); else if (confirmation === 'void') voidDocument(); else if (confirmation === 'delete') void remove() }} />
     </PageContent>
   )
 }

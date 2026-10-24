@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { configureApi, resetApiForTests } from '../api/client'
 import BundleEditor from './BundleEditor'
@@ -52,6 +52,18 @@ describe('SkuListPage', () => {
 })
 
 describe('SkuFormPage', () => {
+  it('opens a delete Dialog and cancelling makes no API call', async () => {
+    const { fetchImpl, calls } = stubFetch(({ url }) => url.startsWith('/api/v1/products') ? { body: products } : { body: sku() })
+    configureApi({ getAccessToken: () => 't', fetchImpl })
+    render(<SkuFormPage id="sku-1" canWrite />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete' }))
+    expect(screen.getByRole('dialog', { name: 'ลบ SKU' })).toBeInTheDocument()
+    expect(calls.filter((call) => call.method !== 'GET')).toHaveLength(0)
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'ยกเลิก' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(calls.filter((call) => call.method !== 'GET')).toHaveLength(0)
+  })
+
   it('creates a SKU with a new product and opens it', async () => {
     const { fetchImpl, calls } = stubFetch(({ url, method }) => {
       if (url.startsWith('/api/v1/products')) return { body: { ...products, items: [] } }

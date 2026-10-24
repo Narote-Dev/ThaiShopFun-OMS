@@ -42,8 +42,8 @@ test('owner posts a RECEIVE and sees it in the SKU stock history', async ({ page
   await add.getByLabel('Qty').fill('5')
   await add.getByRole('button', { name: 'Add line' }).click()
   await expect(page.getByRole('table', { name: 'Lines' })).toContainText(code)
-  page.once('dialog', (dialog) => void dialog.accept())
   await page.getByRole('button', { name: 'Post' }).click()
+  await page.getByRole('dialog', { name: 'ลงบัญชีเอกสารสต็อก' }).getByRole('button', { name: 'ยืนยัน' }).click()
   await expect(page.getByRole('heading', { name: 'Receive · POSTED' })).toBeVisible()
 
   // Step 4: The SKU's history shows the RECEIVE with a link back to the document.
