@@ -151,3 +151,7 @@ Railway's `DATABASE_URL` uses the `postgresql://` scheme. The backend rewrites i
 Placeholders for later tasks (set in the Railway dashboard, not in git): `TSF_JWKS_URI`, `OMS_INTERNAL_HMAC_SECRET`. See `backend/.env.example` and `frontend/.env.example`.
 
 Production deploy, PITR, and manual promotion are T26. Do not point this staging project at production.
+
+### Stock push (T15)
+
+See [stock push](docs/api/stock-push.md) for debounce, modes, versions, full scan, metrics and tests. The `local` profile already sets the localhost mock-tsf outbox URL and matching dev-only HMAC secret: run `cd backend && ./mvnw spring-boot:run -Dspring-boot.run.profiles=local` with mock-tsf on port 8090. After receiving +5 `DEMO-SKU-READY` in an ACTIVE demo account, inspect `curl -s localhost:8090/control/received-events | jq ' .[] | select(.event_type=="stock.updated") | .body | fromjson'` for `L-demo-ready`.

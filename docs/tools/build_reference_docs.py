@@ -465,6 +465,8 @@ def main():
         TABLE_META.update(json.loads(meta_path.read_text(encoding="utf-8")))
 
     dd = build_data_dictionary(args.schema, args.columns)
+    dd = dd.replace(REF, "อ้างอิง T12C schema snapshot + T15 / Flyway V15 supplement (339 business columns)", 1)
+    dd += (ROOT / "docs/tools/stock_push_section.md").read_text(encoding="utf-8")
     (ROOT / "docs/db/DATA-DICTIONARY.md").write_text(dd, encoding="utf-8")
     (ROOT / "docs/backend/MODULES.md").write_text(build_modules(), encoding="utf-8")
     (ROOT / "docs/frontend/PAGES.md").write_text(build_pages(), encoding="utf-8")
