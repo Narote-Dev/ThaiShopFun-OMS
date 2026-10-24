@@ -19,12 +19,19 @@
 
   <properties>
     <java.version>17</java.version>
+    <jqwik.tries>100</jqwik.tries>
     <!-- Change: the T14B chaos suite (tag "chaos") runs only in its own CI job, via -Pchaos. -->
     <surefire.groups></surefire.groups>
     <surefire.excludedGroups>chaos,perf</surefire.excludedGroups>
   </properties>
 
   <dependencies>
+    <dependency>
+      <groupId>net.jqwik</groupId>
+      <artifactId>jqwik</artifactId>
+      <version>1.10.2</version>
+      <scope>test</scope>
+    </dependency>
     <dependency>
       <groupId>org.junit.platform</groupId>
       <artifactId>junit-platform-launcher</artifactId>
@@ -122,6 +129,10 @@
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-surefire-plugin</artifactId>
         <configuration>
+          <systemPropertyVariables>
+            <jqwik.tries.default>${jqwik.tries}</jqwik.tries.default>
+            <jqwik.database>${project.build.directory}/jqwik-database</jqwik.database>
+          </systemPropertyVariables>
           <groups>${surefire.groups}</groups>
           <excludedGroups>${surefire.excludedGroups}</excludedGroups>
           <forkedProcessExitTimeoutInSeconds>30</forkedProcessExitTimeoutInSeconds>
