@@ -418,13 +418,22 @@ export default function OrderDetailPage({ id, me }: { id: string; me: Me }) {
           <Card>
             <CardHeader title="การจัดส่ง" />
             <CardBody>
-              <p className="text-[13px] text-stone-700">
-                {order.recipient.name_masked ?? '—'}
-                <br />
-                {order.recipient.phone_masked ?? '—'}
-                <br />
-                {order.recipient.province} {order.recipient.postcode}
-              </p>
+              {order.recipient.pii_status === 'REDACTED' ? (
+                <>
+                  <AlertBanner variant="info" title="ข้อมูลผู้รับถูกลบตามนโยบาย PDPA แล้ว (เหลือจังหวัด/รหัสไปรษณีย์)" />
+                  <p className="mt-3 text-[13px] text-stone-700">
+                    {order.recipient.province} {order.recipient.postcode}
+                  </p>
+                </>
+              ) : (
+                <p className="text-[13px] text-stone-700">
+                  {order.recipient.name_masked ?? '—'}
+                  <br />
+                  {order.recipient.phone_masked ?? '—'}
+                  <br />
+                  {order.recipient.province} {order.recipient.postcode}
+                </p>
+              )}
               {order.ship_by ? (
                 <p className="mt-2 text-[12px] text-stone-500">
                   Ship by {formatBangkokDateTime(order.ship_by)}

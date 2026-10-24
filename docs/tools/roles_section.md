@@ -11,7 +11,7 @@
 
 **SECURITY DEFINER (ข้าม tenant, คืนเฉพาะ id หรือ batch):** `claim_inbox_batch`, `claim_outbox_batch`, `list_active_tenant_ids`, `list_tenants_with_expired_reservations`, `resolve_tenant`, `resolve_reservation_tenant` (V9), `upsert_app_user`, `provision_tenant`, `provision_membership`, `lookup_login` — ดู `V1__foundation_rls.sql`, `V2__jit_provision.sql`, `V6__stock_expiry_tenant_claim.sql`, `V9__reservation_tenant_lookup.sql`.
 
-### Flyway V1–V13 (ไม่มี V5)
+### Flyway V1–V16 (ไม่มี V5)
 
 | Version | ไฟล์ | สรุป |
 |---|---|---|
@@ -28,3 +28,7 @@
 | V11 | `V11__sales_order_list_cursor_index.sql` | list orders index |
 | V12 | `V12__listing_mapping_and_orphan_marker.sql` | listing mapping + inbox orphan marker |
 | V13 | `V13__order_hold_retry.sql` | `order_hold_retry` |
+
+| V14 | `V14__order_backfill_tenants.sql` | ids-only order backfill tenant discovery |
+| V15 | `V15__stock_push.sql` | durable stock push + ids-only account discovery |
+| V16 | `V16__pii_lifecycle.sql` | scrub timestamps, partial due indexes, ids-only PII discovery (all tenant states) |

@@ -46,6 +46,18 @@ await page.getByRole('link', { name: 'DEMO-UNMAPPED' }).click()
 await page.getByRole('heading', { name: 'Order DEMO-UNMAPPED' }).waitFor({ timeout: 60_000 })
 await capture(page, 'order-detail-demo')
 
+// Capture the same cancelled order before and after the local/e2e-only control.
+await navTo(page, 'Orders')
+await page.getByRole('link', { name: 'DEMO-CANCELLED' }).click()
+await page.getByRole('heading', { name: 'Order DEMO-CANCELLED' }).waitFor()
+await capture(page, 'order-detail-before-redaction')
+const redaction = await page.request.post(`${process.env.OMS_BASE_URL ?? 'http://127.0.0.1:8080'}/control/demo/pii-redact-cancelled`)
+if (!redaction.ok()) throw new Error(`Demo redaction failed: ${redaction.status()}`)
+await navTo(page, 'Orders')
+await page.getByRole('link', { name: 'DEMO-CANCELLED' }).click()
+await page.getByText('ข้อมูลผู้รับถูกลบตามนโยบาย PDPA แล้ว (เหลือจังหวัด/รหัสไปรษณีย์)').waitFor()
+await capture(page, 'order-detail-redacted')
+
 await navTo(page, 'SKUs')
 await capture(page, 'skus')
 

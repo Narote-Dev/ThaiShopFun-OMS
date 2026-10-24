@@ -1,5 +1,6 @@
 --
 -- PostgreSQL database dump
+-- V16 lifecycle fields/indexes/discovery included; V15 stock push is documented in the dictionary supplement.
 -- Schema includes Flyway V14: list_tenants_for_order_backfill() and its EXECUTE grants.
 --
 
@@ -1151,6 +1152,7 @@ CREATE TABLE public.inbox_event (
     aggregate_version bigint DEFAULT 0 NOT NULL,
     payload_sha256 bytea DEFAULT '\x'::bytea NOT NULL,
     orphan_recorded_at timestamp with time zone,
+    payload_scrubbed_at timestamp with time zone,
     CONSTRAINT inbox_event_aggregate_version_check CHECK ((aggregate_version >= 0)),
     CONSTRAINT inbox_event_attempts_check CHECK ((attempts >= 0)),
     CONSTRAINT inbox_event_status_check CHECK ((status = ANY (ARRAY['RECEIVED'::text, 'PROCESSED'::text, 'FAILED'::text, 'DEAD'::text])))
@@ -1381,6 +1383,7 @@ CREATE TABLE public.outbox_event (
     lease_until timestamp with time zone,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     sent_at timestamp with time zone,
+    payload_scrubbed_at timestamp with time zone,
     CONSTRAINT outbox_event_attempts_check CHECK ((attempts >= 0)),
     CONSTRAINT outbox_event_status_check CHECK ((status = ANY (ARRAY['PENDING'::text, 'IN_FLIGHT'::text, 'SENT'::text, 'DEAD'::text])))
 );
@@ -4156,3 +4159,34 @@ GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.warehouse TO oms_maint;
 
 \unrestrict m7Zwlhr0g7ENX4EqLEGo362bkyShWQAQbmrrqD7bvI5BMZKVFgIQOE5VlLiSIqP
 
+
+-- T27 / Flyway V16 supplement (columns are in CREATE TABLE above).
+-- T27: retention markers and ids-only work discovery across ALL entitlement states.
+CREATE INDEX inbox_pii_due_idx ON public.inbox_event (coalesce(processed_at, received_at), tenant_id)
+  WHERE payload_scrubbed_at IS NULL AND status IN ('PROCESSED', 'DEAD');
+CREATE INDEX outbox_pii_due_idx ON public.outbox_event (coalesce(sent_at, created_at), tenant_id)
+  WHERE payload_scrubbed_at IS NULL AND status IN ('SENT', 'DEAD');
+
+-- V6 SECURITY DEFINER pattern: pinned path, qualified tables, maintenance owner,
+-- no public execute. FORCE RLS and existing policies are unchanged.
+CREATE FUNCTION public.list_tenants_with_pii_due(p_now timestamptz)
+RETURNS TABLE (tenant_id uuid)
+LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp
+AS $fn$
+  SELECT r.tenant_id FROM public.order_recipient r
+  WHERE r.pii_status = 'ACTIVE' AND r.redact_after <= p_now
+  UNION
+  SELECT i.tenant_id FROM public.inbox_event i
+  WHERE i.payload_scrubbed_at IS NULL AND i.status IN ('PROCESSED', 'DEAD')
+    AND coalesce(i.processed_at, i.received_at) <= p_now - interval '7 days'
+  UNION
+  SELECT o.tenant_id FROM public.outbox_event o
+  WHERE o.payload_scrubbed_at IS NULL AND o.status IN ('SENT', 'DEAD')
+    AND coalesce(o.sent_at, o.created_at) <= p_now - interval '7 days'
+$fn$;
+ALTER FUNCTION public.list_tenants_with_pii_due(timestamptz) OWNER TO oms_maint;
+REVOKE ALL ON FUNCTION public.list_tenants_with_pii_due(timestamptz) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.list_tenants_with_pii_due(timestamptz) TO oms_app;
+COMMENT ON FUNCTION public.list_tenants_with_pii_due(timestamptz) IS
+  'Read-only tenant ids for recipient redaction and terminal event payload scrubbing. All entitlement states.';

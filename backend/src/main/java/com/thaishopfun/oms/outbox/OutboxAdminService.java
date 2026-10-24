@@ -56,16 +56,20 @@ public class OutboxAdminService {
     // Change: one read for status and attempts. The second SELECT was the same row.
     Existing existing =
         jdbc.query(
-            "SELECT status, attempts FROM outbox_event WHERE id = ?",
+            "SELECT status, attempts, payload_scrubbed_at IS NOT NULL AS scrubbed FROM outbox_event WHERE id = ? FOR UPDATE",
             ps -> ps.setObject(1, eventId),
             rs -> {
               if (!rs.next()) {
                 return null;
               }
-              return new Existing(rs.getString("status"), rs.getInt("attempts"));
+              return new Existing(
+                  rs.getString("status"), rs.getInt("attempts"), rs.getBoolean("scrubbed"));
             });
     if (existing == null) {
       throw new OutboxAccessException(404, "NOT_FOUND", "Outbox event not found");
+    }
+    if (existing.scrubbed()) {
+      throw new OutboxAccessException(409, "PAYLOAD_SCRUBBED", "Scrubbed events cannot be retried");
     }
     if (!"DEAD".equals(existing.status())) {
       throw new OutboxAccessException(409, "CONFLICT", "Only DEAD events can be retried");
@@ -75,7 +79,7 @@ public class OutboxAdminService {
             """
             UPDATE outbox_event
             SET status = 'PENDING', attempts = 0, next_attempt_at = NULL, lease_until = NULL
-            WHERE id = ? AND status = 'DEAD'
+            WHERE id = ? AND status = 'DEAD' AND payload_scrubbed_at IS NULL
             """,
             ps -> ps.setObject(1, eventId));
     if (updated != 1) {
@@ -131,7 +135,7 @@ public class OutboxAdminService {
         instant(rs, "next_attempt_at"));
   }
 
-  private record Existing(String status, int attempts) {}
+  private record Existing(String status, int attempts, boolean scrubbed) {}
 
   private static Instant instant(ResultSet rs, String column) throws SQLException {
     OffsetDateTime value = rs.getObject(column, OffsetDateTime.class);

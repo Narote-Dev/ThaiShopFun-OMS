@@ -19,6 +19,11 @@ public class OrderDemoCatalogController {
     this.catalog = catalog;
   }
 
+  @PostMapping("/pii-redact-cancelled")
+  public Map<String, Object> redactCancelled() {
+    return catalog.redactCancelled();
+  }
+
   @PostMapping("/order-catalog")
   public ResponseEntity<Map<String, Object>> seedCatalog() {
     try {

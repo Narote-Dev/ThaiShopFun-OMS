@@ -41,8 +41,8 @@ def count_fks(text: str) -> int:
 
 def main():
     cols = load_columns()
-    assert len(cols) == 329
-    assert len(FIELDS) == 329
+    assert len(cols) == 331
+    assert len(FIELDS) == 331
     missing = [k for k in cols if k not in FIELDS]
     extra = [k for k in FIELDS if k not in cols]
     blank = [k for k, v in FIELDS.items() if not v.get("meaning", "").strip()]
@@ -51,7 +51,7 @@ def main():
     assert not extra, extra[:5]
     assert not blank, blank[:5]
     assert not missing_usage, missing_usage[:5]
-    assert len(USAGE) == 329
+    assert len(USAGE) == 331
 
     fk = count_fks(SCHEMA.read_text())
     assert fk == 59, fk
@@ -69,7 +69,7 @@ def main():
     from verify_rendered_usage import parse_rendered_usage, verify_rendered
 
     rendered = parse_rendered_usage(dd)
-    assert len(rendered) == 329, f"parsed usage rows={len(rendered)}"
+    assert len(rendered) == 331, f"parsed usage rows={len(rendered)}"
     class_mm, reserved_vv = verify_rendered(rendered)
     justified: list[str] = []
     # Indirect: OrderQueryService filters shipment by order_id only (order_id in SQL is expected).
@@ -86,7 +86,7 @@ def main():
 
     print(
         f"OK columns={len(cols)} fields={len(FIELDS)} fks={fk} checks={check_count} "
-        f"blank_meanings=0 usage=329 rendered_class_mismatches=0 "
+        f"blank_meanings=0 usage=331 rendered_class_mismatches=0 "
         f"rendered_reserved_violations=0 mermaid_blocks={mermaid_blocks}"
     )
     if justified:

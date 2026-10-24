@@ -77,6 +77,8 @@ Hash routing (`#/...`). สี/label: [`frontend/src/ui/status.ts`](../../fronte
 
 ## `#/orders/:id` — Order detail (`OrderDetailPage`)
 
+T27: REDACTED recipient shows the Thai PDPA info AlertBanner and province/postcode only, without masked placeholders. [Screenshots](../ui/screenshots/t27/README.md).
+
 - **API:** `GET /api/v1/orders/{id}`, `POST .../cancel-requests`, `POST .../hold-rechecks`
 - **ส่วน:** หัวสถานะ, บรรทัด, reservations, shipments (ถ้ามี), timeline (`Timeline`)
 - **Status:** order/payment/fulfillment/hold badges แยกมิติ

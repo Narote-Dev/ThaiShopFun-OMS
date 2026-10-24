@@ -1,6 +1,6 @@
 # ดัชนีเอกสาร OMS
 
-อ้างอิง T12C บน main @ f642c69 (Flyway V14)
+อ้างอิง main @ 6d3b5b5 + T27 (Flyway V16)
 
 > **Generated** — แก้ usage ที่ `docs/tools/generate_field_usage.py` (OVERRIDES) + meanings ที่ `docs/tools/field_meta/all_fields.py`; รัน `python docs/tools/generate_field_usage.py` แล้ว `python docs/tools/build_reference_docs.py`. หน้า PAGES/MODULES แก้ที่ `pages_body.md` / `modules_body.md`.
 
@@ -24,3 +24,5 @@
 | [api/channel-listings.md](api/channel-listings.md) | REST listings |
 | [ui/DESIGN-SYSTEM.md](ui/DESIGN-SYSTEM.md) | design system |
 | [MVP-ROADMAP.md](MVP-ROADMAP.md) | roadmap สรุป |
+
+[PII lifecycle / rotation runbook](security/pii.md) — T27 retention and label cache requirements.

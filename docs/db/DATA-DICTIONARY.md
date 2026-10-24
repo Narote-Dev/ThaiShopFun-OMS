@@ -1,11 +1,11 @@
 # OMS Data Dictionary
 
-อ้างอิง T12C schema snapshot + T15 / Flyway V15 supplement (339 business columns)
+อ้างอิง T12C schema snapshot + T15 / Flyway V15 supplement + T27 / Flyway V16 (341 business columns)
 
 > **Generated** — แก้ usage ที่ `docs/tools/generate_field_usage.py` (OVERRIDES) + meanings ที่ `docs/tools/field_meta/all_fields.py`; รัน `python docs/tools/generate_field_usage.py` แล้ว `python docs/tools/build_reference_docs.py`. หน้า PAGES/MODULES แก้ที่ `pages_body.md` / `modules_body.md`.
 
 
-พจนานุกรมข้อมูลทุกคอลัมน์ธุรกิจ (329) จาก `docs/schema/schema-ee4e425_39c6.sql` / `columns-ee4e425_4276.tsv` cross-check กับ Flyway V1–V13 และ Java. หลักการ RLS/PII: [03-data-model.md](../plan/03-data-model.md).
+พจนานุกรมข้อมูลทุกคอลัมน์ธุรกิจ (331) จาก `docs/schema/schema-ee4e425_39c6.sql` / `columns-ee4e425_4276.tsv` cross-check กับ Flyway V1–V16 และ Java. หลักการ RLS/PII: [03-data-model.md](../plan/03-data-model.md).
 
 ## ภาพรวมตาม domain
 
@@ -312,7 +312,7 @@ erDiagram
 
 **SECURITY DEFINER (ข้าม tenant, คืนเฉพาะ id หรือ batch):** `claim_inbox_batch`, `claim_outbox_batch`, `list_active_tenant_ids`, `list_tenants_with_expired_reservations`, `resolve_tenant`, `resolve_reservation_tenant` (V9), `upsert_app_user`, `provision_tenant`, `provision_membership`, `lookup_login` — ดู `V1__foundation_rls.sql`, `V2__jit_provision.sql`, `V6__stock_expiry_tenant_claim.sql`, `V9__reservation_tenant_lookup.sql`.
 
-### Flyway V1–V13 (ไม่มี V5)
+### Flyway V1–V16 (ไม่มี V5)
 
 | Version | ไฟล์ | สรุป |
 |---|---|---|
@@ -329,6 +329,10 @@ erDiagram
 | V11 | `V11__sales_order_list_cursor_index.sql` | list orders index |
 | V12 | `V12__listing_mapping_and_orphan_marker.sql` | listing mapping + inbox orphan marker |
 | V13 | `V13__order_hold_retry.sql` | `order_hold_retry` |
+
+| V14 | `V14__order_backfill_tenants.sql` | ids-only order backfill tenant discovery |
+| V15 | `V15__stock_push.sql` | durable stock push + ids-only account discovery |
+| V16 | `V16__pii_lifecycle.sql` | scrub timestamps, partial due indexes, ids-only PII discovery (all tenant states) |
 
 ## ตาราง
 
@@ -912,7 +916,7 @@ erDiagram
 | `province` | `text` | YES | — | จังหวัด (plaintext; คงไว้หลัง redact) | เขียน `OrderRecipientRepository`; อ่าน repository/API ที่ query ตาราง | — |
 | `postcode` | `text` | YES | — | รหัสไปรษณีย์ (plaintext; คงไว้หลัง redact) | เขียน `OrderRecipientRepository`; อ่าน repository/API ที่ query ตาราง | — |
 | `pii_status` | `text` | NO | `'ACTIVE'::text` | สถานะวงจร PII | เขียน `OrderRecipientRepository`; อ่าน repository/API ที่ query ตาราง | enum: ACTIVE, REDACTED |
-| `redact_after` | `timestamp with time zone` | YES | — | เวลานัดลบ/ทำให้ไม่ระบุตัวตน (PDPA) | เขียน `OrderRecipientRepository`; อ่าน repository/API ที่ query ตาราง | — |
+| `redact_after` | `timestamp with time zone` | YES | — | เวลานัดลบ/ทำให้ไม่ระบุตัวตน (PDPA) | เขียน `OrderRecipientRepository` ผ่าน close hook; อ่าน `PiiLifecycleJob` เพื่อ redact เมื่อครบ 90 วัน | — |
 | `created_at` | `timestamp with time zone` | NO | `now()` | เวลาที่แถวถูกสร้าง (timestamptz UTC) | INSERT default now(); อ่าน repository/API ที่ query ตาราง | — |
 | `updated_at` | `timestamp with time zone` | NO | `now()` | เวลาที่แถวถูกแก้ไขล่าสุด (timestamptz UTC) | อัปเดต `OrderRecipientRepository`; อ่าน repository/API ที่ query ตาราง | — |
 
@@ -1208,7 +1212,7 @@ erDiagram
 | `event_id` | `text` | NO | — | รหัส event จากแหล่ง (dedup ต่อ tenant) | INSERT `InboxIngestService` (dedup); อ่าน `InboxWorker` | — |
 | `event_type` | `text` | NO | — | ชนิด event สำหรับ router handler | INSERT `InboxIngestService`; อ่าน `InboxWorker` router | — |
 | `aggregate_id` | `text` | NO | — | รหัส aggregate ที่ event เกี่ยว | INSERT `InboxIngestService`; อ่าน `InboxWorker` | — |
-| `payload` | `jsonb` | NO | — | เนื้อหา event เป็น JSON (อาจมี PII ชั่วคราว) | INSERT `InboxIngestService`; อ่าน `InboxWorker` handler | PII 🔒 — scrub หลัง 7 วัน วางแผน [T27](../plan/05-task-list.md#L224) (05-task-list); ยังไม่ implement บน main |
+| `payload` | `jsonb` | NO | — | เนื้อหา event เป็น JSON (อาจมี PII ชั่วคราว) | INSERT `InboxIngestService`; อ่าน `InboxWorker` handler; scrub `PiiLifecycleJob` หลัง terminal 7 วัน | PII 🔒 — scrub หลัง 7 วัน วางแผน [T27](../plan/05-task-list.md#L224) (05-task-list); ยังไม่ implement บน main |
 | `status` | `text` | NO | — | สถานะคิว: RECEIVED รอ worker, PROCESSED สำเร็จ, FAILED รอ retry, DEAD หยุด retry | INSERT `InboxIngestService` (RECEIVED); อัปเดต `InboxWorker` (PROCESSED/FAILED/DEAD) | enum: RECEIVED, PROCESSED, FAILED, DEAD |
 | `attempts` | `integer` | NO | `0` | จำนวนครั้งที่ worker หยิบ/ลองแล้ว | อัปเดต `InboxWorker` (claim/retry); อ่าน `InboxWorker` | — |
 | `next_attempt_at` | `timestamp with time zone` | YES | — | เวลา lease/retry ถัดไป (claim_inbox_batch ขยับ) | อัปเดต `InboxWorker`/`claim_inbox_batch` สำหรับ lease/retry | — |
@@ -1218,6 +1222,7 @@ erDiagram
 | `aggregate_version` | `bigint` | NO | `0` | เวอร์ชัน envelope; 0 = ผู้ส่งไม่ส่ง; กัน replay เก่า | INSERT `InboxIngestService`; อ่าน `InboxWorker` dedup | — |
 | `payload_sha256` | `bytea` | NO | `'\x'::bytea` | SHA-256 ของ body ครั้งแรก; event_id ซ้ำแต่ hash ต่างยังถือ duplicate | INSERT `InboxIngestService`; อ่าน `InboxIngestService` duplicate check | — |
 | `orphan_recorded_at` | `timestamp with time zone` | YES | — | เวลาที่บันทึกว่าเป็น orphan หลัง defer เกิน max | อัปเดต `InboxWorker` เมื่อเกิน max-defer | — |
+| `payload_scrubbed_at` | `timestamp with time zone` | YES | — | เวลาที่ล้าง PII ใน terminal inbox payload (T27); NULL หมายถึงยังไม่ scrub | เขียน/อ่าน `PiiLifecycleJob` เมื่อ scrub PROCESSED/DEAD ครบ 7 วัน | — |
 
 ### `outbox_event`
 
@@ -1243,13 +1248,14 @@ erDiagram
 | `aggregate_type` | `text` | NO | — | ประเภท aggregate ใน outbox | INSERT `OutboxAppender`; อ่าน `OutboxAdminService.listDead` | — |
 | `aggregate_id` | `text` | NO | — | รหัส aggregate | INSERT `OutboxAppender`; อ่าน `OutboxAdminService.listDead` | — |
 | `event_type` | `text` | NO | — | ชนิด event ที่จะส่งออก | INSERT `OutboxAppender` (เช่น order.status_changed) | — |
-| `payload` | `jsonb` | NO | — | payload JSON ที่จะส่งไป TSF (อาจมี PII ชั่วคราว) | INSERT `OutboxAppender`; อ่าน `OutboxStore` / `OutboxHttpSender` | PII 🔒 — scrub หลัง 7 วัน วางแผน [T27](../plan/05-task-list.md#L224); ยังไม่ implement บน main |
+| `payload` | `jsonb` | NO | — | payload JSON ที่จะส่งไป TSF (อาจมี PII ชั่วคราว) | INSERT `OutboxAppender`; อ่าน `OutboxStore` / `OutboxHttpSender`; scrub `PiiLifecycleJob` หลัง terminal 7 วัน | PII 🔒 — scrub หลัง 7 วัน วางแผน [T27](../plan/05-task-list.md#L224); ยังไม่ implement บน main |
 | `status` | `text` | NO | — | PENDING รอส่ง, IN_FLIGHT worker ถือ lease, SENT สำเร็จ, DEAD หยุด retry (admin retry ได้) | INSERT `OutboxAppender` (PENDING); อัปเดต `OutboxStore` (IN_FLIGHT→SENT/DEAD); admin retry → PENDING (`OutboxAdminService`) | — |
 | `attempts` | `integer` | NO | `0` | จำนวนครั้งที่พยายามส่ง | อัปเดต `OutboxStore` ตอน claim/fail; reset `OutboxAdminService.retry` | — |
 | `next_attempt_at` | `timestamp with time zone` | YES | — | เวลา retry ส่งถัดไป | อัปเดต `OutboxStore` backoff; NULL เมื่อ SENT/DEAD/retry | — |
 | `lease_until` | `timestamp with time zone` | YES | — | หมด lease ตอน worker ถือ IN_FLIGHT | ตั้ง `OutboxStore` ตอน claim IN_FLIGHT; ล้างเมื่อส่งหรือคืน PENDING | — |
 | `created_at` | `timestamp with time zone` | NO | `now()` | เวลาที่แถวถูกสร้าง (timestamptz UTC) | INSERT default now(); อ่าน `OutboxAdminService` | — |
 | `sent_at` | `timestamp with time zone` | YES | — | เวลาส่งสำเร็จ (UTC) | อัปเดต `OutboxStore` เมื่อ SENT | — |
+| `payload_scrubbed_at` | `timestamp with time zone` | YES | — | เวลาที่ล้าง PII ใน terminal outbox payload (T27); ห้าม retry เมื่อมีค่า | เขียน/อ่าน `PiiLifecycleJob`; อ่าน `OutboxAdminService` เพื่อปฏิเสธ retry | — |
 
 ### `sync_cursor`
 
@@ -1428,3 +1434,14 @@ path, capturing all mapping writers without modifying the stock engine.
 `list_stock_push_accounts(boolean)` is owned by `oms_maint`, executable only by
 `oms_app`, with `search_path=pg_catalog,pg_temp`. It returns tenant/account UUIDs
 only; all business reads and writes then run under transaction-scoped tenant RLS.
+
+## T27 / Flyway V16 — PII lifecycle
+
+`inbox_event.payload_scrubbed_at` and `outbox_event.payload_scrubbed_at` are nullable
+`timestamptz` markers written by `PiiLifecycleJob`. Partial due indexes cover terminal
+statuses with NULL markers. Existing ENABLE/FORCE RLS policies remain unchanged.
+`list_tenants_with_pii_due(timestamptz)` follows V6: SECURITY DEFINER owned by
+`oms_maint`, pinned `pg_catalog, pg_temp`, qualified tables, PUBLIC revoked,
+EXECUTE granted to `oms_app`. It returns **tenant UUIDs only**, across ACTIVE,
+GRACE, SUSPENDED and expired shops. Each batch then runs in a separate tenant
+transaction. See [PII policy and rotation runbook](../security/pii.md).

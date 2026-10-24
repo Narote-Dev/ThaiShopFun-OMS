@@ -18,6 +18,9 @@ READ_ORDERS_UI = "อ่าน `OrderQueryService` / orders UI"
 
 # Per (table, column) — verified against main @ f642c69 Java/SQL
 OVERRIDES: dict[tuple[str, str], str] = {
+    ("inbox_event", "payload_scrubbed_at"): "เขียน/อ่าน `PiiLifecycleJob` เมื่อ scrub PROCESSED/DEAD ครบ 7 วัน",
+    ("outbox_event", "payload_scrubbed_at"): "เขียน/อ่าน `PiiLifecycleJob`; อ่าน `OutboxAdminService` เพื่อปฏิเสธ retry",
+    ("order_recipient", "redact_after"): "เขียน `OrderRecipientRepository` ผ่าน close hook; อ่าน `PiiLifecycleJob` เพื่อ redact เมื่อครบ 90 วัน",
     # --- app_user ---
     ("app_user", "id"): "INSERT `upsert_app_user` (V2) จาก `IdentityProvisioner`; อ่าน join `tenant_membership`",
     ("app_user", "tsf_user_id"): "INSERT/UPDATE `upsert_app_user` (V2) จาก `IdentityProvisioner`; ไม่มี reader บน main",
@@ -111,7 +114,7 @@ OVERRIDES: dict[tuple[str, str], str] = {
     ("outbox_event", "next_attempt_at"): "อัปเดต `OutboxStore` backoff; NULL เมื่อ SENT/DEAD/retry",
     ("outbox_event", "lease_until"): "ตั้ง `OutboxStore` ตอน claim IN_FLIGHT; ล้างเมื่อส่งหรือคืน PENDING",
     ("outbox_event", "sent_at"): "อัปเดต `OutboxStore` เมื่อ SENT",
-    ("outbox_event", "payload"): "INSERT `OutboxAppender`; อ่าน `OutboxStore` / `OutboxHttpSender`",
+    ("outbox_event", "payload"): "INSERT `OutboxAppender`; อ่าน `OutboxStore` / `OutboxHttpSender`; scrub `PiiLifecycleJob` หลัง terminal 7 วัน",
     ("outbox_event", "event_type"): "INSERT `OutboxAppender` (เช่น order.status_changed)",
     ("order_hold_retry", "attempts"): "เขียน `OrderHoldRetryRepository.recordBackoff` (scheduled sweeper); ลบแถวเมื่อ RELEASED/OUT_OF_STOCK",
     ("order_hold_retry", "next_attempt_at"): "เขียน `OrderHoldRetryRepository.recordBackoff` จาก scheduled hold-resolver job",
@@ -151,7 +154,7 @@ OVERRIDES: dict[tuple[str, str], str] = {
     ("inbox_event", "event_id"): "INSERT `InboxIngestService` (dedup); อ่าน `InboxWorker`",
     ("inbox_event", "event_type"): "INSERT `InboxIngestService`; อ่าน `InboxWorker` router",
     ("inbox_event", "aggregate_id"): "INSERT `InboxIngestService`; อ่าน `InboxWorker`",
-    ("inbox_event", "payload"): "INSERT `InboxIngestService`; อ่าน `InboxWorker` handler",
+    ("inbox_event", "payload"): "INSERT `InboxIngestService`; อ่าน `InboxWorker` handler; scrub `PiiLifecycleJob` หลัง terminal 7 วัน",
     ("inbox_event", "status"): "INSERT `InboxIngestService` (RECEIVED); อัปเดต `InboxWorker` (PROCESSED/FAILED/DEAD)",
     ("inbox_event", "attempts"): "อัปเดต `InboxWorker` (claim/retry); อ่าน `InboxWorker`",
     ("inbox_event", "next_attempt_at"): "อัปเดต `InboxWorker`/`claim_inbox_batch` สำหรับ lease/retry",

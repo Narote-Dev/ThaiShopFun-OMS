@@ -12,7 +12,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_SCHEMA = ROOT / "docs/schema/schema-ee4e425_39c6.sql"
 DEFAULT_COLS = ROOT / "docs/schema/columns-ee4e425_4276.tsv"
-REF = "อ้างอิง T12C บน main @ f642c69 (Flyway V14)"
+REF = "อ้างอิง main @ 6d3b5b5 + T27 (Flyway V16)"
 GENERATED_NOTE = (
     "> **Generated** — แก้ usage ที่ `docs/tools/generate_field_usage.py` (OVERRIDES) + meanings ที่ "
     "`docs/tools/field_meta/all_fields.py`; รัน `python docs/tools/generate_field_usage.py` แล้ว "
@@ -381,8 +381,8 @@ def build_data_dictionary(schema_path: Path, cols_path: Path):
     col_types = {(t, c[1]): c[2] for t, cols in columns.items() for c in cols}
     parts = [
         f"# OMS Data Dictionary\n\n{REF}\n\n{GENERATED_NOTE}",
-        "พจนานุกรมข้อมูลทุกคอลัมน์ธุรกิจ (329) จาก `docs/schema/schema-ee4e425_39c6.sql` / `columns-ee4e425_4276.tsv` "
-        "cross-check กับ Flyway V1–V13 และ Java. หลักการ RLS/PII: [03-data-model.md](../plan/03-data-model.md).\n",
+        "พจนานุกรมข้อมูลทุกคอลัมน์ธุรกิจ (331) จาก `docs/schema/schema-ee4e425_39c6.sql` / `columns-ee4e425_4276.tsv` "
+        "cross-check กับ Flyway V1–V16 และ Java. หลักการ RLS/PII: [03-data-model.md](../plan/03-data-model.md).\n",
         "## ภาพรวมตาม domain\n",
     ]
     for domain, tbls in DOMAINS.items():
@@ -465,8 +465,9 @@ def main():
         TABLE_META.update(json.loads(meta_path.read_text(encoding="utf-8")))
 
     dd = build_data_dictionary(args.schema, args.columns)
-    dd = dd.replace(REF, "อ้างอิง T12C schema snapshot + T15 / Flyway V15 supplement (339 business columns)", 1)
+    dd = dd.replace(REF, "อ้างอิง T12C schema snapshot + T15 / Flyway V15 supplement + T27 / Flyway V16 (341 business columns)", 1)
     dd += (ROOT / "docs/tools/stock_push_section.md").read_text(encoding="utf-8")
+    dd += (ROOT / "docs/tools/pii_section.md").read_text(encoding="utf-8")
     (ROOT / "docs/db/DATA-DICTIONARY.md").write_text(dd, encoding="utf-8")
     (ROOT / "docs/backend/MODULES.md").write_text(build_modules(), encoding="utf-8")
     (ROOT / "docs/frontend/PAGES.md").write_text(build_pages(), encoding="utf-8")
@@ -474,7 +475,7 @@ def main():
 
     blank = [f"{t}.{c}" for (t, c), v in FIELDS.items() if not v.get("meaning", "").strip()]
     assert not blank, f"blank meanings: {blank[:5]}"
-    assert len(FIELDS) == 329
+    assert len(FIELDS) == 331
 
     mermaid_ok = 0
     if not args.skip_mermaid:

@@ -105,8 +105,8 @@ erDiagram
 ### Sync / Platform
 | ตาราง | columns สำคัญ | หมายเหตุ |
 |---|---|---|
-| `inbox_event` | id, tenant_id, source, event_id, event_type, aggregate_id, aggregate_version, payload jsonb, payload_sha256 bytea, status (`RECEIVED/PROCESSED/FAILED/DEAD`), attempts, next_attempt_at, last_error, received_at, processed_at, **UNIQUE(tenant_id, source, event_id)** | V3. V1 was `UNIQUE(source, event_id)`, which collided across shops. payload ที่มี PII ล้างหลัง PROCESSED 7 วัน |
-| `outbox_event` | id, tenant_id, aggregate_type, aggregate_id, event_type, payload jsonb, status (`PENDING/IN_FLIGHT/SENT/DEAD`), attempts, next_attempt_at, lease_until, created_at, sent_at | เขียนใน transaction เดียวกับ business change |
+| `inbox_event` | id, tenant_id, source, event_id, event_type, aggregate_id, aggregate_version, payload jsonb, payload_sha256 bytea, payload_scrubbed_at timestamptz NULL, status (`RECEIVED/PROCESSED/FAILED/DEAD`), attempts, next_attempt_at, last_error, received_at, processed_at, **UNIQUE(tenant_id, source, event_id)** | V3. V1 was `UNIQUE(source, event_id)`, which collided across shops. payload ที่มี PII ล้างหลัง PROCESSED 7 วัน |
+| `outbox_event` | id, tenant_id, aggregate_type, aggregate_id, event_type, payload jsonb, status (`PENDING/IN_FLIGHT/SENT/DEAD`), attempts, next_attempt_at, lease_until, created_at, sent_at, payload_scrubbed_at timestamptz NULL | เขียนใน transaction เดียวกับ business change |
 | `sync_cursor` | tenant_id, channel_account_id, resource (`ORDERS/LISTINGS`), cursor, last_success_at, PK(channel_account_id, resource) | |
 | `idempotency_key` | tenant_id, scope, key, request_hash, response_status, response_body jsonb, created_at, PK(tenant_id, scope, key) | ลบหลัง 24 ชม. |
 | `shadow_diff` | id, tenant_id, channel_account_id, kind (`STOCK/ORDER/RESERVATION`), ref, oms_value, channel_value, observed_at | ใช้ตัดสินเลื่อน mode |
@@ -124,7 +124,7 @@ Inbox entitlement (T11), applied by the worker after `claim_inbox_batch`. The cl
 |---|---|---|---|
 | ชื่อ, เบอร์, ที่อยู่ผู้รับ | `order_recipient` | AES-GCM ระดับ column (key จาก secret manager, หมุนได้), ค้นเบอร์ด้วย `phone_hash` (HMAC) | ปิดออเดอร์ (`COMPLETED/CANCELLED`) + 90 วัน → **REDACTED** (ลบ name/phone/address เหลือ province, postcode) |
 | Label PDF | ไม่เก็บถาวร ดึงจาก TSF ตอนพิมพ์ | cache ≤ 7 วันหลัง SHIPPED | ลบอัตโนมัติ |
-| Event payload | `inbox_event.payload` / `outbox_event.payload` | — | ล้าง field PII หลัง PROCESSED/SENT 7 วัน |
+| Event payload | `inbox_event.payload` / `outbox_event.payload` | — | ล้าง field PII หลัง PROCESSED/SENT 7 วัน; DEAD ใช้ processed_at/sent_at หรือ received_at/created_at; [T27 policy](../security/pii.md) |
 | Log | app log | logback masking filter (phone, address, email) + test | ห้ามมี PII เลย |
 | Audit | `audit_log` | PII → `"[PII]"` | ตาม NFR.md |
 | Backup | PITR (Railway) | เข้ารหัสที่ storage | PITR ~28 วัน + offsite dump 35 วัน → ข้อมูลที่ redact แล้วหายจาก backup ครบภายใน ~35 วัน |
