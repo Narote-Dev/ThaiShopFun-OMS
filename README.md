@@ -49,7 +49,7 @@ The web app calls the IdP at `http://localhost:8090/tsf-idp` with `client_id=oms
 | `POST /control/events/shuffle` | `{"events":[envelope, envelope]}` — sent in a different order |
 | `POST /control/events/stale` | `{"skew_seconds":301,"event":{...}}` |
 | `POST /control/events/bad-signature` | `{"event":{...}}` — signed with the wrong secret |
-| `POST /control/demo/order-catalog` | Idempotent SKUs, stock, and listings for demo orders (`local`/`e2e` OMS profile); also switches `shop_active` TSF channel to `ACTIVE` so stock enforcement applies |
+| `POST http://localhost:8080/control/demo/order-catalog` | Idempotent SKUs, stock, and listings for demo orders (`local`/`e2e` OMS profile); also switches `shop_active` TSF channel to `ACTIVE` so stock enforcement applies |
 | `POST /control/demo/orders-seed` | Calls order-catalog then idempotent demo `order.*` events for `shop_active` (local/e2e only) |
 | `POST /control/demo/invariants-check` | Runs one `InvariantJob` pass (`violations` count in JSON); use after demo seed to confirm `violations=0` |
 | `POST /control/events/after-reservation-expiry` | `order.created` only. `{"reservation_expires_at":"...","event":{...}}`. Refuses a future `occurred_at` |
