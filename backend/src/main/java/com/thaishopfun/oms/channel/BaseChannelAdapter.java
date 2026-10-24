@@ -373,9 +373,8 @@ public abstract class BaseChannelAdapter implements ChannelAdapter {
   private void sleepBeforeRetry(Instant deadline, Duration sleep, ChannelRateLimitedException rate)
       throws InterruptedException {
     ensureBudget(deadline, sleep, rate);
-    if (sleep.isZero()) {
-      return;
-    }
+    // Zero is a valid full-jitter result. Keep every backoff observable; SystemSleeper
+    // treats zero as a no-op, while recording sleepers retain the selected duration.
     try {
       sleeper.sleep(sleep);
     } catch (InterruptedException ex) {

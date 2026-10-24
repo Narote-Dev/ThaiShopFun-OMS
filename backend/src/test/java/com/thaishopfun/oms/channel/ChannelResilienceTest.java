@@ -40,6 +40,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 /** Unit tests for {@link BaseChannelAdapter} resilience decorators. No Spring context. */
 class ChannelResilienceTest {
@@ -263,13 +265,14 @@ class ChannelResilienceTest {
     }
   }
 
-  @Test
-  void retryBackoffUsesFullJitterWithinBounds() throws Exception {
+  @ParameterizedTest
+  @ValueSource(longs = {0, 100})
+  void retryBackoffUsesFullJitterWithinBounds(long maxMillis) throws Exception {
     RecordingSleeper sleeper = new RecordingSleeper();
     ChannelProperties properties = properties();
     properties.getTsf().setRetryMaxAttempts(4);
     properties.getTsf().setRetryWaitBase(Duration.ofMillis(100));
-    properties.getTsf().setRetryWaitMax(Duration.ofMillis(100));
+    properties.getTsf().setRetryWaitMax(Duration.ofMillis(maxMillis));
     AtomicInteger attempts = new AtomicInteger();
     TestChannelAdapter adapter =
         adapter(
@@ -286,7 +289,7 @@ class ChannelResilienceTest {
     assertThat(sleeper.durations()).hasSize(3);
     for (Duration sleep : sleeper.durations()) {
       assertThat(sleep.compareTo(Duration.ZERO)).isGreaterThanOrEqualTo(0);
-      assertThat(sleep.compareTo(Duration.ofMillis(100))).isLessThanOrEqualTo(0);
+      assertThat(sleep.compareTo(Duration.ofMillis(maxMillis))).isLessThanOrEqualTo(0);
     }
   }
 
@@ -441,13 +444,8 @@ class ChannelResilienceTest {
             });
     adapter.getOrder(accountRef(), "x");
     assertThat(attempts).hasValue(2);
-    // Full jitter may pick zero ms; retry is still observable via metrics.
-    if (sleeper.durations().isEmpty()) {
-      assertThat(meters.find("oms.channel.retries").tag("reason", "unavailable").counter())
-          .isNotNull();
-    } else {
-      assertThat(sleeper.durations()).isNotEmpty();
-    }
+    assertThat(sleeper.durations()).hasSize(1);
+    assertThat(sleeper.durations().get(0)).isBetween(Duration.ZERO, Duration.ofMillis(100));
   }
 
   @Test
@@ -1150,7 +1148,7 @@ class ChannelResilienceTest {
 
     @Override
     public void sleep(Duration duration) {
-      if (duration != null && !duration.isZero() && !duration.isNegative()) {
+      if (duration != null && !duration.isNegative()) {
         durations.add(duration);
       }
     }
