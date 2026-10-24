@@ -35,6 +35,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.AfterEach;
@@ -950,31 +951,45 @@ class ChannelResilienceTest {
     ChannelProperties properties = properties();
     properties.getTsf().setRetryMaxAttempts(3);
     AtomicInteger attempts = new AtomicInteger();
+    AtomicInteger sleepCalls = new AtomicInteger();
+    InterruptedException interrupted = new InterruptedException("stop");
+    Clock clock = Clock.fixed(Instant.parse("2026-01-01T00:00:00Z"), ZoneOffset.UTC);
     TestChannelAdapter adapter =
-        adapter(
+        new TestChannelAdapter(
+            new AccountResilienceRegistry(properties, new ChannelMetrics(meters)),
             properties,
+            new ChannelMetrics(meters),
             duration -> {
-              throw new InterruptedException("stop");
+              // Full jitter permits zero backoff. Retry-After guarantees this path is exercised.
+              assertThat(duration).isGreaterThanOrEqualTo(Duration.ofSeconds(1));
+              sleepCalls.incrementAndGet();
+              throw interrupted;
             },
+            clock,
             () -> {
               attempts.incrementAndGet();
-              throw new ChannelUnavailableException("retry");
+              throw new ChannelRateLimitedException("retry", 1);
             });
-    java.util.concurrent.atomic.AtomicBoolean interruptedOnWorker =
-        new java.util.concurrent.atomic.AtomicBoolean();
-    Thread runner =
-        new Thread(
+    FutureTask<Boolean> result =
+        new FutureTask<>(
             () -> {
-              try {
-                adapter.getOrder(accountRef(), "interrupt");
-              } catch (ChannelUnavailableException ex) {
-                interruptedOnWorker.set(Thread.currentThread().isInterrupted());
-              }
+              assertThat(Thread.currentThread().isInterrupted()).isFalse();
+              assertThatThrownBy(() -> adapter.getOrder(accountRef(), "interrupt"))
+                  .isInstanceOf(ChannelUnavailableException.class)
+                  .hasCauseReference(interrupted);
+              return Thread.currentThread().isInterrupted();
             });
+    Thread runner = new Thread(result, "channel-retry-interrupt-test");
     runner.start();
-    runner.join(5000);
-    assertThat(interruptedOnWorker).isTrue();
-    assertThat(attempts.get()).isGreaterThanOrEqualTo(1);
+    try {
+      assertThat(result.get(5, TimeUnit.SECONDS)).isTrue();
+      assertThat(sleepCalls).hasValue(1);
+      assertThat(attempts).hasValue(1);
+    } finally {
+      runner.interrupt();
+      runner.join(5000);
+      assertThat(runner.isAlive()).isFalse();
+    }
   }
 
   @Test
