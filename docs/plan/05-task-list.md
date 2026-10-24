@@ -29,6 +29,7 @@ Versions are taken in merge order as the next free number. One migration per PR.
 | V12 | T12B channel_listing mapping columns + inbox `orphan_recorded_at` |
 | V13 | T12B-FU `order_hold_retry` (hold sweeper backoff) |
 | V14 | T12C `list_tenants_for_order_backfill()` (ACTIVE + unexpired GRACE, connected TSF) |
+| V15 | T15 durable `stock_push_pending`, mapping capture trigger, ids-only account discovery, stock propagation origin, `STOCK_PUSH` shadow kind |
 
 ## สรุปจำนวน
 | Phase | Cursor | Codex | รวม |

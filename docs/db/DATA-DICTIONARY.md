@@ -1,6 +1,6 @@
 # OMS Data Dictionary
 
-อ้างอิง T12C บน main @ f642c69 (Flyway V14)
+อ้างอิง T12C schema snapshot + T15 / Flyway V15 supplement (339 business columns)
 
 > **Generated** — แก้ usage ที่ `docs/tools/generate_field_usage.py` (OVERRIDES) + meanings ที่ `docs/tools/field_meta/all_fields.py`; รัน `python docs/tools/generate_field_usage.py` แล้ว `python docs/tools/build_reference_docs.py`. หน้า PAGES/MODULES แก้ที่ `pages_body.md` / `modules_body.md`.
 
@@ -433,9 +433,9 @@ erDiagram
 | `tenant_id` | `uuid` | NO | — | รหัสร้านที่แถวนี้สังกัด ใช้กรองด้วย RLS | INSERT โดย `provision_tenant` (V10); RLS กรอง | — |
 | `channel` | `text` | NO | — | ช่องทางขาย | INSERT โดย `provision_tenant` (V10); อ่าน `OrderQueryService`, `ChannelAccountLookup` | enum: TSF, SHOPEE, LAZADA, TIKTOK |
 | `external_shop_id` | `text` | NO | — | รหัสร้านฝั่งช่องทาง (unique กับ channel) | INSERT โดย `provision_tenant` (V10); อ่าน `resolve_tenant` (V10) | — |
-| `mode` | `text` | NO | `'OBSERVE'::text` | โหมดควบคุมสต็อก/สังเกตการณ์ | INSERT โดย `provision_tenant` (V10); อ่าน `CheckoutRepository`, `OrderHoldResolver`, `OrderQueryService` | enum: OBSERVE, SHADOW, CONTROL, ACTIVE |
-| `stock_sync_paused` | `boolean` | NO | `false` | หยุด push สต็อกไปช่องทางชั่วคราว (true = หยุด) | ไม่มี writer บน main (default false); อ่าน `CheckoutRepository` | — |
-| `status` | `text` | NO | — | สถานะการเชื่อมต่อบัญชี | INSERT โดย `provision_tenant` (V10); อ่าน `CheckoutRepository`, `OrderHoldResolver`, `OrderQueryService` | enum: CONNECTED, DISCONNECTED |
+| `mode` | `text` | NO | `'OBSERVE'::text` | โหมดควบคุมสต็อก/สังเกตการณ์ | INSERT โดย `provision_tenant` (V10); อ่าน `CheckoutRepository`, `OrderHoldResolver`, `OrderQueryService`, `StockPushService` | enum: OBSERVE, SHADOW, CONTROL, ACTIVE |
+| `stock_sync_paused` | `boolean` | NO | `false` | หยุด push สต็อกไปช่องทางชั่วคราว (true = หยุด) | default false; อ่าน `CheckoutRepository`, `StockPushService` (build-time gating) | — |
+| `status` | `text` | NO | — | สถานะการเชื่อมต่อบัญชี | INSERT โดย `provision_tenant` (V10); อ่าน `CheckoutRepository`, `OrderHoldResolver`, `OrderQueryService`, `StockPushService` | enum: CONNECTED, DISCONNECTED |
 | `credentials_ref` | `text` | YES | — | ชื่อ secret ใน secret manager (ไม่เก็บ token ในฐานข้อมูล) | reserved — ไม่มี writer/reader บน main | — |
 | `token_expires_at` | `timestamp with time zone` | YES | — | เวลาหมดอายุ token OAuth (UTC) | reserved — ไม่มี writer/reader บน main | — |
 | `last_synced_at` | `timestamp with time zone` | YES | — | เวลา sync ช่องทางสำเร็จล่าสุด (UTC) | เขียน `ChannelListingSyncService` (`UPDATE channel_account SET last_synced_at`); ไม่มี reader บน main | — |
@@ -565,8 +565,8 @@ erDiagram
 | `external_sku_id` | `text` | NO | — | รหัส SKU/listing ฝั่งช่องทาง | INSERT/UPDATE `ChannelListingRepository.upsertFromChannel`; อ่าน list, intake line match | — |
 | `stock_control` | `boolean` | NO | `false` | เมื่อ true และ channel เป็น CONTROL — บังคับตรวจสต็อก/จอง hold ที่ intake และ checkout | INSERT `ChannelListingRepository` (stub/sync); อ่าน `OrderIntakeSupport`, `OrderHoldEffects`, `CheckoutRepository` | — |
 | `safety_buffer` | `integer` | NO | `0` | จำนวนหักจาก sellable ก่อนคำนวณ channel_exposed (checkout availability วันนี้) | ไม่มี writer บน main (default 0); อ่าน `CheckoutRepository`, `StockRepository`, `StockAvailability` | — |
-| `last_exposed_qty` | `integer` | YES | — | จำนวนสต็อกที่ push ไปช่องทางครั้งล่าสุด | reserved — ยังไม่มี writer บน main ([T15](../plan/05-task-list.md#L216)) | reserved [T15](../plan/05-task-list.md#L216) — ยังไม่มี writer บน main |
-| `last_pushed_version` | `bigint` | YES | — | เวอร์ชัน push สต็อกล่าสุดไปช่องทาง | reserved — ยังไม่มี writer บน main ([T15](../plan/05-task-list.md#L216)) | reserved [T15](../plan/05-task-list.md#L216) — ยังไม่มี writer บน main |
+| `last_exposed_qty` | `integer` | YES | — | จำนวนสต็อกที่ push ไปช่องทางครั้งล่าสุด | เขียน/อ่าน `StockPushService` พร้อม outbox ใน transaction เดียวกัน (T15) | T15: เขียน `StockPushService` พร้อม outbox ใน transaction เดียวกัน (enqueued) |
+| `last_pushed_version` | `bigint` | YES | — | เวอร์ชัน push สต็อกล่าสุดไปช่องทาง | เขียน/อ่าน `StockPushService` พร้อม outbox ใน transaction เดียวกัน (T15) | T15: เขียน `StockPushService` พร้อม outbox ใน transaction เดียวกัน (enqueued) |
 | `last_seen_channel_qty` | `integer` | YES | — | จำนวนสต็อกที่เห็นจากช่องทางล่าสุด | reserved — ยังไม่มี writer บน main ([T23](../plan/05-task-list.md#L245)) | reserved [T23](../plan/05-task-list.md#L245) — ยังไม่มี writer บน main |
 | `created_at` | `timestamp with time zone` | NO | `now()` | เวลาที่แถวถูกสร้าง (timestamptz UTC) | INSERT default; อ่าน list ordering | — |
 | `updated_at` | `timestamp with time zone` | NO | `now()` | เวลาที่แถวถูกแก้ไขล่าสุด (timestamptz UTC) | อัปเดต `ChannelListingRepository` (sync/map/removed); อ่าน sync guard (`updated_at < syncStartedAt`) | — |
@@ -1325,7 +1325,7 @@ erDiagram
 | `id` | `uuid` | NO | — | รหัสประจำแถว (UUIDv7 ที่แอปสร้าง) | PK; เขียน `ShadowDiffRepository`, `CheckoutRepository`; อ่าน repository/API ที่ query ตาราง | — |
 | `tenant_id` | `uuid` | NO | — | รหัสร้านที่แถวนี้สังกัด ใช้กรองด้วย RLS | INSERT ใส่ tenant ปัจจุบัน; RLS กรองทุก SELECT | — |
 | `channel_account_id` | `uuid` | NO | — | บัญชีช่องทางขายที่แถวอ้างอิง | เขียน `ShadowDiffRepository`, `CheckoutRepository`; อ่าน repository/API ที่ query ตาราง | — |
-| `kind` | `text` | NO | — | ชนิดความต่าง | เขียน `ShadowDiffRepository`, `CheckoutRepository`; อ่าน repository/API ที่ query ตาราง | enum: STOCK, ORDER, RESERVATION |
+| `kind` | `text` | NO | — | ชนิดความต่าง | เขียน `ShadowDiffRepository`, `CheckoutRepository`; อ่าน repository/API ที่ query ตาราง | enum: STOCK, ORDER, RESERVATION, STOCK_PUSH |
 | `ref` | `text` | NO | — | อ้างอิงสิ่งที่เทียบ (listing, order, reservation group) | เขียน `ShadowDiffRepository`, `CheckoutRepository`; อ่าน repository/API ที่ query ตาราง | — |
 | `oms_value` | `jsonb` | YES | — | ค่าฝั่ง OMS เป็น JSON | เขียน `ShadowDiffRepository`, `CheckoutRepository`; อ่าน repository/API ที่ query ตาราง | — |
 | `channel_value` | `jsonb` | YES | — | ค่าฝั่งช่องทางเป็น JSON | เขียน `ShadowDiffRepository`, `CheckoutRepository`; อ่าน repository/API ที่ query ตาราง | — |
@@ -1393,3 +1393,38 @@ erDiagram
 | `after` | `jsonb` | YES | — | snapshot หลังเปลี่ยน (JSON) | เขียน audit writers (ดูคอลัมน์ action); อ่าน repository/API ที่ query ตาราง | append-only — ห้าม UPDATE/DELETE |
 | `ip` | `inet` | YES | — | ที่อยู่ IP ผู้เรียก | เขียน audit writers (ดูคอลัมน์ action); อ่าน repository/API ที่ query ตาราง | PII 🔒; append-only — ห้าม UPDATE/DELETE |
 | `created_at` | `timestamp with time zone` | NO | `now()` | เวลาที่บันทึก audit (UTC) | INSERT default now(); อ่าน repository/API ที่ query ตาราง | append-only |
+
+## T15 / Flyway V15 — stock push state
+
+This supplement extends the V13 schema snapshot above with V15. See
+[stock push API and operational rules](../api/stock-push.md). All new state is
+ids, quantities, versions and timestamps; no PII. `stock_push_pending` has ENABLE
+and FORCE RLS, with tenant USING/WITH CHECK, owner `oms_migrator`, and DML grants
+only to `oms_app` / `oms_maint`. Its primary key is `(tenant_id, listing_id)`.
+Composite tenant foreign keys point to the listing (ON DELETE CASCADE) and account.
+The partial dirty index covers `(tenant_id, channel_account_id, dirty_since)`.
+
+| Table.column | Type / nullability | Meaning and writer/reader |
+| --- | --- | --- |
+| `stock_push_pending.tenant_id` | uuid NOT NULL | Tenant boundary, FK to tenant; capture/trigger and builder |
+| `stock_push_pending.channel_account_id` | uuid NOT NULL | TSF account to debounce and claim |
+| `stock_push_pending.listing_id` | uuid NOT NULL | Listing whose durable version survives clean windows/remapping |
+| `stock_push_pending.dirty_since` | timestamptz NULL | First capture timestamp in a pending window; NULL means clean; listener/trigger set, builder clears |
+| `stock_push_pending.changed_at` | timestamptz NULL | Earliest source ledger transaction timestamp (mapping: trigger timestamp) for propagation lag; cleared with dirty marker |
+| `stock_push_pending.mapping_revision` | bigint NOT NULL DEFAULT 0, >= 0 | Incremented by relevant listing-change trigger, included in source key |
+| `stock_push_pending.source_key` | text NULL | Last observed ordered stock/mapping/recipe signature; builder writes and compares |
+| `stock_push_pending.observed_qty` | integer NULL | Last observed absolute exposed quantity, including SHADOW; builder writes |
+| `stock_push_pending.stock_version` | bigint NOT NULL DEFAULT 0, >= 0 | Retained per-listing monotonic snapshot version; builder writes under account lock |
+| `outbox_event.stock_changed_at` | timestamptz NULL | Oldest source change represented by a stock batch; builder writes, publisher reads for successful propagation histogram; other event types leave NULL |
+
+`channel_listing.last_exposed_qty` and `last_pushed_version` are now written by
+`StockPushService`, atomically with outbox append. They describe the latest
+**enqueued** absolute snapshot, not a TSF acknowledgement. `shadow_diff.kind` now
+also accepts `STOCK_PUSH`; its `ref` is the external listing SKU id,
+`oms_value={available,stock_version}`, and `channel_value=NULL`.
+
+`mark_listing_stock_push()` is an invoker trigger function with a pinned search
+path, capturing all mapping writers without modifying the stock engine.
+`list_stock_push_accounts(boolean)` is owned by `oms_maint`, executable only by
+`oms_app`, with `search_path=pg_catalog,pg_temp`. It returns tenant/account UUIDs
+only; all business reads and writes then run under transaction-scoped tenant RLS.

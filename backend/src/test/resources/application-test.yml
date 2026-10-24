@@ -18,6 +18,8 @@ oms:
     hash-key: dGVzdC1vbmx5LXBpaS1obWFjLW5vdC1hLXNlY3JldCE=
   # Change: tests run StockExpiryJob directly. A background tick would race their assertions.
   stock:
+    push:
+      enabled: false
     expiry:
       enabled: false
   order:

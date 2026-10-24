@@ -1,18 +1,23 @@
 package com.thaishopfun.oms.outbox;
 
 import com.thaishopfun.oms.tenant.TenantContext;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /** Database work for the publisher. Each method commits on its own, never around the HTTP call. */
 @Service
@@ -21,9 +26,11 @@ public class OutboxStore {
   private static final Logger log = LoggerFactory.getLogger(OutboxStore.class);
 
   private final JdbcTemplate jdbc;
+  private final MeterRegistry meters;
 
-  public OutboxStore(JdbcTemplate jdbc) {
+  public OutboxStore(JdbcTemplate jdbc, MeterRegistry meters) {
     this.jdbc = jdbc;
+    this.meters = meters;
   }
 
   /**
@@ -141,6 +148,28 @@ public class OutboxStore {
             });
     if (updated == 0) {
       log.warn("outbox lost lease event_id={} attempts={}", held.id(), held.attempts());
+    }
+    if (updated == 1 && "stock.updated".equals(held.eventType())) {
+      Double seconds =
+          jdbc.queryForObject(
+              """
+          SELECT extract(epoch FROM (sent_at - stock_changed_at))::double precision
+          FROM outbox_event WHERE id = ?
+          """,
+              Double.class,
+              held.id());
+      if (seconds != null) {
+        TransactionSynchronizationManager.registerSynchronization(
+            new TransactionSynchronization() {
+              @Override
+              public void afterCommit() {
+                Timer.builder("oms.stock.push.propagation_lag")
+                    .publishPercentileHistogram()
+                    .register(meters)
+                    .record(Math.max(0, (long) (seconds * 1_000_000_000)), TimeUnit.NANOSECONDS);
+              }
+            });
+      }
     }
     return updated == 1;
   }
