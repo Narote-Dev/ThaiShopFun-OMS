@@ -86,7 +86,8 @@ class OrderCancelApiTest extends OrderIntegrationTest {
     registry.add("oms.channel.tsf.retry-wait-base", () -> "10ms");
     registry.add("oms.channel.tsf.retry-wait-max", () -> "20ms");
     registry.add("oms.inbox.hmac-secrets", () -> INBOX_SECRET);
-    registry.add("oms.inbox.worker-enabled", () -> "true");
+    // This suite drives the worker explicitly; a cached scheduler steals later suites' events.
+    registry.add("oms.inbox.worker-enabled", () -> "false");
     registry.add("oms.inbox.jitter-ratio", () -> "0");
     registry.add("oms.security.internal-client-ids", () -> "tsf,tsf-checkout");
   }
