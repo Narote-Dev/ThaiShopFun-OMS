@@ -129,7 +129,7 @@ export default function AppShell({ me, route, userDisplayName, onLogout, childre
             </div>
             <div className="leading-tight">
               <div className="text-[13px] font-semibold tracking-tight">
-                <span className="text-brand-600">ไทยช็อปฟัน</span>
+                ThaiShopFun <span className="text-brand-600">OMS</span>
               </div>
               <div className="text-[11px] text-stone-500">ระบบจัดการออเดอร์</div>
             </div>

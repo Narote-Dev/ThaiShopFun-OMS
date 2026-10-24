@@ -10,7 +10,7 @@ type Props = {
 export default function LoginPage({ error, onSignIn }: Props) {
   return (
     <PageContent className="max-w-lg">
-      <p className="text-[11px] font-semibold uppercase tracking-wider text-brand-700">ไทยช็อปฟัน</p>
+      <p className="text-[11px] font-semibold uppercase tracking-wider text-brand-700">ThaiShopFun</p>
       <PageHeader className="mt-2" title="ระบบจัดการออเดอร์" />
       <p className="mt-2 text-[13px] text-stone-600">เข้าสู่ระบบด้วย TSF เพื่อเปิดร้านค้าของคุณ</p>
       {error ? <p role="alert" className="mt-4 text-[13px] text-red-700">{error}</p> : null}
