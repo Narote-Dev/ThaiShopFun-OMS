@@ -8,9 +8,11 @@ No UI or contract changes are required.
 
 ## Capture, debounce and recovery
 
-An AFTER_COMMIT `StockChanged` listener resolves both the changed SKUs and dependent
-bundles and upserts `stock_push_pending` in a new tenant transaction. A V15 listing
-trigger captures inserts, manual mapping, auto-map, remapping, unmapping, revival,
+A BEFORE_COMMIT `StockChanged` listener resolves both the changed SKUs and dependent
+bundles and upserts `stock_push_pending` in the existing stock transaction.
+Capture requires that transaction (`MANDATORY`) and a matching tenant context.
+It reuses the stock connection, including with a pool of one; it never opens a
+nested transaction or takes stock locks. A V15 listing trigger captures inserts, manual mapping, auto-map, remapping, unmapping, revival,
 seller SKU changes and safety-buffer changes inside their transaction. It does not
 fire when pushed markers are updated. Removed/unmapped listings are filtered later.
 The dirty marker preserves the first change time in each fixed account window;
@@ -27,10 +29,11 @@ first's committed clean state and pushed versions. Outbox append, version state,
 listing `last_exposed_qty` / `last_pushed_version`, and dirty-marker clearing commit
 atomically. Counters increment only after commit. A rollback leaves work dirty.
 
-Pending rows survive process restarts. If a process dies between the stock commit
-and its AFTER_COMMIT capture (or capture fails), the full scan recovers the change
-from inventory versions. Capture failure is logged with tenant id and exception
-class only; a successful stock commit must not be reported as a failed reserve.
+Pending rows survive process restarts. Stock and its dirty marker commit or roll
+back together; a marker write failure aborts the stock transaction and follows the
+engine's existing retry policy. There is no gap between committing stock and
+capturing its marker. The full scan remains a safety net for missing markers and
+older data. Builders still own separate per-account transactions after capture.
 
 ## Versions
 
@@ -50,9 +53,9 @@ and remaps to a SKU with a smaller inventory version. Initial legacy pushed
 markers are also a lower bound. Clean state is deleted only with the listing.
 
 The signature is read before availability. A concurrent stock commit either
-appears in this snapshot or its AFTER_COMMIT marker waits for the state lock and
-schedules another window. Versions are per listing; consumers compare each item,
-not the envelope's aggregate version (the maximum version in that batch).
+appears in this snapshot or waits for the state lock before atomically committing
+stock and its marker, scheduling another window. Versions are per listing;
+consumers compare each item, not the envelope's aggregate version (the maximum version in that batch).
 
 ## Build-time gating
 
@@ -117,6 +120,13 @@ batch splitting, seller SKU fallback and its counter. Every inspected event is
 validated against the unchanged contract. The 200-change lag test prints p95/max
 and writes `backend/target/stock-push-lag.json`; it asserts p95 < 10 seconds using
 commit-return timestamps and successful `sent_at`, plus the receiver timestamp.
+
+`StockPushCaptureTransactionTest` exercises real Spring transaction/event dispatch
+and JDBC connection binding with a single available connection, checks capture
+before commit, rollback, mandatory propagation, tenant matching, and failure
+rollback. `StockPushCaptureAcceptanceTest` verifies marker/stock commit and rollback
+atomically against PostgreSQL. Existing pool-of-one and concurrency tests are
+unchanged.
 
 No Docker is available in this implementation environment. Acceptance and V15
 migration tests are compiled for CI, but their runtime results and measured lag

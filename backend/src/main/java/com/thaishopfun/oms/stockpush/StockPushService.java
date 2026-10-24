@@ -20,6 +20,8 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -53,14 +55,15 @@ public class StockPushService {
     tx.setTimeout(15);
   }
 
-  /** AFTER_COMMIT: no stock locks. A crash before capture is repaired by the full scan. */
+  /** Persist the dirty marker on the stock transaction's connection, atomically with stock. */
+  @Transactional(propagation = Propagation.MANDATORY)
   public void capture(StockChanged change) {
-    inTenant(
-        change.tenantId(),
-        () -> {
-          String[] skus = change.allSkuIds().stream().map(UUID::toString).toArray(String[]::new);
-          jdbc.update(
-              """
+    if (!TenantContext.requireTenantId().equals(change.tenantId())) {
+      throw new IllegalStateException("stock change tenant does not match TenantContext");
+    }
+    String[] skus = change.allSkuIds().stream().map(UUID::toString).toArray(String[]::new);
+    jdbc.update(
+        """
           INSERT INTO stock_push_pending (tenant_id, channel_account_id, listing_id, dirty_since, changed_at)
           SELECT cl.tenant_id, cl.channel_account_id, cl.id, clock_timestamp(), coalesce((
             SELECT max(created_at) FROM inventory_ledger WHERE sku_id = ANY (?::uuid[])
@@ -74,12 +77,10 @@ public class StockPushService {
             SET dirty_since = coalesce(stock_push_pending.dirty_since, EXCLUDED.dirty_since),
                 changed_at = least(stock_push_pending.changed_at, EXCLUDED.changed_at)
           """,
-              ps -> {
-                ps.setArray(1, ps.getConnection().createArrayOf("text", skus));
-                ps.setArray(2, ps.getConnection().createArrayOf("text", skus));
-                ps.setArray(3, ps.getConnection().createArrayOf("text", skus));
-              });
-          return null;
+        ps -> {
+          ps.setArray(1, ps.getConnection().createArrayOf("text", skus));
+          ps.setArray(2, ps.getConnection().createArrayOf("text", skus));
+          ps.setArray(3, ps.getConnection().createArrayOf("text", skus));
         });
   }
 
@@ -188,7 +189,7 @@ public class StockPushService {
           && !listing.removed()
           && (!"CONTROL".equals(account.mode()) || listing.controlled())) {
         // Read the signature BEFORE quantity. A concurrent stock commit is either represented
-        // here or leaves a dirty marker after our pending-row lock is released.
+        // here or commits its dirty marker after our pending-row lock is released.
         Source source = source(listing.id());
         String key = source.key();
         int qty = availability.channelExposed(listing.id());

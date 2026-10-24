@@ -381,7 +381,7 @@ class StockPushAcceptanceTest {
     Catalog c = catalog("ACTIVE");
     assertThat(flush(c, true)).isEqualTo(1);
     reserve(c, 2);
-    // Simulate a process death after the stock commit, before AFTER_COMMIT capture.
+    // Simulate a missing marker (legacy data or external damage); full scan must repair it.
     sql(c, "UPDATE stock_push_pending SET dirty_since = NULL, changed_at = NULL");
     assertThat(flush(c, false)).isZero();
     assertThat(flush(c, true)).isEqualTo(1);

@@ -8,9 +8,10 @@ import java.util.UUID;
  * {@code on_hand} or {@code reserved} changed for these component SKUs. {@code bundleSkuIds} is
  * every bundle that uses one of them, so its derived availability changed too.
  *
- * <p>Published inside the engine transaction. Listen with {@code @TransactionalEventListener(phase
- * = AFTER_COMMIT)}: it is delivered after commit and dropped on rollback. Tenant id and SKU ids
- * only. Mapping it to outbox {@code stock.updated} is T15.
+ * <p>Published inside the engine transaction. Durable stock-push capture listens with
+ * {@code @TransactionalEventListener(phase = BEFORE_COMMIT)} and joins that transaction, so stock
+ * and its dirty marker commit or roll back together without borrowing another connection.
+ * Observational listeners can use {@code AFTER_COMMIT}. Tenant id and SKU ids only.
  */
 public record StockChanged(UUID tenantId, Set<UUID> componentSkuIds, Set<UUID> bundleSkuIds) {
 
