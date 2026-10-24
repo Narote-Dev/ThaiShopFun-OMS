@@ -1,11 +1,12 @@
+import { messageTh } from '../ui/labels'
 import { useEffect, useState, type ReactNode } from 'react'
 import { apiRequest, ApiError, configureApi } from '../api/client'
 import { safeReturn } from '../routing/hash'
 import { AuthContext, type Gate, type Me } from './AuthContext'
 import { bootSession, getSessionDisplayName, logout, resumeLogin, setSessionListener, startLogin } from './session'
 
-const READ_ONLY = 'This shop is read-only until membership is renewed.'
-const SETUP_RETRYING = 'Your shop is being set up. Retrying…'
+const READ_ONLY = 'ร้านค้านี้อ่านได้อย่างเดียวจนกว่าจะต่ออายุสมาชิก'
+const SETUP_RETRYING = 'กำลังตั้งค่าร้านค้าของคุณ กำลังลองอีกครั้ง…'
 
 export default function AuthProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<'booting' | 'anonymous' | 'signed-in'>('booting')
@@ -43,7 +44,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
         setMe(null)
         setGate('setting-up')
         setSetupFailed(true)
-        setSetupMessage(message)
+        setSetupMessage(messageTh(message, 'กำลังตั้งค่าร้านค้าของคุณ'))
       },
       onLoginRequired: () => {
         resumeLogin()
@@ -58,7 +59,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
       if (cancelled) return
       if (result.kind === 'redirecting') return
       if (result.kind === 'anonymous') {
-        setSignInError(result.error)
+        setSignInError(result.error ? messageTh(result.error, 'เข้าสู่ระบบไม่สำเร็จ') : null)
         setStatus('anonymous')
         return
       }
@@ -88,7 +89,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
         setMe(null)
         setGate('setting-up')
         setSetupFailed(true)
-        setSetupMessage(err.message)
+        setSetupMessage(messageTh(err.message, 'ตั้งค่าร้านค้าไม่สำเร็จ'))
         return
       }
       if (err instanceof ApiError && (err.code === 'ENTITLEMENT_INACTIVE' || err.code === 'MEMBERSHIP_REVOKED')) {
@@ -98,7 +99,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
         return
       }
       // Step 2: A failed profile load must not sit on the loading gate.
-      setProfileError(err instanceof Error ? err.message : 'Could not load the shop')
+      setProfileError(messageTh(err instanceof Error ? err.message : null, 'โหลดร้านค้าไม่สำเร็จ'))
     }
   }
 
@@ -106,7 +107,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
     setSignInError(null)
     setStatus('booting')
     void startLogin(safeReturn(window.location.hash || '#/')).catch((err: unknown) => {
-      setSignInError(err instanceof Error ? err.message : 'Sign-in failed')
+      setSignInError(messageTh(err instanceof Error ? err.message : null, 'เข้าสู่ระบบไม่สำเร็จ'))
       setStatus('anonymous')
     })
   }

@@ -15,7 +15,7 @@ vi.mock('./auth/session', () => ({
 describe('App', () => {
   it('shows sign in when boot stays on the manual screen', async () => {
     render(<App />)
-    expect(await screen.findByRole('button', { name: 'Sign in' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'OMS' })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'เข้าสู่ระบบ' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'ระบบจัดการออเดอร์' })).toBeInTheDocument()
   })
 })

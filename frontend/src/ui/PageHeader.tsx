@@ -3,7 +3,7 @@ import { cn } from './cn'
 
 type Props = {
   title: ReactNode
-  /** Overrides the accessible name when visible title differs (e.g. Thai + English for tests). */
+  /** Overrides the accessible name when visible title differs (e.g. an order number with a Thai accessible label). */
   titleAriaLabel?: string
   subtitle?: ReactNode
   actions?: ReactNode

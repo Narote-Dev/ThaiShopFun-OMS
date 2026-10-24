@@ -13,7 +13,7 @@ test('owner browses orders, opens detail with masked phone, requests cancel', as
   test.setTimeout(180_000)
   await page.goto('/')
   await page.getByRole('link', { name: /^Active Shop/ }).click()
-  await expect(page.getByRole('heading', { name: 'Active Shop' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Active Shop', exact: true })).toBeVisible()
 
   const catalog = await request.post('http://127.0.0.1:8080/control/demo/order-catalog')
   expect(catalog.ok()).toBeTruthy()
@@ -21,80 +21,88 @@ test('owner browses orders, opens detail with masked phone, requests cancel', as
   const seed = await request.post('http://127.0.0.1:8090/control/demo/orders-seed')
   expect(seed.ok()).toBeTruthy()
 
-  await page.getByRole('link', { name: 'Orders', exact: true }).click()
-  await expect(page.getByRole('heading', { name: 'Orders' })).toBeVisible()
+  await page.getByRole('navigation', { name: 'เมนูหลัก', exact: true }).getByRole('link', { name: 'ออเดอร์', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'ออเดอร์', exact: true })).toBeVisible()
 
-  const search = page.getByLabel('Search')
+  const search = page.getByRole('main').getByLabel('ค้นหา', { exact: true })
   await expect
     .poll(
       async () => {
         await search.fill('DEMO-COD')
-        await page.getByRole('button', { name: 'Apply' }).click()
-        return await page.getByRole('link', { name: 'DEMO-COD' }).count()
+        await page.getByRole('button', { name: 'ใช้ตัวกรอง', exact: true }).click()
+        return await page.getByRole('link', { name: 'DEMO-COD', exact: true }).count()
       },
       { timeout: 120_000, intervals: [3000] },
     )
     .toBeGreaterThan(0)
 
-  await page.getByRole('link', { name: 'DEMO-COD' }).click()
-  await expect(page.getByRole('heading', { name: 'Order DEMO-COD' })).toBeVisible()
+  await page.getByRole('link', { name: 'DEMO-COD', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'ออเดอร์ DEMO-COD', exact: true })).toBeVisible()
   await expect(page.getByText(/\*\*\*-\*\*\*-/)).toBeVisible()
-  await expect(page.getByRole('list', { name: 'Status timeline' })).not.toBeEmpty()
+  await expect(page.getByRole('list', { name: 'ประวัติการเปลี่ยนสถานะ', exact: true })).not.toBeEmpty()
 
-  await page.getByRole('link', { name: '← Orders' }).click()
-  await page.getByLabel('Hold filter').selectOption('SKU_NOT_MAPPED')
+  await page.getByRole('link', { name: '← ออเดอร์', exact: true }).click()
+  await page.getByRole('main').getByLabel('ตัวกรองการพักออเดอร์', { exact: true }).selectOption('SKU_NOT_MAPPED')
   await search.fill('')
-  await page.getByRole('button', { name: 'Apply' }).click()
+  await page.getByRole('button', { name: 'ใช้ตัวกรอง', exact: true }).click()
   await expect
     .poll(
-      async () => await page.getByRole('link', { name: 'DEMO-UNMAPPED' }).count(),
+      async () => await page.getByRole('link', { name: 'DEMO-UNMAPPED', exact: true }).count(),
       { timeout: 60_000, intervals: [2000] },
     )
     .toBeGreaterThan(0)
-  await page.getByRole('link', { name: 'DEMO-UNMAPPED' }).click()
-  await expect(page.getByRole('list', { name: 'Status timeline' })).not.toBeEmpty()
+  await page.getByRole('link', { name: 'DEMO-UNMAPPED', exact: true }).click()
+  await expect(page.getByRole('list', { name: 'ประวัติการเปลี่ยนสถานะ', exact: true })).not.toBeEmpty()
 
-  await page.getByRole('link', { name: '← Orders' }).click()
-  await page.getByLabel('Hold filter').selectOption('OUT_OF_STOCK')
+  await page.getByRole('link', { name: '← ออเดอร์', exact: true }).click()
+  await page.getByRole('main').getByLabel('ตัวกรองการพักออเดอร์', { exact: true }).selectOption('สต็อกไม่พอ')
   await search.fill('')
-  await page.getByRole('button', { name: 'Apply' }).click()
+  await page.getByRole('button', { name: 'ใช้ตัวกรอง', exact: true }).click()
   await expect
     .poll(
-      async () => await page.getByRole('link', { name: 'DEMO-OOS' }).count(),
+      async () => await page.getByRole('link', { name: 'DEMO-OOS', exact: true }).count(),
       { timeout: 60_000, intervals: [2000] },
     )
     .toBeGreaterThan(0)
 
-  await page.getByRole('link', { name: 'DEMO-OOS' }).click()
-  await expect(page.getByRole('heading', { name: 'Order DEMO-OOS' })).toBeVisible()
+  await page.getByRole('link', { name: 'DEMO-OOS', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'ออเดอร์ DEMO-OOS', exact: true })).toBeVisible()
 
-  await page.getByRole('link', { name: '← Orders' }).click()
-  await page.getByLabel('Hold filter').selectOption('')
+  await page.getByRole('link', { name: '← ออเดอร์', exact: true }).click()
+  await page.getByRole('main').getByLabel('ตัวกรองการพักออเดอร์', { exact: true }).selectOption('')
   await search.fill('DEMO-COD')
-  await page.getByRole('button', { name: 'Apply' }).click()
-  await page.getByRole('link', { name: 'DEMO-COD' }).click()
-  await expect(page.getByRole('heading', { name: 'Order DEMO-COD' })).toBeVisible()
+  await page.getByRole('button', { name: 'ใช้ตัวกรอง', exact: true }).click()
+  await page.getByRole('link', { name: 'DEMO-COD', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'ออเดอร์ DEMO-COD', exact: true })).toBeVisible()
 
-  const cancel = page.getByRole('button', { name: 'Request cancel' })
+  const cancel = page.getByRole('button', { name: 'ขอยกเลิก', exact: true })
   await expect(cancel).toBeVisible({ timeout: 60_000 })
-  page.once('dialog', (dialog) => void dialog.accept())
-  await page.getByLabel('Reason').fill('E2E cancel')
   await cancel.click()
-  await expect(page.getByRole('status')).toContainText('CHANNEL_CANCEL_PENDING', { timeout: 30_000 })
+  const dialog = page.getByRole('dialog', { name: 'ขอยกเลิกออเดอร์', exact: true })
+  await dialog.getByLabel('เหตุผล', { exact: true }).selectOption('อื่นๆ')
+  await dialog.getByLabel('เหตุผลอื่นๆ', { exact: true }).fill('E2E cancel')
+  await dialog.getByRole('button', { name: 'ส่งคำขอยกเลิก', exact: true }).click()
+  await expect(page.getByRole('status')).toContainText('รอยกเลิกจากช่องทาง', { timeout: 30_000 })
+  await expect(page.getByText('รอ TSF ตัดสินคำขอยกเลิก', { exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'ส่งคำขอแล้ว', exact: true })).toBeDisabled()
+  await page.getByRole('link', { name: '← ออเดอร์', exact: true }).click()
+  await page.getByRole('button', { name: /^รอยกเลิก/ }).click()
+  await expect(page.getByRole('link', { name: 'DEMO-COD', exact: true })).toBeVisible()
+
 })
 
 test('owner sync listings shows removed zero for demo catalog', async ({ page, request }) => {
   test.setTimeout(180_000)
   await page.goto('/')
   await page.getByRole('link', { name: /^Active Shop/ }).click()
-  await expect(page.getByRole('heading', { name: 'Active Shop' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Active Shop', exact: true })).toBeVisible()
   const seed = await request.post('http://127.0.0.1:8090/control/demo/orders-seed')
   expect(seed.ok()).toBeTruthy()
   const catalog = await request.post('http://127.0.0.1:8080/control/demo/order-catalog')
   expect(catalog.ok()).toBeTruthy()
   const channelAccountId = (await catalog.json()).channel_account_id as string
   await page.goto(`/#/channel/listings?channel_account_id=${channelAccountId}`)
-  await page.getByRole('button', { name: 'Sync listings' }).click()
+  await page.getByRole('button', { name: 'ซิงก์รายการขาย', exact: true }).click()
   await expect(page.getByText(/ถูกลบจาก TSF 0/)).toBeVisible({ timeout: 90_000 })
 })
 
@@ -106,7 +114,7 @@ test('owner maps unmapped listing via listings UI and order becomes ready to pic
   const token = await ownerToken(request)
   await page.goto('/')
   await page.getByRole('link', { name: /^Active Shop/ }).click()
-  await expect(page.getByRole('heading', { name: 'Active Shop' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Active Shop', exact: true })).toBeVisible()
 
   const seed = await request.post('http://127.0.0.1:8090/control/demo/orders-seed')
   expect(seed.ok()).toBeTruthy()
@@ -141,23 +149,23 @@ test('owner maps unmapped listing via listings UI and order becomes ready to pic
     },
     { channelAccountId },
   )
-  await expect(page.getByRole('heading', { name: 'Channel listings' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'รายการขายจากช่องทาง', exact: true })).toBeVisible()
   await expect(page.getByText('L-demo-missing')).toBeVisible({ timeout: 60_000 })
-  await page.getByRole('button', { name: 'Map' }).first().click()
-  await page.getByLabel('SKU search').fill('DEMO-SKU-READY')
+  await page.getByRole('row').filter({ has: page.getByText('L-demo-missing', { exact: true }) }).getByRole('button', { name: 'จับคู่', exact: true }).click()
+  await page.getByRole('dialog', { name: 'จับคู่ L-demo-missing', exact: true }).getByLabel('ค้นหารหัสสินค้า', { exact: true }).fill('DEMO-SKU-READY')
   await expect(page.getByRole('button', { name: /DEMO-SKU-READY/ })).toBeVisible({
     timeout: 30_000,
   })
   await page.getByRole('button', { name: /DEMO-SKU-READY/ }).click()
-  await page.getByRole('button', { name: 'Save mapping' }).click()
-  await expect(page.getByText(/released 1/)).toBeVisible({ timeout: 90_000 })
+  await page.getByRole('button', { name: 'บันทึกการจับคู่', exact: true }).click()
+  await expect(page.getByText(/ปล่อยออเดอร์แล้ว 1/)).toBeVisible({ timeout: 90_000 })
 
-  await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Orders' }).click()
-  await page.getByLabel('Search').fill('DEMO-UNMAPPED')
-  await page.getByRole('button', { name: 'Apply' }).click()
-  await page.getByRole('link', { name: 'DEMO-UNMAPPED' }).click()
-  await expect(page.getByRole('heading', { name: 'Order DEMO-UNMAPPED' })).toBeVisible()
-  await expect(page.locator('dt:has-text("Fulfillment") + dd')).toHaveText('READY_TO_PICK', {
+  await page.getByRole('navigation', { name: 'เมนูหลัก', exact: true }).getByRole('link', { name: 'ออเดอร์', exact: true }).click()
+  await page.getByRole('main').getByLabel('ค้นหา', { exact: true }).fill('DEMO-UNMAPPED')
+  await page.getByRole('button', { name: 'ใช้ตัวกรอง', exact: true }).click()
+  await page.getByRole('link', { name: 'DEMO-UNMAPPED', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'ออเดอร์ DEMO-UNMAPPED', exact: true })).toBeVisible()
+  await expect(page.locator('dt:has-text("การจัดส่ง") + dd')).toHaveText('รอหยิบ', {
     timeout: 90_000,
   })
 })

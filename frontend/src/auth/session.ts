@@ -90,7 +90,7 @@ async function bootOnce(): Promise<BootResult> {
       sweepBrowserStorage()
       return {
         kind: 'anonymous',
-        error: err instanceof Error ? err.message : 'Sign-in failed',
+        error: err instanceof Error ? err.message : 'เข้าสู่ระบบไม่สำเร็จ',
       }
     }
   }
@@ -111,7 +111,7 @@ async function bootOnce(): Promise<BootResult> {
     manualSignIn = true
     return {
       kind: 'anonymous',
-      error: err instanceof Error ? err.message : 'Sign-in failed',
+      error: err instanceof Error ? err.message : 'เข้าสู่ระบบไม่สำเร็จ',
     }
   }
 }

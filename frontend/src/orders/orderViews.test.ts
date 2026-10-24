@@ -9,6 +9,7 @@ describe('orderViews tabs', () => {
     expect(filtersForTab('ready', dates).fulfillment_status).toBe('READY_TO_PICK')
     expect(filtersForTab('ready', dates).order_status).toBe('ACTIVE')
     expect(filtersForTab('hold', dates).hold_reason).toBe('ANY')
+    expect(filtersForTab('cancel_pending', dates)).toEqual({ ...filtersForTab('all', dates), hold_reason: 'CHANNEL_CANCEL_PENDING' })
     expect(filtersForTab('cancelled', dates).order_status).toBe('CANCELLED')
   })
 
@@ -16,6 +17,7 @@ describe('orderViews tabs', () => {
     expect(tabFromFilters(filtersForTab('all', dates))).toBe('all')
     expect(tabFromFilters(filtersForTab('ready', dates))).toBe('ready')
     expect(tabFromFilters(filtersForTab('hold', dates))).toBe('hold')
+    expect(tabFromFilters(filtersForTab('cancel_pending', dates))).toBe('cancel_pending')
     expect(tabFromFilters(filtersForTab('cancelled', dates))).toBe('cancelled')
     expect(
       tabFromFilters({

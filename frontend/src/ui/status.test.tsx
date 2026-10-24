@@ -25,17 +25,17 @@ describe('status mapping', () => {
       order_status: 'CANCELLED',
       fulfillment_status: 'READY_TO_PICK',
       hold_reason: 'OUT_OF_STOCK',
-    }).label).toBe('CANCELLED')
+    }).label).toBe('ยกเลิกแล้ว')
     expect(resolveOrderDisplayStatus({
       order_status: 'ACTIVE',
       fulfillment_status: 'READY_TO_PICK',
       hold_reason: 'SKU_NOT_MAPPED',
-    }).label).toBe('ON HOLD')
+    }).label).toBe('พักออเดอร์')
     expect(resolveOrderDisplayStatus({
       order_status: 'ACTIVE',
       fulfillment_status: 'READY_TO_PICK',
       hold_reason: 'NONE',
-    }).label).toBe('READY_TO_PICK')
+    }).label).toBe('รอหยิบ')
   })
 
   it('renders order display badge', () => {
@@ -46,6 +46,6 @@ describe('status mapping', () => {
         hold_reason="NONE"
       />,
     )
-    expect(screen.getByText('UNFULFILLED')).toBeInTheDocument()
+    expect(screen.getByText('ยังไม่จัดส่ง')).toBeInTheDocument()
   })
 })

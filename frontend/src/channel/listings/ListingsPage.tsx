@@ -3,6 +3,7 @@ import type { Me } from '../../auth/AuthContext'
 import { catalogApi, type Sku } from '../../catalog/api'
 import { Badge } from '../../ui/Badge'
 import { Button } from '../../ui/Button'
+import { ConfirmationDialog } from '../../ui/ConfirmationDialog'
 import { Card } from '../../ui/Card'
 import { Dialog } from '../../ui/Dialog'
 import {
@@ -16,6 +17,7 @@ import { Input } from '../../ui/Input'
 import { Label } from '../../ui/Label'
 import { PageContent } from '../../ui/PageContent'
 import { PageHeader } from '../../ui/PageHeader'
+import { labelTh } from '../../ui/labels'
 import { Select } from '../../ui/Select'
 import { listingsAccess } from './access'
 import { AlertBanner } from '../../ui/Alert'
@@ -104,6 +106,7 @@ export default function ListingsPage({ me }: { me: Me }) {
   const [skuHits, setSkuHits] = useState<Sku[]>([])
   const [activeListing, setActiveListing] = useState<ChannelListing | null>(null)
   const [busy, setBusy] = useState(false)
+  const [unmapListing, setUnmapListing] = useState<ChannelListing | null>(null)
   const searchDebounceBoot = useRef(true)
   const channelAccountLoadBoot = useRef(false)
 
@@ -192,7 +195,7 @@ export default function ListingsPage({ me }: { me: Me }) {
         setError('')
       })
       .catch((err: unknown) => {
-        if (active) setError(listingsMessage(err, 'Could not load listings'))
+        if (active) setError(listingsMessage(err, 'โหลดรายการขายไม่สำเร็จ'))
       })
     return () => {
       active = false
@@ -216,15 +219,14 @@ export default function ListingsPage({ me }: { me: Me }) {
       setItems(page.items)
       setTotal(page.total)
     } catch (err: unknown) {
-      setError(listingsMessage(err, 'Mapping failed'))
+      setError(listingsMessage(err, 'จับคู่ไม่สำเร็จ'))
     } finally {
       setBusy(false)
     }
   }
 
   async function unmap(listing: ChannelListing) {
-    const ok = window.confirm(`Unmap ${listing.external_sku_id}?`)
-    if (!ok) return
+    if (busy) return
     setBusy(true)
     try {
       await listingsApi.deleteMapping(listing.id)
@@ -232,7 +234,7 @@ export default function ListingsPage({ me }: { me: Me }) {
       setItems(page.items)
       setTotal(page.total)
     } catch (err: unknown) {
-      setError(listingsMessage(err, 'Unmap failed'))
+      setError(listingsMessage(err, 'ยกเลิกการจับคู่ไม่สำเร็จ'))
     } finally {
       setBusy(false)
     }
@@ -249,7 +251,7 @@ export default function ListingsPage({ me }: { me: Me }) {
       setItems(page.items)
       setTotal(page.total)
     } catch (err: unknown) {
-      setError(listingsMessage(err, 'Sync failed'))
+      setError(listingsMessage(err, 'ซิงก์ไม่สำเร็จ'))
     } finally {
       setBusy(false)
     }
@@ -279,22 +281,22 @@ export default function ListingsPage({ me }: { me: Me }) {
       <PageHeader
         title={
           <>
-            <span className="sr-only">Channel listings</span>
-            <span aria-hidden="true">Listings</span>
+            <span className="sr-only">รายการขายจากช่องทาง</span>
+            <span aria-hidden="true">รายการขาย</span>
           </>
         }
       />
       <Card className="mt-4">
         <div className="grid gap-4 p-4 sm:grid-cols-2 lg:grid-cols-4">
           <div>
-            <Label htmlFor="listings-account">Channel account</Label>
+            <Label htmlFor="listings-account">บัญชีช่องทาง</Label>
             <Select
               id="listings-account"
-              aria-label="Channel account"
+              aria-label="บัญชีช่องทาง"
               value={channelAccountId}
               onChange={(e) => setChannelAccountId(e.target.value)}
             >
-              <option value="">Select account…</option>
+              <option value="">เลือกบัญชี…</option>
               {accounts.map((row) => (
                 <option key={row.id} value={row.id}>
                   {row.external_shop_id} ({row.id.slice(0, 8)}…)
@@ -303,38 +305,38 @@ export default function ListingsPage({ me }: { me: Me }) {
             </Select>
           </div>
           <div>
-            <Label htmlFor="listings-mapped">Mapped</Label>
+            <Label htmlFor="listings-mapped">จับคู่แล้ว</Label>
             <Select
               id="listings-mapped"
-              aria-label="Mapped filter"
+              aria-label="ตัวกรองการจับคู่"
               value={mappedFilter}
               onChange={(e) => setMappedFilter(e.target.value as 'unmapped' | 'mapped' | 'all')}
             >
-              <option value="unmapped">Unmapped first</option>
-              <option value="mapped">Mapped</option>
-              <option value="all">All</option>
+              <option value="unmapped">ยังไม่จับคู่ก่อน</option>
+              <option value="mapped">จับคู่แล้ว</option>
+              <option value="all">ทั้งหมด</option>
             </Select>
           </div>
           <div>
-            <Label htmlFor="listings-search">Search</Label>
+            <Label htmlFor="listings-search">ค้นหา</Label>
             <Input
               id="listings-search"
               value={searchDraft}
               onChange={(e) => setSearchDraft(e.target.value)}
-              aria-label="Search listings"
+              aria-label="ค้นหารายการขาย"
             />
           </div>
           <div className="flex flex-wrap items-end gap-2">
             <Button type="button" variant="primary" onClick={() => void applyFilters()}>
-              Apply
+              ใช้ตัวกรอง
             </Button>
             {access.canWrite ? (
               <Button type="button" variant="secondary" disabled={busy || !channelAccountId} onClick={() => void syncListings()}>
-                Sync listings
+                ซิงก์รายการขาย
               </Button>
             ) : (
               <p role="status" className="text-[13px] text-stone-600">
-                Read-only{access.grace ? ' (GRACE)' : ''}
+                อ่านอย่างเดียว{access.grace ? ' (รอต่ออายุ)' : ''}
               </p>
             )}
           </div>
@@ -346,11 +348,11 @@ export default function ListingsPage({ me }: { me: Me }) {
         </AlertBanner>
       ) : null}
       {syncResult ? (
-        <Card className="mt-4 p-4" role="status" aria-label="ผลการซิงก์ listings">
+        <Card className="mt-4 p-4" role="status" aria-label="ผลการซิงก์รายการขาย">
           <p className="text-[13px] text-stone-800">
-            ดึงมา {syncResult.fetched} · สร้างใหม่ {syncResult.created} · อัปเดต {syncResult.updated} · map
+            ดึงมา {syncResult.fetched} · สร้างใหม่ {syncResult.created} · อัปเดต {syncResult.updated} · จับคู่
             อัตโนมัติ {syncResult.auto_mapped} · กลับมาขาย {syncResult.revived} · ถูกลบจาก TSF{' '}
-            {syncResult.removed} · ประมวลผล hold {syncResult.reevaluated_orders} · รอคิว{' '}
+            {syncResult.removed} · ประมวลผลออเดอร์ค้าง {syncResult.reevaluated_orders} · รอคิว{' '}
             {syncResult.deferred}
           </p>
         </Card>
@@ -377,21 +379,21 @@ export default function ListingsPage({ me }: { me: Me }) {
       </FilterBar>
       {summary ? (
         <p role="status" className="mt-2 text-[13px] text-stone-600">
-          Re-evaluated: released {summary.released}, out of stock {summary.out_of_stock}, still held{' '}
-          {summary.still_held}, deferred {summary.deferred}
+          ตรวจสอบอีกครั้ง: ปล่อยออเดอร์แล้ว {summary.released}, สต็อกไม่พอ {summary.out_of_stock}, ยังพักอยู่{' '}
+          {summary.still_held}, รอดำเนินการภายหลัง {summary.deferred}
         </p>
       ) : null}
       {error ? <p role="alert" className="mt-4 text-[13px] text-red-700">{error}</p> : null}
       <div className="mt-4">
-        <DataTable aria-label="Channel listings">
+        <DataTable aria-label="รายการขายจากช่องทาง">
           <DataTableHead>
             <tr>
-              <DataTableTh>External SKU</DataTableTh>
-              <DataTableTh>Seller SKU</DataTableTh>
-              <DataTableTh>Name</DataTableTh>
-              <DataTableTh>Mapped</DataTableTh>
-              <DataTableTh>Source</DataTableTh>
-              <DataTableTh>Held orders</DataTableTh>
+              <DataTableTh>รหัสสินค้าจากช่องทาง</DataTableTh>
+              <DataTableTh>รหัสสินค้าผู้ขาย</DataTableTh>
+              <DataTableTh>ชื่อ</DataTableTh>
+              <DataTableTh>จับคู่แล้ว</DataTableTh>
+              <DataTableTh>ที่มา</DataTableTh>
+              <DataTableTh>ออเดอร์ค้าง</DataTableTh>
               <DataTableTh />
             </tr>
           </DataTableHead>
@@ -401,9 +403,9 @@ export default function ListingsPage({ me }: { me: Me }) {
                 <DataTableCell>
                   {row.external_sku_id}
                   {row.removed_at ? (
-                    <Badge variant="muted" className="ml-1 normal-case" title="Removed on channel">
+                    <Badge variant="muted" className="ml-1 normal-case" title="ถูกลบจากช่องทาง">
                       {' '}
-                      removed
+                      ถูกลบแล้ว
                     </Badge>
                   ) : null}
                 </DataTableCell>
@@ -412,19 +414,19 @@ export default function ListingsPage({ me }: { me: Me }) {
                 <DataTableCell>
                   {row.sku_id
                     ? `${row.sku_code ?? row.sku_id}${row.sku_name ? ` — ${row.sku_name}` : ''}`
-                    : 'Not mapped'}
+                    : 'ยังไม่จับคู่'}
                 </DataTableCell>
-                <DataTableCell>{row.mapping_source ?? '—'}</DataTableCell>
+                <DataTableCell>{labelTh(row.mapping_source, 'mapping_source')}</DataTableCell>
                 <DataTableCell>{row.held_orders}</DataTableCell>
                 <DataTableCell>
                   {access.canWrite && !row.removed_at ? (
                     <div className="flex flex-wrap gap-2">
                       <Button type="button" size="sm" onClick={() => openMapPicker(row)}>
-                        Map
+                        จับคู่
                       </Button>
                       {row.sku_id ? (
-                        <Button type="button" size="sm" variant="ghost" onClick={() => void unmap(row)}>
-                          Unmap
+                        <Button type="button" size="sm" variant="ghost" onClick={() => setUnmapListing(row)}>
+                          ยกเลิกการจับคู่
                         </Button>
                       ) : null}
                     </div>
@@ -435,7 +437,7 @@ export default function ListingsPage({ me }: { me: Me }) {
           </tbody>
         </DataTable>
       </div>
-      <p className="mt-4 text-[13px] text-stone-600">{total} listings</p>
+      <p className="mt-4 text-[13px] text-stone-600">{total} รายการขาย</p>
       <div className="mt-2 flex flex-wrap gap-2">
         <Button
           type="button"
@@ -447,7 +449,7 @@ export default function ListingsPage({ me }: { me: Me }) {
             writeHash(channelAccountId, mappedFilter, removedOnly, searchDraft, next)
           }}
         >
-          Previous
+          ก่อนหน้า
         </Button>
         <Button
           type="button"
@@ -459,7 +461,7 @@ export default function ListingsPage({ me }: { me: Me }) {
             writeHash(channelAccountId, mappedFilter, removedOnly, searchDraft, next)
           }}
         >
-          Next
+          ถัดไป
         </Button>
       </div>
       <Dialog
@@ -467,14 +469,14 @@ export default function ListingsPage({ me }: { me: Me }) {
         onOpenChange={(open) => {
           if (!open) closeMapPicker()
         }}
-        title={activeListing ? `Map ${activeListing.external_sku_id}` : 'Map listing'}
+        title={activeListing ? `จับคู่ ${activeListing.external_sku_id}` : 'จับคู่รายการขาย'}
       >
         <div className="space-y-4">
           <div>
-            <Label htmlFor="picker-sku-search">SKU search</Label>
+            <Label htmlFor="picker-sku-search">ค้นหารหัสสินค้า</Label>
             <Input
               id="picker-sku-search"
-              aria-label="SKU search"
+              aria-label="ค้นหารหัสสินค้า"
               value={skuQuery}
               onChange={(e) => setSkuQuery(e.target.value)}
             />
@@ -492,17 +494,20 @@ export default function ListingsPage({ me }: { me: Me }) {
               </li>
             ))}
           </ul>
-          {pickerSku ? <p className="text-[13px] text-stone-600">Selected: {pickerSku.sku_code}</p> : null}
+          {pickerSku ? <p className="text-[13px] text-stone-600">เลือกแล้ว: {pickerSku.sku_code}</p> : null}
           <div className="flex flex-wrap gap-2">
             <Button type="button" variant="primary" disabled={busy || !pickerSku} onClick={() => void saveMapping()}>
-              Save mapping
+              บันทึกการจับคู่
             </Button>
             <Button type="button" variant="secondary" onClick={() => closeMapPicker()}>
-              Cancel
+              ยกเลิก
             </Button>
           </div>
         </div>
       </Dialog>
+      <ConfirmationDialog open={unmapListing !== null} onOpenChange={(open) => { if (!open) setUnmapListing(null) }} danger
+        title="ยกเลิกการจับคู่รหัสสินค้า" description={`ยกเลิกการจับคู่ ${unmapListing?.external_sku_id ?? ''}?`}
+        onConfirm={() => { if (unmapListing) void unmap(unmapListing) }} />
     </PageContent>
   )
 }

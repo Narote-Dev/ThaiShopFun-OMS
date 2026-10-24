@@ -8,6 +8,7 @@ import {
   DataTableRow,
   DataTableTh,
 } from '../ui/DataTable'
+import { labelTh } from '../ui/labels'
 import { Input } from '../ui/Input'
 import { Label } from '../ui/Label'
 import { PageContent } from '../ui/PageContent'
@@ -32,7 +33,7 @@ export default function ProductsPage({ canWrite }: { canWrite: boolean }) {
         setNames(Object.fromEntries(page.items.map((p) => [p.id, p.name])))
       })
       .catch((err: unknown) => {
-        if (active) setError(messageFor(err, 'Could not load products'))
+        if (active) setError(messageFor(err, 'โหลดสินค้าไม่สำเร็จ'))
       })
     return () => {
       active = false
@@ -57,7 +58,7 @@ export default function ProductsPage({ canWrite }: { canWrite: boolean }) {
 
   async function create(event: FormEvent) {
     event.preventDefault()
-    if (await run(() => catalogApi.createProduct(newName.trim()), 'Could not create the product')) setNewName('')
+    if (await run(() => catalogApi.createProduct(newName.trim()), 'สร้างสินค้าไม่สำเร็จ')) setNewName('')
   }
 
   return (
@@ -65,8 +66,8 @@ export default function ProductsPage({ canWrite }: { canWrite: boolean }) {
       <PageHeader
         title={
           <>
-            <span aria-hidden="true">สินค้า (Products)</span>
-            <span className="sr-only">Products</span>
+            <span aria-hidden="true">สินค้า</span>
+            <span className="sr-only">สินค้า</span>
           </>
         }
       />
@@ -74,24 +75,24 @@ export default function ProductsPage({ canWrite }: { canWrite: boolean }) {
         <Card className="mt-4">
           <form className="flex flex-wrap items-end gap-4 p-4" onSubmit={create}>
             <div className="min-w-[200px] flex-1">
-              <Label htmlFor="products-new-name">New product name</Label>
+              <Label htmlFor="products-new-name">ชื่อสินค้าใหม่</Label>
               <Input id="products-new-name" value={newName} onChange={(event) => setNewName(event.target.value)} />
             </div>
             <Button type="submit" variant="primary" disabled={busy || newName.trim() === ''}>
-              Add product
+              เพิ่มสินค้า
             </Button>
           </form>
         </Card>
       ) : null}
       {error ? <p role="alert" className="mt-4 text-[13px] text-red-700">{error}</p> : null}
       <div className="mt-4">
-        <DataTable aria-label="Products">
+        <DataTable aria-label="สินค้า">
           <DataTableHead>
             <tr>
-              <DataTableTh>Name</DataTableTh>
-              <DataTableTh>Status</DataTableTh>
-              <DataTableTh>SKUs</DataTableTh>
-              {canWrite ? <DataTableTh>Actions</DataTableTh> : null}
+              <DataTableTh>ชื่อ</DataTableTh>
+              <DataTableTh>สถานะ</DataTableTh>
+              <DataTableTh>รหัสสินค้า</DataTableTh>
+              {canWrite ? <DataTableTh>การดำเนินการ</DataTableTh> : null}
             </tr>
           </DataTableHead>
           <tbody>
@@ -100,7 +101,7 @@ export default function ProductsPage({ canWrite }: { canWrite: boolean }) {
                 <DataTableCell>
                   {canWrite ? (
                     <Input
-                      aria-label={`Name of ${product.name}`}
+                      aria-label={`ชื่อของ ${product.name}`}
                       value={names[product.id] ?? ''}
                       onChange={(event) => setNames({ ...names, [product.id]: event.target.value })}
                       className="mt-0"
@@ -109,7 +110,7 @@ export default function ProductsPage({ canWrite }: { canWrite: boolean }) {
                     product.name
                   )}
                 </DataTableCell>
-                <DataTableCell>{product.status}</DataTableCell>
+                <DataTableCell>{labelTh(product.status)}</DataTableCell>
                 <DataTableCell>{product.sku_count}</DataTableCell>
                 {canWrite ? (
                   <DataTableCell>
@@ -121,19 +122,19 @@ export default function ProductsPage({ canWrite }: { canWrite: boolean }) {
                         onClick={() =>
                           void run(
                             () => catalogApi.updateProduct(product.id, names[product.id].trim(), product.status),
-                            'Could not rename the product',
+                            'เปลี่ยนชื่อสินค้าไม่สำเร็จ',
                           )
                         }
                       >
-                        Rename
+                        เปลี่ยนชื่อ
                       </Button>
                       <Button
                         type="button"
                         size="sm"
                         disabled={busy || product.status === 'INACTIVE'}
-                        onClick={() => void run(() => catalogApi.archiveProduct(product.id), 'Could not archive')}
+                        onClick={() => void run(() => catalogApi.archiveProduct(product.id), 'เก็บถาวรไม่สำเร็จ')}
                       >
-                        Archive
+                        เก็บถาวร
                       </Button>
                     </div>
                   </DataTableCell>

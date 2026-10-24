@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import BundleEditor from './BundleEditor'
 import { Button } from '../ui/Button'
+import { ConfirmationDialog } from '../ui/ConfirmationDialog'
 import { Card } from '../ui/Card'
 import { Input } from '../ui/Input'
 import { Label } from '../ui/Label'
@@ -51,6 +52,7 @@ export default function SkuFormPage({ id, canWrite }: { id: string | null; canWr
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [busy, setBusy] = useState(false)
+  const [deleteOpen, setDeleteOpen] = useState(false)
   const [loaded, setLoaded] = useState(false)
 
   // Step 1: Load the product list and, when editing, the SKU with its components.
@@ -69,7 +71,7 @@ export default function SkuFormPage({ id, canWrite }: { id: string | null; canWr
         setLoaded(true)
       })
       .catch((err: unknown) => {
-        if (active) setError(messageFor(err, 'Could not load the SKU'))
+        if (active) setError(messageFor(err, 'โหลดรหัสสินค้าไม่สำเร็จ'))
       })
     return () => {
       active = false
@@ -85,7 +87,7 @@ export default function SkuFormPage({ id, canWrite }: { id: string | null; canWr
     // Step 2: Build the body. Weight is optional and must be a whole number.
     const weight = draft.weight.trim() === '' ? null : Number(draft.weight)
     if (weight !== null && (!Number.isInteger(weight) || weight < 0)) {
-      setError('Weight must be a whole number of grams.')
+      setError('น้ำหนักต้องเป็นจำนวนเต็มหน่วยกรัม')
       return
     }
     const input: SkuInput = {
@@ -106,27 +108,27 @@ export default function SkuFormPage({ id, canWrite }: { id: string | null; canWr
         const saved = await catalogApi.updateSku(sku.id, input)
         setSku(saved)
         setDraft(draftOf(saved))
-        setNotice('Saved.')
+        setNotice('บันทึกแล้ว')
       } else {
         const created = await catalogApi.createSku(input)
         window.location.hash = `#/catalog/skus/${created.id}`
       }
     } catch (err) {
-      setError(messageFor(err, 'Could not save the SKU'))
+      setError(messageFor(err, 'บันทึกรหัสสินค้าไม่สำเร็จ'))
     } finally {
       setBusy(false)
     }
   }
 
   async function remove() {
-    if (!sku || !window.confirm(`Delete ${sku.sku_code}?`)) return
+    if (!sku || busy || !canWrite) return
     setBusy(true)
     setError('')
     try {
       await catalogApi.deleteSku(sku.id)
       window.location.hash = '#/catalog/skus'
     } catch (err) {
-      setError(messageFor(err, 'Could not delete the SKU'))
+      setError(messageFor(err, 'ลบรหัสสินค้าไม่สำเร็จ'))
     } finally {
       setBusy(false)
     }
@@ -134,20 +136,20 @@ export default function SkuFormPage({ id, canWrite }: { id: string | null; canWr
 
   // Defaults must settle before edits; a late product response used to replace the selection.
   const readOnly = !canWrite || !loaded
-  const heading = id ? (sku ? sku.sku_code : 'SKU') : 'New SKU'
+  const heading = id ? (sku ? sku.sku_code : 'รหัสสินค้า') : 'เพิ่มรหัสสินค้า'
   return (
     <PageContent>
       <p className="text-[13px]">
         <a href="#/catalog/skus" className="font-medium text-brand-700 hover:underline">
-          Back to SKUs
+          กลับไปรายการรหัสสินค้า
         </a>
       </p>
       <PageHeader className="mt-2" title={heading} />
-      {!canWrite ? <p className="mt-2 text-[13px] text-stone-600">You can view this SKU. Only an OWNER or ADMIN can change it.</p> : null}
+      {!canWrite ? <p className="mt-2 text-[13px] text-stone-600">คุณดูรหัสสินค้านี้ได้ เฉพาะเจ้าของร้านหรือผู้ดูแลระบบเท่านั้นที่แก้ไขได้</p> : null}
       <Card className="mt-4">
         <form className="grid gap-4 p-5 sm:grid-cols-2" onSubmit={submit}>
           <div>
-            <Label htmlFor="sku-product">Product</Label>
+            <Label htmlFor="sku-product">สินค้า</Label>
             <Select
               id="sku-product"
               value={draft.productId}
@@ -157,15 +159,15 @@ export default function SkuFormPage({ id, canWrite }: { id: string | null; canWr
               {products.map((product) => (
                 <option key={product.id} value={product.id}>
                   {product.name}
-                  {product.status === 'INACTIVE' ? ' (archived)' : ''}
+                  {product.status === 'INACTIVE' ? ' (เก็บถาวรแล้ว)' : ''}
                 </option>
               ))}
-              {!sku ? <option value={NEW_PRODUCT}>New product…</option> : null}
+              {!sku ? <option value={NEW_PRODUCT}>สินค้าใหม่…</option> : null}
             </Select>
           </div>
           {draft.productId === NEW_PRODUCT ? (
             <div>
-              <Label htmlFor="sku-new-product">New product name</Label>
+              <Label htmlFor="sku-new-product">ชื่อสินค้าใหม่</Label>
               <Input
                 id="sku-new-product"
                 value={draft.productName}
@@ -175,15 +177,15 @@ export default function SkuFormPage({ id, canWrite }: { id: string | null; canWr
             </div>
           ) : null}
           <div>
-            <Label htmlFor="sku-code">SKU code</Label>
+            <Label htmlFor="sku-code">รหัสสินค้า</Label>
             <Input id="sku-code" value={draft.code} disabled={readOnly} onChange={(event) => set('code', event.target.value)} />
           </div>
           <div>
-            <Label htmlFor="sku-name">Name</Label>
+            <Label htmlFor="sku-name">ชื่อ</Label>
             <Input id="sku-name" value={draft.name} disabled={readOnly} onChange={(event) => set('name', event.target.value)} />
           </div>
           <div>
-            <Label htmlFor="sku-barcode">Barcode</Label>
+            <Label htmlFor="sku-barcode">บาร์โค้ด</Label>
             <Input
               id="sku-barcode"
               value={draft.barcode}
@@ -192,7 +194,7 @@ export default function SkuFormPage({ id, canWrite }: { id: string | null; canWr
             />
           </div>
           <div>
-            <Label htmlFor="sku-weight">Weight (g)</Label>
+            <Label htmlFor="sku-weight">น้ำหนัก (กรัม)</Label>
             <Input
               id="sku-weight"
               inputMode="numeric"
@@ -210,19 +212,19 @@ export default function SkuFormPage({ id, canWrite }: { id: string | null; canWr
                 disabled={readOnly}
                 onChange={(event) => set('bundle', event.target.checked)}
               />
-              Bundle (made of other SKUs)
+              สินค้าชุด (ประกอบด้วยสินค้าอื่น)
             </Label>
           </div>
           {sku && !sku.is_bundle && sku.on_hand !== null ? (
             <p className="sm:col-span-2 text-[13px] text-stone-600">
-              On hand {sku.on_hand} · reserved {sku.reserved ?? 0}
+              คงเหลือ {sku.on_hand} · จอง {sku.reserved ?? 0}
             </p>
           ) : null}
           {/* Change: T08A stock history link. */}
           {sku && !sku.is_bundle ? (
             <p className="sm:col-span-2 text-[13px]">
               <a href={`#/catalog/skus/${sku.id}/history`} className="font-medium text-brand-700 hover:underline">
-                Stock history
+                ประวัติสต็อก
               </a>
             </p>
           ) : null}
@@ -235,11 +237,11 @@ export default function SkuFormPage({ id, canWrite }: { id: string | null; canWr
           {canWrite ? (
             <div className="flex flex-wrap gap-2 sm:col-span-2">
               <Button type="submit" variant="primary" disabled={busy || !loaded}>
-                {sku ? 'Save' : 'Create SKU'}
+                {sku ? 'บันทึก' : 'สร้างรหัสสินค้า'}
               </Button>
               {sku ? (
-                <Button type="button" variant="danger" disabled={busy} onClick={() => void remove()}>
-                  Delete
+                <Button type="button" variant="danger" disabled={busy} onClick={() => setDeleteOpen(true)}>
+                  ลบ
                 </Button>
               ) : null}
             </div>
@@ -251,6 +253,8 @@ export default function SkuFormPage({ id, canWrite }: { id: string | null; canWr
           <BundleEditor key={sku.id} sku={sku} canWrite={canWrite} onSaved={setSku} />
         </div>
       ) : null}
+      <ConfirmationDialog open={deleteOpen} onOpenChange={setDeleteOpen} danger
+        title="ลบรหัสสินค้า" description={`ลบ ${sku?.sku_code ?? ''}?`} onConfirm={() => void remove()} />
     </PageContent>
   )
 }

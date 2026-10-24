@@ -17,10 +17,10 @@ it('shows the PDPA banner and province/postcode without masked or empty fields',
   } }))
   configureApi({ getAccessToken: () => 't', fetchImpl })
   render(<OrderDetailPage id="o1" me={{ tenant: { id: 't', name: 'ร้าน', membership_tier: 'PRO', tsf_shop_id: 's' }, role: 'STAFF', entitlement: { status: 'ACTIVE', expires_at: null, ent_ver: 1 } }} />)
-  expect(await screen.findByText('ข้อมูลผู้รับถูกลบตามนโยบาย PDPA แล้ว (เหลือจังหวัด/รหัสไปรษณีย์)')).toBeInTheDocument()
+  expect(await screen.findByText('ข้อมูลผู้รับถูกลบตามนโยบายคุ้มครองข้อมูลส่วนบุคคล แล้ว (เหลือจังหวัด/รหัสไปรษณีย์)')).toBeInTheDocument()
   expect(screen.getByText('กรุงเทพมหานคร 10110')).toBeInTheDocument()
   expect(screen.queryByText('ส***')).not.toBeInTheDocument()
   expect(screen.queryByText('***-***-1234')).not.toBeInTheDocument()
-  const shipping = screen.getByText('การจัดส่ง').parentElement?.parentElement
+  const shipping = screen.getByText('ข้อมูลการจัดส่ง').parentElement?.parentElement
   expect(shipping?.textContent).not.toContain('—')
 })

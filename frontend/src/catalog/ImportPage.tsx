@@ -8,6 +8,7 @@ import {
   DataTableRow,
   DataTableTh,
 } from '../ui/DataTable'
+import { labelTh, importErrorTh } from '../ui/labels'
 import { Input } from '../ui/Input'
 import { Label } from '../ui/Label'
 import { PageContent } from '../ui/PageContent'
@@ -16,9 +17,9 @@ import { catalogApi, ImportInvalidError, messageFor, type ImportResult, type Imp
 
 const SAMPLE =
   'product_name,sku_code,sku_name,barcode,weight_g,is_bundle,components\n' +
-  'T-Shirt,TS-RED-M,Red T-Shirt M,8850000000011,180,false,\n' +
-  'T-Shirt,TS-RED-L,Red T-Shirt L,8850000000028,200,false,\n' +
-  'Gift set,SET-RED,Red T-Shirt pair,,,true,TS-RED-M:1|TS-RED-L:1\n'
+  'เสื้อยืด,TS-RED-M,เสื้อยืดแดงขนาดกลาง,8850000000011,180,false,\n' +
+  'เสื้อยืด,TS-RED-L,เสื้อยืดแดงขนาดใหญ่,8850000000028,200,false,\n' +
+  'ชุดของขวัญ,SET-RED,เสื้อยืดแดงคู่,,,true,TS-RED-M:1|TS-RED-L:1\n'
 
 export default function ImportPage({ canWrite }: { canWrite: boolean }) {
   const [file, setFile] = useState<File | null>(null)
@@ -39,10 +40,10 @@ export default function ImportPage({ canWrite }: { canWrite: boolean }) {
     } catch (err) {
       // Step 1: All-or-nothing. A rejected file lists every bad row; nothing was imported.
       if (err instanceof ImportInvalidError) {
-        setError(err.message)
+        setError('ข้อมูลในไฟล์ไม่ถูกต้อง ยังไม่ได้นำเข้าข้อมูล')
         setRowErrors(err.errors)
       } else {
-        setError(messageFor(err, 'Import failed'))
+        setError(messageFor(err, 'นำเข้าไม่สำเร็จ'))
       }
     } finally {
       setBusy(false)
@@ -54,60 +55,67 @@ export default function ImportPage({ canWrite }: { canWrite: boolean }) {
       <PageHeader
         title={
           <>
-            <span aria-hidden="true">นำเข้าข้อมูล (Import)</span>
-            <span className="sr-only">Import catalog</span>
+            <span aria-hidden="true">นำเข้าข้อมูล</span>
+            <span className="sr-only">นำเข้าข้อมูลสินค้า</span>
           </>
         }
       />
       <p className="mt-4 text-[13px] leading-relaxed text-stone-600">
-        UTF-8 CSV with a header row. Columns: <code className="rounded bg-stone-100 px-1">product_name, sku_code, sku_name, barcode, weight_g,
-        is_bundle, components</code>. <code className="rounded bg-stone-100 px-1">components</code> is <code className="rounded bg-stone-100 px-1">CODE:qty|CODE:qty</code> and may name SKUs
-        anywhere in the file. An existing <code className="rounded bg-stone-100 px-1">sku_code</code> is updated, so the same file can be imported
-        again. For an existing SKU, an optional column left out of the header keeps the stored value; an empty
-        cell clears it. Products are matched by <code className="rounded bg-stone-100 px-1">product_name</code>. If any row is wrong, nothing is imported.
+        ใช้ไฟล์ซีเอสวีที่เข้ารหัสยูทีเอฟแปดและมีแถวหัวตาราง โดยใช้ชื่อคอลัมน์ตามตัวอย่างด้านล่าง
+        คอลัมน์ส่วนประกอบใช้รูปแบบ รหัสสินค้า:จำนวน คั่นแต่ละรายการด้วยเครื่องหมาย | และอ้างถึงสินค้าได้ทุกตำแหน่งในไฟล์
+        หากรหัสสินค้ามีอยู่แล้ว ระบบจะแก้ไขข้อมูล จึงนำเข้าไฟล์เดิมซ้ำได้
+        สำหรับสินค้าที่มีอยู่แล้ว การละคอลัมน์ที่ไม่บังคับจะเก็บค่าเดิมไว้ ส่วนช่องว่างจะล้างค่า
+        ระบบจับคู่สินค้าด้วยชื่อ หากแถวใดผิดพลาด ระบบจะไม่นำเข้าทั้งไฟล์
       </p>
       <details className="mt-4 text-[13px]">
-        <summary className="cursor-pointer font-medium text-stone-800">Example</summary>
+        <summary className="cursor-pointer font-medium text-stone-800">ตัวอย่าง</summary>
         <pre className="mt-2 overflow-x-auto rounded-lg border border-stone-200 bg-stone-50 p-3 text-[12px]">{SAMPLE}</pre>
       </details>
       {canWrite ? (
         <Card className="mt-4">
           <form className="flex flex-wrap items-end gap-4 p-4" onSubmit={upload}>
             <div>
-              <Label htmlFor="import-csv">CSV file</Label>
+              <Label htmlFor="import-csv">ไฟล์ซีเอสวี</Label>
               <Input
                 id="import-csv"
                 type="file"
                 accept=".csv,text/csv"
-                className="py-1.5 file:mr-3 file:rounded-md file:border-0 file:bg-stone-100 file:px-3 file:text-[13px] file:font-medium"
+                className="sr-only"
+                tabIndex={-1}
                 onChange={(event) => setFile(event.target.files?.[0] ?? null)}
               />
+              <div className="mt-1 flex items-center gap-3">
+                <Button type="button" variant="secondary" onClick={() => document.getElementById('import-csv')?.click()}>
+                  เลือกไฟล์
+                </Button>
+                <span className="text-[13px] text-stone-600">{file?.name ?? 'ยังไม่ได้เลือกไฟล์'}</span>
+              </div>
             </div>
             <Button type="submit" variant="primary" disabled={busy || !file}>
-              {busy ? 'Importing…' : 'Import'}
+              {busy ? 'กำลังนำเข้า…' : 'นำเข้าข้อมูล'}
             </Button>
           </form>
         </Card>
       ) : (
-        <p className="mt-4 text-[13px] text-stone-600">Only an OWNER or ADMIN can import, and not while the shop is read-only.</p>
+        <p className="mt-4 text-[13px] text-stone-600">เฉพาะเจ้าของร้านหรือผู้ดูแลระบบเท่านั้นที่นำเข้าได้ และร้านค้าต้องไม่อยู่ในโหมดอ่านอย่างเดียว</p>
       )}
       {error ? <p role="alert" className="mt-4 text-[13px] text-red-700">{error}</p> : null}
       {rowErrors.length > 0 ? (
         <div className="mt-4">
-          <DataTable aria-label="Row errors">
+          <DataTable aria-label="ข้อผิดพลาดรายแถว">
             <DataTableHead>
               <tr>
-                <DataTableTh>Row</DataTableTh>
-                <DataTableTh>Column</DataTableTh>
-                <DataTableTh>Error</DataTableTh>
+                <DataTableTh>แถว</DataTableTh>
+                <DataTableTh>คอลัมน์</DataTableTh>
+                <DataTableTh>ข้อผิดพลาด</DataTableTh>
               </tr>
             </DataTableHead>
             <tbody>
               {rowErrors.map((row, index) => (
                 <DataTableRow key={`${row.row}-${row.column ?? ''}-${index}`}>
                   <DataTableCell>{row.row}</DataTableCell>
-                  <DataTableCell>{row.column ?? '—'}</DataTableCell>
-                  <DataTableCell>{row.error}</DataTableCell>
+                  <DataTableCell>{labelTh(row.column)}</DataTableCell>
+                  <DataTableCell>{importErrorTh(row.error)}</DataTableCell>
                 </DataTableRow>
               ))}
             </tbody>
@@ -116,9 +124,9 @@ export default function ImportPage({ canWrite }: { canWrite: boolean }) {
       ) : null}
       {result ? (
         <p className="mt-4 text-[13px] text-stone-700">
-          Imported {result.rows} rows: {result.skus_created} created, {result.skus_updated} updated,{' '}
-          {result.skus_unchanged} unchanged, {result.bundles_replaced} bundles updated, {result.products_created}{' '}
-          new products.
+          นำเข้าแล้ว {result.rows} แถว: {result.skus_created} สร้างใหม่, {result.skus_updated} แก้ไข,{' '}
+          {result.skus_unchanged} ไม่เปลี่ยนแปลง, {result.bundles_replaced} สินค้าชุดที่แก้ไข, {result.products_created}{' '}
+          สินค้าใหม่
         </p>
       ) : null}
     </PageContent>

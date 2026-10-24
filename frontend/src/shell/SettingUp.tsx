@@ -11,13 +11,13 @@ export default function SettingUp({ message, onRetry }: Props) {
   return (
     <PageContent className="max-w-lg">
       <p className="text-[11px] font-semibold uppercase tracking-wider text-brand-700">ThaiShopFun</p>
-      <PageHeader className="mt-2" title="Setting up your shop" />
+      <PageHeader className="mt-2" title="กำลังตั้งค่าร้านค้า" />
       <p role="status" className="mt-4 text-[13px] text-stone-600">
         {message}
       </p>
       {onRetry ? (
         <Button type="button" variant="primary" className="mt-6" onClick={onRetry}>
-          Retry
+          ลองอีกครั้ง
         </Button>
       ) : null}
     </PageContent>

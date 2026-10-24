@@ -4,7 +4,7 @@
  *
  * Signs in once (in-memory OIDC); navigates via sidebar hash links — no full reload after auth.
  */
-import { chromium } from '@playwright/test'
+import { chromium, expect } from '@playwright/test'
 import { mkdir } from 'node:fs/promises'
 import path from 'node:path'
 
@@ -20,11 +20,12 @@ async function signInOnce(page) {
 
 async function navTo(page, ariaLabel) {
   await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: ariaLabel }).click()
-  await page.waitForTimeout(600)
+  const headings = { Dashboard: 'Active Shop', Orders: 'Orders', SKUs: 'SKUs', Products: 'Products', Import: 'Import catalog', Warehouses: 'Warehouses', 'Stock documents': 'Stock documents', Listings: 'Channel listings', 'Hold queue': 'Hold queue', 'Dead outbox': 'Dead outbox' }
+  await page.getByRole('heading', { name: headings[ariaLabel], exact: true }).waitFor()
 }
 
 async function capture(page, name) {
-  await page.waitForTimeout(400)
+  await page.evaluate(() => document.fonts.ready)
   await page.screenshot({ path: path.join(outDir, `${name}.png`), fullPage: true })
 }
 
@@ -45,6 +46,22 @@ await capture(page, 'orders')
 await page.getByRole('link', { name: 'DEMO-UNMAPPED' }).click()
 await page.getByRole('heading', { name: 'Order DEMO-UNMAPPED' }).waitFor({ timeout: 60_000 })
 await capture(page, 'order-detail-demo')
+
+await navTo(page, 'Orders')
+await page.getByRole('link', { name: 'DEMO-COD', exact: true }).click()
+await page.getByRole('heading', { name: 'Order DEMO-COD' }).waitFor()
+await page.getByRole('button', { name: 'ขอยกเลิก', exact: true }).click()
+const cancelDialog = page.getByRole('dialog', { name: 'ขอยกเลิกออเดอร์' })
+await cancelDialog.getByLabel('เหตุผล', { exact: true }).selectOption('ลูกค้าขอยกเลิก')
+await capture(page, 'cancel-request-dialog')
+await cancelDialog.getByRole('button', { name: 'ส่งคำขอยกเลิก' }).click()
+await page.getByText('รอ TSF ตัดสินคำขอยกเลิก', { exact: true }).waitFor()
+await capture(page, 'cancel-pending-banner')
+await navTo(page, 'Orders')
+await page.getByRole('button', { name: /^รอยกเลิก/ }).click()
+await page.getByRole('link', { name: 'DEMO-COD', exact: true }).waitFor()
+await expect(page.getByRole('button', { name: /^รอยกเลิก/ })).toContainText(/\d/)
+await capture(page, 'orders-cancel-pending-tab')
 
 // Capture the same cancelled order before and after the local/e2e-only control.
 await navTo(page, 'Orders')
@@ -73,6 +90,20 @@ await capture(page, 'warehouses')
 await navTo(page, 'Stock documents')
 await capture(page, 'stock-documents')
 
+await page.getByLabel('New document type').selectOption('RECEIVE')
+await page.getByRole('form', { name: 'New stock document' }).getByLabel('Reference no.').fill('UI-CANCEL-SCREENSHOT')
+await page.getByRole('button', { name: 'Create document' }).click()
+await page.getByRole('heading', { name: 'Receive · DRAFT' }).waitFor()
+const addLine = page.getByRole('form', { name: 'Add line' })
+await addLine.getByLabel('SKU code').fill('DEMO-SKU-READY')
+await addLine.getByLabel('Qty').fill('1')
+await addLine.getByRole('button', { name: 'Add line' }).click()
+await page.getByRole('table', { name: 'Lines' }).getByText('DEMO-SKU-READY', { exact: true }).waitFor()
+await page.getByRole('button', { name: 'Post', exact: true }).click()
+await page.getByRole('dialog', { name: 'ลงบัญชีเอกสารสต็อก' }).waitFor()
+await capture(page, 'stock-post-dialog')
+await page.getByRole('dialog').getByRole('button', { name: 'ยกเลิก', exact: true }).click()
+
 await navTo(page, 'Listings')
 await capture(page, 'listings')
 const syncBtn = page.getByRole('button', { name: 'Sync listings' })
@@ -82,7 +113,7 @@ if (await syncBtn.isVisible().catch(() => false)) {
   await capture(page, 'listings-sync-result')
 }
 await page.getByRole('button', { name: 'ถูกลบจาก TSF' }).click().catch(() => {})
-await page.waitForTimeout(400)
+await page.getByRole('button', { name: 'ถูกลบจาก TSF' }).waitFor()
 await capture(page, 'listings-removed-filter')
 
 await navTo(page, 'Hold queue')

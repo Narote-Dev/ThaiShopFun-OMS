@@ -1,13 +1,14 @@
 import type { OrderFilters } from './api'
 import { bangkokTodayIso } from '../ui/format'
 
-export type OrdersTabId = 'all' | 'ready' | 'hold' | 'cancelled'
+export type OrdersTabId = 'all' | 'ready' | 'hold' | 'cancelled' | 'cancel_pending'
 
 export const ORDER_TAB_LABELS: Record<OrdersTabId, string> = {
   all: 'ทั้งหมด',
   ready: 'รอหยิบ',
-  hold: 'ค้าง (Hold)',
+  hold: 'ค้าง',
   cancelled: 'ยกเลิก',
+  cancel_pending: 'รอยกเลิก',
 }
 
 export const FULFILLMENT_FILTER_VALUES = [
@@ -65,6 +66,8 @@ export function filtersForTab(tab: OrdersTabId, dates: DateScope): OrderFilters 
       return { ...base, fulfillment_status: 'READY_TO_PICK', order_status: 'ACTIVE' }
     case 'hold':
       return { ...base, hold_reason: 'ANY' }
+    case 'cancel_pending':
+      return { ...base, hold_reason: 'CHANNEL_CANCEL_PENDING' }
     case 'cancelled':
       return { ...base, order_status: 'CANCELLED' }
     default:
@@ -77,6 +80,7 @@ export function tabFromFilters(filters: OrderFilters): OrdersTabId {
   if (filters.order_status === 'CANCELLED') {
     return 'cancelled'
   }
+  if (filters.hold_reason === 'CHANNEL_CANCEL_PENDING') return 'cancel_pending'
   if (filters.hold_reason === 'ANY' && !filters.fulfillment_status && filters.order_status !== 'CANCELLED') {
     return 'hold'
   }

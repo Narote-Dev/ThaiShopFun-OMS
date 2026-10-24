@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { configureApi, resetApiForTests } from '../../api/client'
 import type { Me } from '../../auth/AuthContext'
@@ -25,6 +25,21 @@ afterEach(() => {
 })
 
 describe('ListingsPage', () => {
+  it('opens an unmap Dialog and cancelling makes no API call', async () => {
+    const { fetchImpl, calls } = stubFetch(({ url }) => {
+      if (url.includes('/channel-accounts')) return { body: { items: [{ id: 'ca-1', channel: 'TSF', external_shop_id: 'shop', status: 'CONNECTED' }] } }
+      return { body: { items: [{ id: 'l1', channel_account_id: 'ca-1', external_sku_id: 'L-x', seller_sku: 'X', name: 'Item', sku_id: 'sku-1', sku_code: 'SKU-1', mapping_source: 'MANUAL', mapped_at: null, stock_control: true, held_orders: 0 }], total: 1, limit: 25, offset: 0 } }
+    })
+    configureApi({ getAccessToken: () => 't', fetchImpl })
+    render(<ListingsPage me={owner} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'ยกเลิกการจับคู่' }))
+    expect(screen.getByRole('dialog', { name: 'ยกเลิกการจับคู่รหัสสินค้า' })).toHaveTextContent('L-x')
+    expect(calls.filter((call) => call.method !== 'GET')).toHaveLength(0)
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'ยกเลิก' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(calls.filter((call) => call.method !== 'GET')).toHaveLength(0)
+  })
+
   it('maps filters to query string and hides write controls for STAFF', async () => {
     const { fetchImpl, calls } = stubFetch(({ url, init }) => {
       if (url.includes('/channel-accounts') && !url.includes('listing-syncs')) {
@@ -60,7 +75,7 @@ describe('ListingsPage', () => {
     configureApi({ getAccessToken: () => 't', fetchImpl })
     render(<ListingsPage me={staff} />)
     await screen.findByText('L-x')
-    expect(screen.queryByRole('button', { name: 'Sync listings' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'ซิงก์รายการขาย' })).toBeNull()
     await waitFor(() =>
       expect(calls.some((c) => c.url.includes('mapped=false'))).toBe(true),
     )
@@ -122,12 +137,12 @@ describe('ListingsPage', () => {
     configureApi({ getAccessToken: () => 't', fetchImpl })
     render(<ListingsPage me={owner} />)
     await screen.findByText('L-x')
-    fireEvent.click(screen.getByRole('button', { name: 'Map' }))
-    fireEvent.change(screen.getByLabelText('SKU search'), { target: { value: 'DEMO' } })
+    fireEvent.click(screen.getByRole('button', { name: 'จับคู่' }))
+    fireEvent.change(screen.getByLabelText('ค้นหารหัสสินค้า'), { target: { value: 'DEMO' } })
     await screen.findByRole('button', { name: /DEMO/ })
     fireEvent.click(screen.getByRole('button', { name: /DEMO/ }))
-    fireEvent.click(screen.getByRole('button', { name: 'Save mapping' }))
-    await screen.findByText(/released 1/)
+    fireEvent.click(screen.getByRole('button', { name: 'บันทึกการจับคู่' }))
+    await screen.findByText(/ปล่อยออเดอร์แล้ว 1/)
   })
 
   it('shows removed badge when removed_at is set', async () => {
@@ -162,7 +177,7 @@ describe('ListingsPage', () => {
     })
     configureApi({ getAccessToken: () => 't', fetchImpl })
     render(<ListingsPage me={owner} />)
-    await screen.findByText('removed')
+    await screen.findByText('ถูกลบแล้ว')
     expect(screen.getByText('L-gone')).toBeTruthy()
   })
 
@@ -218,16 +233,16 @@ describe('ListingsPage', () => {
     configureApi({ getAccessToken: () => 't', fetchImpl })
     render(<ListingsPage me={owner} />)
     await screen.findByText('L-one')
-    fireEvent.click(screen.getAllByRole('button', { name: 'Map' })[0])
-    fireEvent.change(screen.getByLabelText('SKU search'), { target: { value: 'DEMO' } })
+    fireEvent.click(screen.getAllByRole('button', { name: 'จับคู่' })[0])
+    fireEvent.change(screen.getByLabelText('ค้นหารหัสสินค้า'), { target: { value: 'DEMO' } })
     await screen.findByRole('button', { name: /DEMO/ })
     fireEvent.click(screen.getByRole('button', { name: /DEMO/ }))
-    expect(screen.getByText('Selected: DEMO')).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
-    expect(screen.queryByText('Selected: DEMO')).toBeNull()
-    fireEvent.click(screen.getAllByRole('button', { name: 'Map' })[1])
-    expect(screen.queryByText('Selected: DEMO')).toBeNull()
-    expect(screen.getByText('Map L-two')).toBeTruthy()
+    expect(screen.getByText('เลือกแล้ว: DEMO')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'ยกเลิก' }))
+    expect(screen.queryByText('เลือกแล้ว: DEMO')).toBeNull()
+    fireEvent.click(screen.getAllByRole('button', { name: 'จับคู่' })[1])
+    expect(screen.queryByText('เลือกแล้ว: DEMO')).toBeNull()
+    expect(screen.getByText('จับคู่ L-two')).toBeTruthy()
   })
 
   it('renders sync result counts and removal_skipped warning', async () => {
@@ -254,8 +269,8 @@ describe('ListingsPage', () => {
     })
     configureApi({ getAccessToken: () => 't', fetchImpl })
     render(<ListingsPage me={owner} />)
-    await screen.findByRole('button', { name: 'Sync listings' })
-    fireEvent.click(screen.getByRole('button', { name: 'Sync listings' }))
+    await screen.findByRole('button', { name: 'ซิงก์รายการขาย' })
+    fireEvent.click(screen.getByRole('button', { name: 'ซิงก์รายการขาย' }))
     await screen.findByText(/ดึงมา 4/)
     expect(screen.getByText(/ถูกลบจาก TSF 0/)).toBeTruthy()
     expect(screen.getByText(/ไม่ได้ลบรายการจาก TSF/)).toBeTruthy()
@@ -314,7 +329,7 @@ describe('ListingsPage', () => {
       listingCall?.url.includes('mapped=all') || !listingCall?.url.includes('mapped='),
     ).toBe(true)
     await screen.findByText('L-removed-mapped')
-    expect(screen.queryByRole('button', { name: 'Map' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'จับคู่' })).toBeNull()
     expect(screen.getByRole('button', { name: 'ถูกลบจาก TSF' }).getAttribute('aria-pressed')).toBe(
       'true',
     )
@@ -335,7 +350,7 @@ describe('ListingsPage', () => {
     configureApi({ getAccessToken: () => 't', fetchImpl })
     render(<ListingsPage me={owner} />)
     await vi.runOnlyPendingTimersAsync()
-    fireEvent.change(screen.getByLabelText('Search listings'), { target: { value: 'widget' } })
+    fireEvent.change(screen.getByLabelText('ค้นหารายการขาย'), { target: { value: 'widget' } })
     await vi.advanceTimersByTimeAsync(400)
     expect(window.location.hash).not.toContain('offset=25')
     expect(window.location.hash).toContain('q=widget')

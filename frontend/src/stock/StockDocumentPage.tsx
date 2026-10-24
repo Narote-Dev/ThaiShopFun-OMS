@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { catalogApi, type Sku, type Warehouse } from '../catalog/api'
 import { Button } from '../ui/Button'
+import { ConfirmationDialog } from '../ui/ConfirmationDialog'
 import { Card } from '../ui/Card'
 import {
   DataTable,
@@ -13,6 +14,7 @@ import { Input } from '../ui/Input'
 import { Label } from '../ui/Label'
 import { PageContent } from '../ui/PageContent'
 import { PageHeader } from '../ui/PageHeader'
+import { labelTh, messageTh } from '../ui/labels'
 import { Select } from '../ui/Select'
 import type { StockAccess } from './access'
 import {
@@ -61,6 +63,7 @@ export default function StockDocumentPage({ id, access }: { id: string; access: 
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [busy, setBusy] = useState(false)
+  const [confirmation, setConfirmation] = useState<'post' | 'void' | 'delete' | null>(null)
   const [version, setVersion] = useState(0)
 
   // Step 1: Load the document and the warehouses (the first list creates MAIN).
@@ -77,7 +80,7 @@ export default function StockDocumentPage({ id, access }: { id: string; access: 
         setNewWarehouse((current) => current || (list.items.find((w) => w.is_default)?.id ?? list.items[0]?.id ?? ''))
       })
       .catch((err: unknown) => {
-        if (active) setError(stockMessage(err, 'Could not load the document'))
+        if (active) setError(stockMessage(err, 'โหลดเอกสารไม่สำเร็จ'))
       })
     return () => {
       active = false
@@ -123,7 +126,7 @@ export default function StockDocumentPage({ id, access }: { id: string; access: 
     const qty = whole(edit.qty)
     const counted = whole(edit.counted)
     if (Number.isNaN(qty) || Number.isNaN(counted)) {
-      setError('Quantities must be whole numbers.')
+      setError('จำนวนต้องเป็นจำนวนเต็ม')
       return null
     }
     const input: LineInput = { warehouse_id: edit.warehouse || null }
@@ -137,7 +140,7 @@ export default function StockDocumentPage({ id, access }: { id: string; access: 
     event.preventDefault()
     const input = lineInput({ warehouse: newWarehouse, qty: newQty, counted: newCounted, reason: newReason })
     if (!input) return
-    const ok = await run(() => stockApi.addLine(id, { ...input, sku_code: skuCode.trim() }), 'Could not add the line')
+    const ok = await run(() => stockApi.addLine(id, { ...input, sku_code: skuCode.trim() }), 'เพิ่มรายการไม่สำเร็จ')
     if (ok) {
       setSkuCode('')
       setNewQty('')
@@ -149,7 +152,7 @@ export default function StockDocumentPage({ id, access }: { id: string; access: 
   function saveLine(line: DocumentLine) {
     const input = lineInput(edits[line.id] ?? editOf(line))
     if (!input) return
-    void run(() => stockApi.updateLine(id, line.id, { ...input, sku_id: line.sku_id }), 'Could not save the line', 'Line saved.')
+    void run(() => stockApi.updateLine(id, line.id, { ...input, sku_id: line.sku_id }), 'บันทึกรายการไม่สำเร็จ', 'บันทึกรายการแล้ว')
   }
 
   function setEdit(lineId: string, key: keyof RowEdit, value: string) {
@@ -157,24 +160,24 @@ export default function StockDocumentPage({ id, access }: { id: string; access: 
   }
 
   function post() {
-    if (!doc || !window.confirm(`Post this ${TYPE_LABELS[doc.type].toLowerCase()}? Stock changes right away.`)) return
+    if (!doc || busy) return
     void run(async () => {
       const result = await stockApi.post(id)
-      setNotice(`Posted. ${result.movements.length} ledger entries written.`)
-    }, 'Could not post the document')
+      setNotice(`ลงบัญชีแล้ว บันทึกความเคลื่อนไหว ${result.movements.length} รายการ`)
+    }, 'ลงบัญชีเอกสารไม่สำเร็จ')
   }
 
   function voidDocument() {
-    if (!doc || !window.confirm('Void this document? Every stock change it made is reversed.')) return
+    if (!doc || busy) return
     void run(async () => {
       const result = await stockApi.voidDocument(id)
-      setNotice(`Voided. ${result.movements.length} reversing entries written.`)
-    }, 'Could not void the document')
+      setNotice(`ยกเลิกแล้ว บันทึกรายการกลับบัญชี ${result.movements.length} รายการ`)
+    }, 'ยกเลิกเอกสารไม่สำเร็จ')
   }
 
   async function remove() {
-    if (!window.confirm('Delete this draft?')) return
-    if (await run(() => stockApi.deleteDocument(id), 'Could not delete the draft')) window.location.hash = '#/stock/documents'
+    if (busy) return
+    if (await run(() => stockApi.deleteDocument(id), 'ลบฉบับร่างไม่สำเร็จ')) window.location.hash = '#/stock/documents'
   }
 
   function problemFor(line: DocumentLine): LineProblem | undefined {
@@ -189,10 +192,10 @@ export default function StockDocumentPage({ id, access }: { id: string; access: 
       <PageContent>
         <p className="text-[13px]">
           <a href="#/stock/documents" className="font-medium text-brand-700 hover:underline">
-            Back to stock documents
+            กลับไปเอกสารสต็อก
           </a>
         </p>
-        {error ? <p role="alert" className="mt-4 text-[13px] text-red-700">{error}</p> : <p role="status" className="mt-4 text-[13px] text-stone-600">Loading…</p>}
+        {error ? <p role="alert" className="mt-4 text-[13px] text-red-700">{error}</p> : <p role="status" className="mt-4 text-[13px] text-stone-600">กำลังโหลด…</p>}
       </PageContent>
     )
   }
@@ -206,42 +209,42 @@ export default function StockDocumentPage({ id, access }: { id: string; access: 
     <PageContent wide>
       <p className="text-[13px]">
         <a href="#/stock/documents" className="font-medium text-brand-700 hover:underline">
-          Back to stock documents
+          กลับไปเอกสารสต็อก
         </a>
       </p>
       <PageHeader
         className="mt-2"
         title={
           <>
-            {TYPE_LABELS[doc.type]} · {doc.status}
+            {TYPE_LABELS[doc.type]} · {labelTh(doc.status)}
           </>
         }
       />
       {count && doc.count_started_at ? (
-        <p className="mt-2 text-[13px] text-stone-600">Count started {new Date(doc.count_started_at).toLocaleString()}</p>
+        <p className="mt-2 text-[13px] text-stone-600">เริ่มตรวจนับแล้ว {new Date(doc.count_started_at).toLocaleString()}</p>
       ) : null}
-      {doc.posted_at ? <p className="text-[13px] text-stone-600">Posted {new Date(doc.posted_at).toLocaleString()}</p> : null}
-      {!access.canEdit ? <p className="text-[13px] text-stone-600">This shop is read-only.</p> : null}
+      {doc.posted_at ? <p className="text-[13px] text-stone-600">ลงบัญชีแล้ว {new Date(doc.posted_at).toLocaleString()}</p> : null}
+      {!access.canEdit ? <p className="text-[13px] text-stone-600">ร้านค้านี้อ่านได้อย่างเดียว</p> : null}
       <Card className="mt-4">
         <form
           className="flex flex-wrap items-end gap-4 p-4"
-          aria-label="Document header"
+          aria-label="หัวเอกสาร"
           onSubmit={(event) => {
             event.preventDefault()
-            void run(() => stockApi.updateDocument(id, reference.trim() || null, note.trim() || null), 'Could not save', 'Saved.')
+            void run(() => stockApi.updateDocument(id, reference.trim() || null, note.trim() || null), 'บันทึกไม่สำเร็จ', 'บันทึกแล้ว')
           }}
         >
           <div className="min-w-[160px] flex-1">
-            <Label htmlFor="doc-ref">Reference no.</Label>
+            <Label htmlFor="doc-ref">เลขที่อ้างอิง</Label>
             <Input id="doc-ref" value={reference} disabled={!editable} onChange={(event) => setReference(event.target.value)} />
           </div>
           <div className="min-w-[160px] flex-1">
-            <Label htmlFor="doc-note">Note</Label>
+            <Label htmlFor="doc-note">หมายเหตุ</Label>
             <Input id="doc-note" value={note} disabled={!editable} onChange={(event) => setNote(event.target.value)} />
           </div>
           {editable ? (
             <Button type="submit" variant="primary" disabled={busy}>
-              Save header
+              บันทึกหัวเอกสาร
             </Button>
           ) : null}
         </form>
@@ -249,17 +252,17 @@ export default function StockDocumentPage({ id, access }: { id: string; access: 
       {error ? <p role="alert" className="mt-4 text-[13px] text-red-700">{error}</p> : null}
       {notice ? <p role="status" className="mt-2 text-[13px] text-stone-600">{notice}</p> : null}
       <div className="mt-4">
-        <DataTable aria-label="Lines">
+        <DataTable aria-label="รายการ">
           <DataTableHead>
             <tr>
-              <DataTableTh>SKU</DataTableTh>
-              <DataTableTh>Warehouse</DataTableTh>
-              {count ? <DataTableTh>System at start</DataTableTh> : null}
-              {count ? <DataTableTh>Counted</DataTableTh> : <DataTableTh>Qty</DataTableTh>}
-              {reasons ? <DataTableTh>Reason</DataTableTh> : null}
-              <DataTableTh>On hand / reserved</DataTableTh>
-              <DataTableTh>Problem</DataTableTh>
-              {editable ? <DataTableTh>Actions</DataTableTh> : null}
+              <DataTableTh>รหัสสินค้า</DataTableTh>
+              <DataTableTh>คลังสินค้า</DataTableTh>
+              {count ? <DataTableTh>ยอดระบบเมื่อเริ่มนับ</DataTableTh> : null}
+              {count ? <DataTableTh>ตรวจนับแล้ว</DataTableTh> : <DataTableTh>จำนวน</DataTableTh>}
+              {reasons ? <DataTableTh>เหตุผล</DataTableTh> : null}
+              <DataTableTh>คงเหลือ / จอง</DataTableTh>
+              <DataTableTh>ปัญหา</DataTableTh>
+              {editable ? <DataTableTh>การดำเนินการ</DataTableTh> : null}
             </tr>
           </DataTableHead>
           <tbody>
@@ -274,7 +277,7 @@ export default function StockDocumentPage({ id, access }: { id: string; access: 
                   <DataTableCell>
                     {editable ? (
                       <Select
-                        aria-label={`Warehouse for ${line.sku_code}`}
+                        aria-label={`คลังสินค้าสำหรับ ${line.sku_code}`}
                         value={edit.warehouse}
                         className="mt-0"
                         onChange={(event) => setEdit(line.id, 'warehouse', event.target.value)}
@@ -293,7 +296,7 @@ export default function StockDocumentPage({ id, access }: { id: string; access: 
                   <DataTableCell>
                     {editable ? (
                       <Input
-                        aria-label={`${count ? 'Counted' : 'Qty'} for ${line.sku_code}`}
+                        aria-label={`${count ? 'ตรวจนับแล้ว' : 'จำนวน'} สำหรับ ${line.sku_code}`}
                         inputMode="numeric"
                         value={count ? edit.counted : edit.qty}
                         className="mt-0"
@@ -309,41 +312,41 @@ export default function StockDocumentPage({ id, access }: { id: string; access: 
                     <DataTableCell>
                       {editable ? (
                         <Select
-                          aria-label={`Reason for ${line.sku_code}`}
+                          aria-label={`เหตุผลสำหรับ ${line.sku_code}`}
                           value={edit.reason}
                           className="mt-0"
                           onChange={(event) => setEdit(line.id, 'reason', event.target.value)}
                         >
-                          <option value="">No reason</option>
+                          <option value="">ไม่ระบุเหตุผล</option>
                           {ADJUSTMENT_REASONS.map((r) => (
                             <option key={r} value={r}>
-                              {r}
+                              {labelTh(r)}
                             </option>
                           ))}
                         </Select>
                       ) : (
-                        (line.reason_code ?? '')
+                        (line.reason_code ? labelTh(line.reason_code) : '')
                       )}
                     </DataTableCell>
                   ) : null}
                   <DataTableCell>
                     {line.on_hand ?? 0} / {line.reserved ?? 0}
                   </DataTableCell>
-                  <DataTableCell>{problem ? <span role="alert">{`${problem.error}: ${problem.message}`}</span> : null}</DataTableCell>
+                  <DataTableCell>{problem ? <span role="alert">{messageTh(problem.message, labelTh(problem.error))}</span> : null}</DataTableCell>
                   {editable ? (
                     <DataTableCell>
                       <div className="flex flex-wrap gap-2">
                         <Button type="button" size="sm" disabled={busy} onClick={() => saveLine(line)}>
-                          Save
+                          บันทึก
                         </Button>
                         <Button
                           type="button"
                           size="sm"
                           variant="ghost"
                           disabled={busy}
-                          onClick={() => void run(() => stockApi.deleteLine(id, line.id), 'Could not remove the line')}
+                          onClick={() => void run(() => stockApi.deleteLine(id, line.id), 'นำรายการออกไม่สำเร็จ')}
                         >
-                          Remove
+                          นำออก
                         </Button>
                       </div>
                     </DataTableCell>
@@ -354,12 +357,12 @@ export default function StockDocumentPage({ id, access }: { id: string; access: 
           </tbody>
         </DataTable>
       </div>
-      {lines.length === 0 ? <p className="mt-4 text-[13px] text-stone-600">No lines yet.</p> : null}
+      {lines.length === 0 ? <p className="mt-4 text-[13px] text-stone-600">ยังไม่มีรายการ</p> : null}
       {editable ? (
         <Card className="mt-4">
-          <form className="grid gap-4 p-4 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5" onSubmit={addLine} aria-label="Add line">
+          <form className="grid gap-4 p-4 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5" onSubmit={addLine} aria-label="เพิ่มรายการ">
             <div>
-              <Label htmlFor="add-line-sku">SKU code</Label>
+              <Label htmlFor="add-line-sku">รหัสสินค้า</Label>
               <Input id="add-line-sku" list="stock-sku-options" value={skuCode} onChange={(event) => setSkuCode(event.target.value)} />
             </div>
             <datalist id="stock-sku-options">
@@ -370,7 +373,7 @@ export default function StockDocumentPage({ id, access }: { id: string; access: 
               ))}
             </datalist>
             <div>
-              <Label htmlFor="add-line-wh">Warehouse</Label>
+              <Label htmlFor="add-line-wh">คลังสินค้า</Label>
               <Select id="add-line-wh" value={newWarehouse} onChange={(event) => setNewWarehouse(event.target.value)}>
                 {warehouses.map((w) => (
                   <option key={w.id} value={w.id}>
@@ -381,7 +384,7 @@ export default function StockDocumentPage({ id, access }: { id: string; access: 
             </div>
             {count ? (
               <div>
-                <Label htmlFor="add-line-counted">Counted qty</Label>
+                <Label htmlFor="add-line-counted">จำนวนที่นับได้</Label>
                 <Input
                   id="add-line-counted"
                   inputMode="numeric"
@@ -391,18 +394,18 @@ export default function StockDocumentPage({ id, access }: { id: string; access: 
               </div>
             ) : (
               <div>
-                <Label htmlFor="add-line-qty">Qty</Label>
+                <Label htmlFor="add-line-qty">จำนวน</Label>
                 <Input id="add-line-qty" inputMode="numeric" value={newQty} onChange={(event) => setNewQty(event.target.value)} />
               </div>
             )}
             {reasons ? (
               <div>
-                <Label htmlFor="add-line-reason">Reason</Label>
+                <Label htmlFor="add-line-reason">เหตุผล</Label>
                 <Select id="add-line-reason" value={newReason} onChange={(event) => setNewReason(event.target.value)}>
-                  <option value="">No reason</option>
+                  <option value="">ไม่ระบุเหตุผล</option>
                   {ADJUSTMENT_REASONS.map((r) => (
                     <option key={r} value={r}>
-                      {r}
+                      {labelTh(r)}
                     </option>
                   ))}
                 </Select>
@@ -410,7 +413,7 @@ export default function StockDocumentPage({ id, access }: { id: string; access: 
             ) : null}
             <div className="flex items-end">
               <Button type="submit" variant="primary" disabled={busy || skuCode.trim() === ''}>
-                Add line
+                เพิ่มรายการ
               </Button>
             </div>
           </form>
@@ -422,30 +425,35 @@ export default function StockDocumentPage({ id, access }: { id: string; access: 
             type="button"
             variant="secondary"
             disabled={busy}
-            onClick={() => void run(() => stockApi.startCount(id), 'Could not start the count', 'Count started.')}
+            onClick={() => void run(() => stockApi.startCount(id), 'เริ่มตรวจนับไม่สำเร็จ', 'เริ่มตรวจนับแล้ว')}
           >
-            Start count
+            เริ่มตรวจนับ
           </Button>
         ) : null}
         {draft && access.canPost(doc.type) ? (
-          <Button type="button" variant="primary" disabled={busy || lines.length === 0} onClick={post}>
-            Post
+          <Button type="button" variant="primary" disabled={busy || lines.length === 0} onClick={() => setConfirmation('post')}>
+            ลงบัญชี
           </Button>
         ) : null}
         {draft && !access.canPost(doc.type) && access.canEdit ? (
-          <span className="text-[13px] text-stone-600">Only an OWNER or ADMIN can post this document.</span>
+          <span className="text-[13px] text-stone-600">เฉพาะเจ้าของร้านหรือผู้ดูแลระบบเท่านั้นที่ลงบัญชีเอกสารนี้ได้</span>
         ) : null}
         {doc.status === 'POSTED' && access.canVoid ? (
-          <Button type="button" variant="danger" disabled={busy} onClick={voidDocument}>
-            Void
+          <Button type="button" variant="danger" disabled={busy} onClick={() => setConfirmation('void')}>
+            ยกเลิกเอกสาร
           </Button>
         ) : null}
         {editable ? (
-          <Button type="button" variant="ghost" disabled={busy} onClick={() => void remove()}>
-            Delete draft
+          <Button type="button" variant="ghost" disabled={busy} onClick={() => setConfirmation('delete')}>
+            ลบฉบับร่าง
           </Button>
         ) : null}
       </div>
+      <ConfirmationDialog open={confirmation !== null} onOpenChange={(open) => { if (!open) setConfirmation(null) }}
+        title={confirmation === 'post' ? 'ลงบัญชีเอกสารสต็อก' : confirmation === 'void' ? 'ยกเลิกเอกสารสต็อก' : 'ลบเอกสารฉบับร่าง'}
+        description={confirmation === 'post' ? 'ลงบัญชีเอกสารนี้? สต็อกจะเปลี่ยนทันที' : confirmation === 'void' ? 'ยกเลิกเอกสารนี้? การเปลี่ยนแปลงสต็อกทั้งหมดจากเอกสารนี้จะถูกย้อนกลับ' : 'ลบเอกสารฉบับร่างนี้?'}
+        danger={confirmation !== 'post'}
+        onConfirm={() => { if (confirmation === 'post') post(); else if (confirmation === 'void') voidDocument(); else if (confirmation === 'delete') void remove() }} />
     </PageContent>
   )
 }
