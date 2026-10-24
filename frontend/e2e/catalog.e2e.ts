@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { searchSkus } from './catalog-support'
 
 // T07: the owner of Active Shop creates a SKU, finds it through search, then imports a CSV
 // with one bad row and sees that row's error. Codes are unique per run so a reused local
@@ -17,17 +18,10 @@ test('owner creates a SKU, finds it by search, and sees a CSV row error', async 
   await expect(page.getByRole('heading', { name: 'New SKU' })).toBeVisible()
 
   // Step 2: Create the SKU with a new product in the same call.
-  const productSelect = page.getByRole('main').getByRole('combobox')
-  await expect
-    .poll(
-      async () => {
-        if ((await productSelect.locator('option').count()) < 1) return false
-        await productSelect.selectOption('__new__')
-        return await page.getByLabel('New product name').isVisible()
-      },
-      { timeout: 30_000, intervals: [500] },
-    )
-    .toBeTruthy()
+  const productSelect = page.getByLabel('Product', { exact: true })
+  await expect(productSelect).toBeEnabled()
+  await productSelect.selectOption('__new__')
+  await expect(page.getByLabel('New product name')).toBeVisible()
   await page.getByLabel('New product name').fill('E2E Product')
   await page.getByLabel('SKU code').fill(code)
   await page.getByLabel('Name', { exact: true }).fill('E2E red mug')
@@ -37,8 +31,7 @@ test('owner creates a SKU, finds it by search, and sees a CSV row error', async 
 
   // Step 3: Find it by a lower-case code prefix.
   await page.getByRole('link', { name: 'Back to SKUs' }).click()
-  await page.getByLabel('Search SKUs').fill(code.toLowerCase())
-  await page.getByRole('button', { name: 'Search' }).click()
+  await searchSkus(page, code.toLowerCase())
   await expect(page.getByRole('link', { name: code })).toBeVisible()
 
   // Step 4: Import a small file whose line 3 has no sku_name. Nothing is imported.
@@ -61,7 +54,6 @@ test('owner creates a SKU, finds it by search, and sees a CSV row error', async 
 
   // Step 5: The good row of the rejected file was not written either.
   await page.getByRole('link', { name: 'SKUs', exact: true }).click()
-  await page.getByLabel('Search SKUs').fill(`${code}-a`)
-  await page.getByRole('button', { name: 'Search' }).click()
+  await searchSkus(page, `${code}-a`)
   await expect(page.getByText('No SKUs found.')).toBeVisible()
 })

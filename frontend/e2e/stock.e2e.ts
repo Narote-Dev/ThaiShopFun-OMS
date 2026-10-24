@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { searchSkus } from './catalog-support'
 
 // T08A: the owner of Active Shop creates a SKU, receives 5 units through a RECEIVE document,
 // posts it, and finds the RECEIVE entry in that SKU's stock history with a link back to the
@@ -18,8 +19,10 @@ test('owner posts a RECEIVE and sees it in the SKU stock history', async ({ page
   await expect(page.getByLabel(`Name of ${product}`)).toBeVisible()
   await page.getByRole('link', { name: 'SKUs', exact: true }).click()
   await page.getByRole('link', { name: 'New SKU' }).click()
-  // The option exists only once the product list has loaded, so this cannot race the form default.
-  await page.getByRole('combobox').selectOption({ label: product })
+  const productSelect = page.getByLabel('Product', { exact: true })
+  await expect(productSelect).toBeEnabled()
+  await productSelect.selectOption({ label: product })
+  await expect(productSelect.locator('option:checked')).toHaveText(product)
   await page.getByLabel('SKU code').fill(code)
   await page.getByLabel('Name', { exact: true }).fill('E2E stock item')
   await page.getByRole('button', { name: 'Create SKU' }).click()
@@ -45,8 +48,7 @@ test('owner posts a RECEIVE and sees it in the SKU stock history', async ({ page
 
   // Step 4: The SKU's history shows the RECEIVE with a link back to the document.
   await page.getByRole('link', { name: 'SKUs', exact: true }).click()
-  await page.getByLabel('Search SKUs').fill(code.toLowerCase())
-  await page.getByRole('button', { name: 'Search' }).click()
+  await searchSkus(page, code.toLowerCase())
   await page.getByRole('row', { name: new RegExp(code) }).getByRole('link', { name: 'History' }).click()
   await expect(page.getByRole('heading', { name: `Stock history · ${code}` })).toBeVisible()
   const movements = page.getByRole('table', { name: 'Stock movements' })
