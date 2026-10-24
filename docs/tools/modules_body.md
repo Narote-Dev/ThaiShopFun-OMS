@@ -29,7 +29,7 @@
 | `order.demo` | demo seed (local) | `OrderDemoCatalogController`, `OrderDemoCatalogService` | catalog/stock/listing | `POST .../order-catalog` (profile) |
 | `listing` | listings UI/API | `ChannelListingController`, `ChannelAccountListingSyncController`, `ChannelListingSyncService`, `ChannelListingRepository` | `channel_listing` | `GET /api/v1/channel-accounts`, `/api/v1/channel-listings`, mapping, `POST .../listing-syncs` |
 | `listing.intake` | `listing.changed` | `ListingChangedHandler` | `channel_listing` | (inbox) |
-| `pii` | encryption | `PiiCipher`, `PiiKeyRing` | `order_recipient` | — |
+| `pii` / `pii.lifecycle` | encryption, masking, retention | `PiiCipher`, `PiiKeyRing`, `PiiLogConverter`, `OrderPiiLifecycle`, `PiiLifecycleJob` | `order_recipient`, inbox/outbox payload markers, count-only audit | 03:00 Asia/Bangkok daily; [policy](../security/pii.md) |
 
 **Single-write rule:** `ReservationEngine` / `StockRepository` — หนึ่งการเปลี่ยนสต็อกต่อ transaction ของ caller; ห้ามแก้ `inventory` นอก engine (`StockTransactions` รวม ledger + reservation).
 

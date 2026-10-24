@@ -331,4 +331,8 @@ FIELDS: dict[tuple[str, str], dict[str, str]] = {
     ("warehouse", "updated_at"): {"meaning": 'เวลาที่แถวถูกแก้ไขล่าสุด (timestamptz UTC)'}
 }
 
-assert len(FIELDS) == 329
+FIELDS.update({
+    ("inbox_event", "payload_scrubbed_at"): {"meaning": "เวลาที่ล้าง PII ใน terminal inbox payload (T27); NULL หมายถึงยังไม่ scrub"},
+    ("outbox_event", "payload_scrubbed_at"): {"meaning": "เวลาที่ล้าง PII ใน terminal outbox payload (T27); ห้าม retry เมื่อมีค่า"},
+})
+assert len(FIELDS) == 331

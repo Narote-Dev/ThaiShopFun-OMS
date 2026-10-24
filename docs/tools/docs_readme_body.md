@@ -18,3 +18,5 @@
 | [api/channel-listings.md](api/channel-listings.md) | REST listings |
 | [ui/DESIGN-SYSTEM.md](ui/DESIGN-SYSTEM.md) | design system |
 | [MVP-ROADMAP.md](MVP-ROADMAP.md) | roadmap สรุป |
+
+[PII lifecycle / rotation runbook](security/pii.md) — T27 retention and label cache requirements.

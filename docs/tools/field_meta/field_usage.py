@@ -62,7 +62,8 @@ USAGE: dict[tuple[str, str], str] = {
     ('inbox_event', 'last_error'): 'อัปเดต `InboxWorker`; อ่าน `InboxWorker`',
     ('inbox_event', 'next_attempt_at'): 'อัปเดต `InboxWorker`/`claim_inbox_batch` สำหรับ lease/retry',
     ('inbox_event', 'orphan_recorded_at'): 'อัปเดต `InboxWorker` เมื่อเกิน max-defer',
-    ('inbox_event', 'payload'): 'INSERT `InboxIngestService`; อ่าน `InboxWorker` handler',
+    ('inbox_event', 'payload'): 'INSERT `InboxIngestService`; อ่าน `InboxWorker` handler; scrub `PiiLifecycleJob` หลัง terminal 7 วัน',
+    ('inbox_event', 'payload_scrubbed_at'): 'เขียน/อ่าน `PiiLifecycleJob` เมื่อ scrub PROCESSED/DEAD ครบ 7 วัน',
     ('inbox_event', 'payload_sha256'): 'INSERT `InboxIngestService`; อ่าน `InboxIngestService` duplicate check',
     ('inbox_event', 'processed_at'): 'อัปเดต `InboxWorker` เมื่อ PROCESSED',
     ('inbox_event', 'received_at'): 'INSERT default (DB); อ่าน `InboxWorker`',
@@ -120,7 +121,7 @@ USAGE: dict[tuple[str, str], str] = {
     ('order_recipient', 'pii_status'): 'เขียน `OrderRecipientRepository`; อ่าน repository/API ที่ query ตาราง',
     ('order_recipient', 'postcode'): 'เขียน `OrderRecipientRepository`; อ่าน repository/API ที่ query ตาราง',
     ('order_recipient', 'province'): 'เขียน `OrderRecipientRepository`; อ่าน repository/API ที่ query ตาราง',
-    ('order_recipient', 'redact_after'): 'เขียน `OrderRecipientRepository`; อ่าน repository/API ที่ query ตาราง',
+    ('order_recipient', 'redact_after'): 'เขียน `OrderRecipientRepository` ผ่าน close hook; อ่าน `PiiLifecycleJob` เพื่อ redact เมื่อครบ 90 วัน',
     ('order_recipient', 'tenant_id'): 'INSERT ใส่ tenant ปัจจุบัน; RLS กรองทุก SELECT',
     ('order_recipient', 'updated_at'): 'อัปเดต `OrderRecipientRepository`; อ่าน repository/API ที่ query ตาราง',
     ('order_status_history', 'actor'): 'INSERT `OrderStatusHistoryRepository`',
@@ -140,7 +141,8 @@ USAGE: dict[tuple[str, str], str] = {
     ('outbox_event', 'id'): 'PK; เขียน `OutboxAppender`, `OutboxPublisher`; อ่าน `OutboxAdminService`',
     ('outbox_event', 'lease_until'): 'ตั้ง `OutboxStore` ตอน claim IN_FLIGHT; ล้างเมื่อส่งหรือคืน PENDING',
     ('outbox_event', 'next_attempt_at'): 'อัปเดต `OutboxStore` backoff; NULL เมื่อ SENT/DEAD/retry',
-    ('outbox_event', 'payload'): 'INSERT `OutboxAppender`; อ่าน `OutboxStore` / `OutboxHttpSender`',
+    ('outbox_event', 'payload'): 'INSERT `OutboxAppender`; อ่าน `OutboxStore` / `OutboxHttpSender`; scrub `PiiLifecycleJob` หลัง terminal 7 วัน',
+    ('outbox_event', 'payload_scrubbed_at'): 'เขียน/อ่าน `PiiLifecycleJob`; อ่าน `OutboxAdminService` เพื่อปฏิเสธ retry',
     ('outbox_event', 'sent_at'): 'อัปเดต `OutboxStore` เมื่อ SENT',
     ('outbox_event', 'status'): 'INSERT `OutboxAppender` (PENDING); อัปเดต `OutboxStore` (IN_FLIGHT→SENT/DEAD); admin retry → PENDING (`OutboxAdminService`)',
     ('outbox_event', 'tenant_id'): 'INSERT ใส่ tenant ปัจจุบัน; RLS กรองทุก SELECT',
@@ -331,4 +333,4 @@ USAGE: dict[tuple[str, str], str] = {
     ('warehouse', 'updated_at'): 'อัปเดต `WarehouseService`; อ่าน repository/API ที่ query ตาราง',
 }
 
-assert len(USAGE) == 329
+assert len(USAGE) == 331

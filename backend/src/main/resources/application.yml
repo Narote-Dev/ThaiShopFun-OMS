@@ -97,6 +97,10 @@ oms:
   # comma-separated; decrypt accepts any listed key, encrypt uses active-key-id.
   # The dev value is application-local.yml (profile local), not this file.
   pii:
+    redaction:
+      enabled: ${OMS_PII_REDACTION_ENABLED:true}
+      cron: ${OMS_PII_REDACTION_CRON:0 0 3 * * *}
+      batch-size: ${OMS_PII_REDACTION_BATCH_SIZE:500}
     keys: ${OMS_PII_KEYS:}
     active-key-id: ${OMS_PII_ACTIVE_KEY_ID:}
     hash-key: ${OMS_PII_HASH_KEY:}

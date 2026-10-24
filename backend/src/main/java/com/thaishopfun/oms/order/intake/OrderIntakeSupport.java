@@ -24,6 +24,7 @@ import com.thaishopfun.oms.order.SalesOrderRepository;
 import com.thaishopfun.oms.order.ShadowDiffRepository;
 import com.thaishopfun.oms.order.hold.OrderHoldEffects;
 import com.thaishopfun.oms.order.hold.OrderHoldEffects.HoldLine;
+import com.thaishopfun.oms.pii.lifecycle.OrderPiiLifecycle;
 import com.thaishopfun.oms.stock.AdoptResult;
 import com.thaishopfun.oms.stock.EnsureHoldResult;
 import com.thaishopfun.oms.stock.ReservationEngine;
@@ -36,7 +37,6 @@ import com.thaishopfun.oms.stock.StockOwner;
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
-import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -74,6 +74,7 @@ public class OrderIntakeSupport {
   private final InboxProperties inboxProperties;
   private final JdbcTemplate jdbc;
   private final Clock clock;
+  private final OrderPiiLifecycle piiLifecycle;
 
   public OrderIntakeSupport(
       ChannelAccountLookup channels,
@@ -92,7 +93,8 @@ public class OrderIntakeSupport {
       OrderProperties orderProperties,
       InboxProperties inboxProperties,
       JdbcTemplate jdbc,
-      Clock clock) {
+      Clock clock,
+      OrderPiiLifecycle piiLifecycle) {
     this.channels = channels;
     this.orders = orders;
     this.lines = lines;
@@ -110,6 +112,7 @@ public class OrderIntakeSupport {
     this.inboxProperties = inboxProperties;
     this.jdbc = jdbc;
     this.clock = clock;
+    this.piiLifecycle = piiLifecycle;
   }
 
   TsfAccount requireTsfAccount(InboxMessage message) {
@@ -342,7 +345,7 @@ public class OrderIntakeSupport {
     engine.release(StockOwner.order(order.id().toString()), "order.release:" + message.eventId());
     stateMachine.applyOrderStatus(
         order, "CANCELLED", "TSF cancel", "TSF", guard(account, order, List.of()));
-    recipients.scheduleRedaction(order.id(), clock.instant().plus(90, ChronoUnit.DAYS));
+    piiLifecycle.onOrderClosed(order.id(), clock.instant());
     bumpExternalVersion(account, order, message);
     hooks.afterOutbox();
   }

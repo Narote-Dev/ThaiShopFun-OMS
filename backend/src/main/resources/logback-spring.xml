@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+  <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+  <conversionRule conversionWord="pii" class="com.thaishopfun.oms.pii.PiiLogConverter"/>
+  <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+    <encoder>
+      <pattern>%pii(${CONSOLE_LOG_PATTERN}){}%nopex</pattern>
+      <charset>${CONSOLE_LOG_CHARSET}</charset>
+    </encoder>
+  </appender>
+  <root level="${ROOT_LOG_LEVEL:-INFO}"><appender-ref ref="CONSOLE"/></root>
+</configuration>

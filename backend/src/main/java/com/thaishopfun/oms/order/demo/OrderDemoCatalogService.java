@@ -1,6 +1,7 @@
 package com.thaishopfun.oms.order.demo;
 
 import com.thaishopfun.oms.auth.UuidV7;
+import com.thaishopfun.oms.pii.lifecycle.PiiLifecycleJob;
 import com.thaishopfun.oms.tenant.TenantContext;
 import java.util.List;
 import java.util.Map;
@@ -18,10 +19,13 @@ public class OrderDemoCatalogService {
   private static final String SHOP = "shop_active";
 
   private final JdbcTemplate jdbc;
+  private final PiiLifecycleJob piiJob;
   private final TransactionTemplate transactionTemplate;
 
-  public OrderDemoCatalogService(JdbcTemplate jdbc, TransactionTemplate transactionTemplate) {
+  public OrderDemoCatalogService(
+      JdbcTemplate jdbc, TransactionTemplate transactionTemplate, PiiLifecycleJob piiJob) {
     this.jdbc = jdbc;
+    this.piiJob = piiJob;
     this.transactionTemplate = transactionTemplate;
   }
 
@@ -44,6 +48,33 @@ public class OrderDemoCatalogService {
       if (clearTenant) {
         TenantContext.clear();
       }
+    }
+  }
+
+  /** Local/e2e demonstration only: fixed shop and fixed closed order, never arbitrary ids. */
+  public Map<String, Object> redactCancelled() {
+    UUID previous = TenantContext.tenantId();
+    UUID user = TenantContext.userId();
+    try {
+      UUID tenant = resolveTsfShopTenantId();
+      if (tenant == null) throw new DemoCatalogTenantMissingException();
+      TenantContext.set(tenant, null);
+      int count =
+          transactionTemplate.execute(
+              status ->
+                  jdbc.update(
+                      """
+          UPDATE order_recipient r
+          SET redact_after = now() - interval '1 second'
+          FROM sales_order o WHERE o.id = r.order_id AND o.tenant_id = r.tenant_id
+            AND o.external_order_id = 'DEMO-CANCELLED' AND o.order_status = 'CANCELLED'
+            AND r.pii_status = 'ACTIVE'
+          """));
+      piiJob.runOnce();
+      return Map.of("status", "OK", "redacted", count);
+    } finally {
+      if (previous == null) TenantContext.clear();
+      else TenantContext.set(previous, user);
     }
   }
 

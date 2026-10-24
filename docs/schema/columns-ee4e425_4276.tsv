@@ -339,3 +339,5 @@ warehouse	6	is_default	boolean	NO	false
 warehouse	7	created_at	timestamp with time zone	NO	now()	
 warehouse	8	updated_at	timestamp with time zone	NO	now()	
 (339 rows)
+inbox_event	17	payload_scrubbed_at	timestamp with time zone	YES		T27 terminal payload retention marker
+outbox_event	14	payload_scrubbed_at	timestamp with time zone	YES		T27 terminal payload retention marker

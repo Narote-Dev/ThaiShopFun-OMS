@@ -30,6 +30,7 @@ Versions are taken in merge order as the next free number. One migration per PR.
 | V13 | T12B-FU `order_hold_retry` (hold sweeper backoff) |
 | V14 | T12C `list_tenants_for_order_backfill()` (ACTIVE + unexpired GRACE, connected TSF) |
 | V15 | T15 durable `stock_push_pending`, mapping capture trigger, ids-only account discovery, stock propagation origin, `STOCK_PUSH` shadow kind |
+| V16 | T27 PII lifecycle: scrub timestamps, partial due indexes, ids-only discovery across every entitlement state |
 
 ## สรุปจำนวน
 | Phase | Cursor | Codex | รวม |
@@ -229,6 +230,7 @@ flowchart LR
 
 ## Phase 3: Fulfillment (สัปดาห์ 11–13)
 **T18 · Cursor · deps: T12, T16, T27** Pick / Pack / Label / Ship
+- TODO T27: purge label cache ≤ 7 days after SHIPPED (all entitlement states); implement and test per [PII policy](../security/pii.md#label-cache-and-follow-ups).
 - pick list (PDF), หน้าแพ็กยิงบาร์โค้ด, ขอ label ผ่าน adapter (ตรวจ `supportsLabel`), รวม label PDF, ยืนยันส่ง → `SHIPPED` + consume + `shipment.updated`
 - AC: ยิงผิด/เกิน = ไม่ให้ PACKED · ขอ label ซ้ำไม่ออกใหม่ · SHIPPED แล้ว `on_hand` ลดตรง, reservation CONSUMED · 100 label PDF เดียว · ออเดอร์ที่มี hold ไม่อยู่ใน pick list
 
