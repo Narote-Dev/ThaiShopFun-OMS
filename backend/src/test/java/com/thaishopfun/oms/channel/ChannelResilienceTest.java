@@ -446,6 +446,8 @@ class ChannelResilienceTest {
     assertThat(attempts).hasValue(2);
     assertThat(sleeper.durations()).hasSize(1);
     assertThat(sleeper.durations().get(0)).isBetween(Duration.ZERO, Duration.ofMillis(100));
+    assertThat(meters.find("oms.channel.retries").tag("reason", "unavailable").counter())
+        .isNotNull();
   }
 
   @Test
