@@ -142,7 +142,7 @@ class FlywayV8LedgerSeqTest {
       try (Connection conn =
           DriverManager.getConnection(url, postgres.getUsername(), postgres.getPassword())) {
         assertThat(versions(conn))
-            .containsExactly("1", "2", "3", "4", "6", "7", "8", "9", "10", "11", "12", "13");
+            .containsExactly("1", "2", "3", "4", "6", "7", "8", "9", "10", "11", "12", "13", "14");
         assertThat(ledgerSeq(conn, ledgerEarly)).isEqualTo(1);
         assertThat(ledgerSeq(conn, ledgerMid)).isEqualTo(2);
         assertThat(ledgerSeq(conn, ledgerLate)).isEqualTo(3);

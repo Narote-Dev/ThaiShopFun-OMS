@@ -229,8 +229,11 @@ class ListingLifecycleT12BFUAcceptanceTest {
 
   @Test
   void ac02_reviveViaSyncReleasesInSyncCall() throws Exception {
-    StockFixture.Shop shop = ensureShopActive();
-    String shopId = "shop_active";
+    StockFixture.Shop shop = fixture.shop("ACTIVE");
+    String shopId = fixture.tsfShopId(shop);
+    OrderIntakeMockRuntime.mock()
+        .getBean(com.thaishopfun.mocktsf.rest.TsfCatalog.class)
+        .registerShop(shopId);
     UUID account = fixture.channelAccount(shop, shopId, "ACTIVE", "CONNECTED");
     UUID sku = fixture.sku(shop, 12);
     String listingSku = "tsf_sku_7781";
@@ -463,9 +466,14 @@ class ListingLifecycleT12BFUAcceptanceTest {
   class ReevalCapOne {
     @Test
     void ac06_deferredWithReevalCapOne() throws Exception {
-      StockFixture.Shop shop = ensureShopActive();
-      String shopId = "shop_active";
+      StockFixture.Shop shop = fixture.shop("ACTIVE");
+      String shopId = fixture.tsfShopId(shop);
+      OrderIntakeMockRuntime.mock()
+          .getBean(com.thaishopfun.mocktsf.rest.TsfCatalog.class)
+          .registerShop(shopId);
       UUID account = fixture.channelAccount(shop, shopId, "ACTIVE", "CONNECTED");
+      TenantContext.set(shop.tenant(), null);
+      assertThat(catalog.ensureDemoCatalog().get("status")).isEqualTo("OK");
       assertThat(postListingSync(shopId, account).statusCode()).isEqualTo(202);
       ensureSellerSku(shop, "TSHIRT-BLK-M", 50);
       ensureSellerSku(shop, "MUG-WHT", 50);

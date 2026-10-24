@@ -81,6 +81,7 @@ class InboxApiTest {
   @Autowired private PlatformTransactionManager transactions;
   @Autowired private MeterRegistry meters;
   @Autowired private InboxProperties inboxProperties;
+  @Autowired private RecordingOrderGapRefetch gapRefetch;
 
   @Autowired
   @Qualifier("orderCreated")
@@ -116,6 +117,7 @@ class InboxApiTest {
             "oms-internal",
             Instant.now().plusSeconds(600),
             List.of("oms"));
+    gapRefetch.reset();
     orderCreated.reset();
     orderFail.reset();
     orderPaid.reset();
@@ -627,8 +629,8 @@ class InboxApiTest {
     stampReceived(base, 2);
     stampReceived(skipped, 1);
     worker.processAvailable();
-    assertThat(orderCreated.calls.get()).isEqualTo(2);
-    assertThat(orderCreated.gaps).containsExactly(false, true);
+    assertThat(orderCreated.calls.get()).isEqualTo(1);
+    assertThat(gapRefetch.calls()).hasSize(1);
   }
 
   @Test
@@ -674,8 +676,94 @@ class InboxApiTest {
     String paidId = id();
     postBusinessEvent(shop, paidId, aggregate, "order.paid", 3);
     worker.processAvailable();
-    assertThat(orderPaid.calls.get()).isEqualTo(1);
-    assertThat(orderPaid.gaps).containsExactly(true);
+    assertThat(orderPaid.calls.get()).isZero();
+    assertThat(gapRefetch.calls()).hasSize(1);
+  }
+
+  @Test
+  void batchPartitionReadsTenantMetadataAndDoesNotYieldAnotherTenantsOrder() throws Exception {
+    Shop first = seed("ACTIVE", future(), 1);
+    Shop second = seed("ACTIVE", future(), 1);
+    String aggregate = "shared-external-id-" + UUID.randomUUID();
+    String created = id();
+    String firstPaid = id();
+    String secondPaid = id();
+    postOrder(first, created, aggregate, 1);
+    postBusinessEvent(first, firstPaid, aggregate, "order.paid", 2);
+    postBusinessEvent(second, secondPaid, aggregate, "order.paid", 1);
+    assertThat(worker.processAvailable(10)).isEqualTo(2);
+    assertThat(state(created).status()).isEqualTo("PROCESSED");
+    assertThat(state(secondPaid).status()).isEqualTo("PROCESSED");
+    assertThat(state(firstPaid).status()).isEqualTo("RECEIVED");
+    assertThat(state(firstPaid).attempts()).isZero();
+    assertThat(worker.processAvailable(10)).isEqualTo(1);
+    assertThat(state(firstPaid).status()).isEqualTo("PROCESSED");
+    assertThat(orderCreated.calls.get()).isEqualTo(1);
+    assertThat(orderPaid.calls.get()).isEqualTo(2);
+  }
+
+  @Test
+  void gapSnapshotRetryUsesJitteredBackoffAndExhaustsToInboxPayload() throws Exception {
+    Shop shop = seed("ACTIVE", future(), 1);
+    String aggregate = "gap-budget-" + UUID.randomUUID();
+    postBusinessEvent(shop, id(), aggregate, "order.updated", 1);
+    worker.processAvailable();
+    gapRefetch.snapshotReady = false;
+    String eventId = id();
+    postBusinessEvent(shop, eventId, aggregate, "order.paid", 3);
+    double previousJitter = inboxProperties.getJitterRatio();
+    try {
+      inboxProperties.setJitterRatio(0.2);
+      for (int attempt = 1; attempt <= InboxWorker.BACKOFF.length; attempt++) {
+        worker.processAvailable();
+        InboxState row = state(eventId);
+        assertThat(row.status()).isEqualTo("RECEIVED");
+        assertThat(row.attempts()).isEqualTo(attempt);
+        double seconds = InboxWorker.BACKOFF[attempt - 1].toMillis() / 1000d;
+        assertThat(row.waitSeconds()).isBetween(seconds * 0.8 - 1, seconds * 1.2 + 1);
+        assertThat(gapRefetch.fallbacks).isZero();
+        makeDue(eventId);
+      }
+      worker.processAvailable();
+      assertThat(state(eventId).status()).isEqualTo("PROCESSED");
+      assertThat(gapRefetch.fallbacks).isEqualTo(1);
+      assertThat(worker.processAvailable()).isZero();
+    } finally {
+      inboxProperties.setJitterRatio(previousJitter);
+    }
+  }
+
+  @Test
+  void gapSnapshotMaxAgeWithoutApplicablePayloadIsDeadAndReconciled() throws Exception {
+    Shop shop = seed("ACTIVE", future(), 1);
+    String aggregate = "gap-aged-" + UUID.randomUUID();
+    postBusinessEvent(shop, id(), aggregate, "order.updated", 1);
+    worker.processAvailable();
+    gapRefetch.snapshotReady = false;
+    gapRefetch.fallbackApplied = false;
+    String eventId = id();
+    postBusinessEvent(shop, eventId, aggregate, "order.paid", 3);
+    stampReceived(eventId, (int) inboxProperties.getMaxDefer().toSeconds() + 10);
+    worker.processAvailable();
+    assertThat(state(eventId).status()).isEqualTo("DEAD");
+    assertThat(state(eventId).lastError()).isEqualTo("GAP_SNAPSHOT_STALE");
+    assertThat(gapRefetch.fallbacks).isEqualTo(1);
+    assertThat(
+            count(
+                "SELECT count(*) FROM reconciliation_issue WHERE tenant_id = ?::uuid AND rule = 'GAP_SNAPSHOT_STALE'",
+                shop.id().toString()))
+        .isEqualTo(1);
+    assertThat(worker.processAvailable()).isZero();
+  }
+
+  private void makeDue(String eventId) throws Exception {
+    try (Connection admin = AuthTestSupport.admin();
+        PreparedStatement statement =
+            admin.prepareStatement(
+                "UPDATE inbox_event SET next_attempt_at = now() - interval '1 second' WHERE event_id = ?")) {
+      statement.setString(1, eventId);
+      assertThat(statement.executeUpdate()).isEqualTo(1);
+    }
   }
 
   @Test

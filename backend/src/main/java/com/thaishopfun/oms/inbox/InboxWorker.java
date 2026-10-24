@@ -2,6 +2,8 @@ package com.thaishopfun.oms.inbox;
 
 import com.thaishopfun.oms.order.OrderOptimisticLockException;
 import com.thaishopfun.oms.order.ReconciliationIssueRepository;
+import com.thaishopfun.oms.order.backfill.GapSnapshotNotReadyException;
+import com.thaishopfun.oms.order.backfill.OrderGapRefetch;
 import com.thaishopfun.oms.stock.StockBusyException;
 import com.thaishopfun.oms.stock.StockConflictException;
 import com.thaishopfun.oms.stock.StockRetry;
@@ -11,7 +13,12 @@ import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import org.slf4j.Logger;
@@ -47,6 +54,9 @@ public class InboxWorker {
   static final String ENTITLEMENT_DEFERRED = "ENTITLEMENT_DEFERRED";
 
   static final Duration UNKNOWN_DEFER = Duration.ofHours(1);
+
+  /** Yields to a higher aggregate_version inbox row that is still due or retrying. */
+  static final Duration NEWER_PENDING_DEFER = Duration.ofSeconds(1);
 
   static final Duration[] BACKOFF = {
     Duration.ofSeconds(30),
@@ -94,6 +104,7 @@ public class InboxWorker {
   private final InboxEntitlementPolicy policy;
   private final ReconciliationIssueRepository reconciliation;
   private final InboxAggregateLock aggregateLock;
+  private final OrderGapRefetch gapRefetch;
   private final JdbcTemplate jdbc;
   private final TransactionTemplate claimTx;
   private final TransactionTemplate applyTx;
@@ -108,6 +119,7 @@ public class InboxWorker {
       InboxEntitlementPolicy policy,
       ReconciliationIssueRepository reconciliation,
       InboxAggregateLock aggregateLock,
+      OrderGapRefetch gapRefetch,
       JdbcTemplate jdbc,
       PlatformTransactionManager transactions,
       JsonMapper json,
@@ -117,6 +129,7 @@ public class InboxWorker {
     this.policy = policy;
     this.reconciliation = reconciliation;
     this.aggregateLock = aggregateLock;
+    this.gapRefetch = gapRefetch;
     this.jdbc = jdbc;
     this.claimTx = new TransactionTemplate(transactions);
     // Step 1: TransactionTemplate takes whole seconds and truncates. Ceil so 1.1s is 2s, not 1s.
@@ -136,13 +149,25 @@ public class InboxWorker {
   }
 
   public int processAvailable(int limit) {
-    // Step 1: Claim with an empty tenant context. The definer returns id, tenant, and the lease.
-    List<Claimed> claimed = claim(limit);
+    int bounded = Math.min(Math.max(limit, 1), 1000);
+    return processClaimBatch(claim(bounded));
+  }
+
+  private int processClaimBatch(List<Claimed> claimed) {
+    if (claimed.isEmpty()) {
+      return 0;
+    }
+    BatchPartition partition = partitionBatch(claimed);
+    for (Claimed skipped : partition.yielded()) {
+      releaseClaim(skipped);
+    }
     int handled = 0;
-    for (Claimed row : claimed) {
+    for (Claimed row : partition.toProcess()) {
       try {
-        processClaim(row);
-        handled++;
+        ClaimOutcome outcome = processClaim(row);
+        if (outcome.countsAsHandled()) {
+          handled++;
+        }
       } catch (RuntimeException ex) {
         log.error("inbox event {} was not completed", row.id(), ex);
       }
@@ -153,6 +178,16 @@ public class InboxWorker {
   /** Applies one already-claimed row. Tests use this to show a stale lease cannot write. */
   void applyClaim(UUID id, UUID tenantId, OffsetDateTime leaseUntil) {
     processClaim(new Claimed(id, tenantId, leaseUntil));
+  }
+
+  private enum ClaimOutcome {
+    PROCESSED,
+    HANDLED,
+    NOOP;
+
+    boolean countsAsHandled() {
+      return this == PROCESSED || this == HANDLED;
+    }
   }
 
   private List<Claimed> claim(int limit) {
@@ -182,29 +217,32 @@ public class InboxWorker {
     return claim(limit).stream().map(Claimed::leaseUntil).toList();
   }
 
-  private void processClaim(Claimed claimed) {
+  private ClaimOutcome processClaim(Claimed claimed) {
     TenantContext.set(claimed.tenantId(), null);
     try {
       int attempts = 0;
       while (true) {
         try {
+          ClaimOutcome[] outcome = {ClaimOutcome.NOOP};
           applyTx.executeWithoutResult(
               status -> {
                 jdbc.execute(
                     "SET LOCAL statement_timeout = " + properties.getHandlerTimeout().toMillis());
-                apply(claimed);
+                outcome[0] = apply(claimed);
               });
-          break;
+          return outcome[0];
         } catch (InboxDeferException defer) {
           handleDefer(claimed, defer);
-          break;
+          return ClaimOutcome.HANDLED;
+        } catch (InboxGapRefetchRequired gap) {
+          return handleGapRefetch(claimed, gap);
         } catch (RuntimeException ex) {
           if (attempts < 3 && retryableTransaction(ex)) {
             attempts++;
             continue;
           }
           recordFailure(claimed, ex);
-          break;
+          return ClaimOutcome.HANDLED;
         }
       }
     } finally {
@@ -267,28 +305,28 @@ public class InboxWorker {
     return StockRetry.classify(ex) != null;
   }
 
-  private void apply(Claimed claimed) {
+  private ClaimOutcome apply(Claimed claimed) {
     // Step 1: Lock the claimed row. A lost lease or a finished row is left alone.
     InboxRow row = lock(claimed.id());
     if (row == null || !claimed.tenantId().equals(row.tenantId())) {
-      return;
+      return ClaimOutcome.NOOP;
     }
     if (!"RECEIVED".equals(row.status()) && !"FAILED".equals(row.status())) {
-      return;
+      return ClaimOutcome.NOOP;
     }
     if (!leaseMatches(row.nextAttemptAt(), claimed.leaseUntil())) {
-      return;
+      return ClaimOutcome.NOOP;
     }
     // Step 2: A claim past the ladder means an earlier attempt never recorded DEAD.
     if (row.attempts() > BACKOFF.length + 1) {
       markDead(row, MAX_ATTEMPTS_ERROR);
-      return;
+      return ClaimOutcome.HANDLED;
     }
     // Step 3: Suspended and expired shops keep the event. membership.changed still runs.
     // The marker is what a later ACTIVE/GRACE membership wakes. A normal failure backoff is not.
     if (policy.defer(row.entitlementStatus(), row.expiresAt(), row.eventType())) {
       pushBack(row, properties.getSuspendDefer(), ENTITLEMENT_DEFERRED);
-      return;
+      return ClaimOutcome.HANDLED;
     }
     InboxHandler handler = registry.find(row.eventType());
     if (handler == null) {
@@ -300,11 +338,18 @@ public class InboxWorker {
           UNKNOWN_DEFER);
       unknownTypes.increment();
       pushBack(row, UNKNOWN_DEFER);
-      return;
+      return ClaimOutcome.HANDLED;
     }
     // Step 5: One aggregate at a time, then drop a version that is already applied.
     // Events ordered by ent_ver are not part of this history, and do not use it.
     lockAggregate(row);
+    if ("order.updated".equals(row.eventType()) && blockedByNewerPending(row)) {
+      throw new InboxDeferException(NEWER_PENDING_DEFER);
+    }
+    if ("order.paid".equals(row.eventType()) && blockedByOlderPendingUpdate(row)) {
+      // Payment advances external_version; finish queued recipient deltas before that happens.
+      throw new InboxDeferException(NEWER_PENDING_DEFER);
+    }
     Long lastForStale = lastProcessedVersionForStale(row);
     Long lastAggregate = lastProcessedVersionAggregate(row);
     boolean entVerOrdered = InboxEntitlementPolicy.ordersByEntVer(row.eventType());
@@ -313,18 +358,68 @@ public class InboxWorker {
             && row.aggregateVersion() > 0
             && lastForStale != null
             && row.aggregateVersion() <= lastForStale;
-    // TODO: Handlers must apply the full snapshot in data until REST refetch exists (T10).
-    // gap=true means aggregate_version skipped at least one version. Do not assume a delta.
+    // gap=true means aggregate_version skipped at least one version. REST refetch applies snapshot.
     boolean gap =
         !stale
             && row.aggregateVersion() > 0
             && lastAggregate != null
             && row.aggregateVersion() > lastAggregate + 1;
+    if (gap) {
+      String shopId = row.payload().path("tsf_shop_id").asString(null);
+      String orderId = row.payload().path("data").path("order_id").asString(null);
+      if (orderId == null || orderId.isBlank()) {
+        orderId = row.aggregateId();
+      }
+      if (shopId == null || orderId == null || orderId.isBlank()) {
+        throw new NonRetryableInboxException("gap event is missing shop or order id");
+      }
+      throw new InboxGapRefetchRequired(
+          row.id(),
+          row.tenantId(),
+          shopId,
+          orderId,
+          row.aggregateVersion(),
+          row.nextAttemptAt(),
+          row.eventType(),
+          row.payload());
+    }
     if (!stale) {
       // Step 6: Handler writes and PROCESSED commit together. A throw rolls both back.
-      handler.handle(row.message(gap));
+      handler.handle(row.message(false));
     }
     markProcessed(row);
+    return ClaimOutcome.PROCESSED;
+  }
+
+  private ClaimOutcome handleGapRefetch(Claimed claimed, InboxGapRefetchRequired gap) {
+    try {
+      boolean applied =
+          gapRefetch.refetchAndApply(
+              gap.tenantId(),
+              gap.shopId(),
+              gap.externalOrderId(),
+              gap.aggregateVersion(),
+              "gap:" + gap.inboxId(),
+              gap.eventType(),
+              gap.payload());
+      if (!applied) {
+        throw new GapSnapshotNotReadyException(0, gap.aggregateVersion());
+      }
+      applyTx.executeWithoutResult(
+          status -> {
+            InboxRow row = lock(claimed.id());
+            if (row == null || !leaseMatches(row.nextAttemptAt(), gap.leaseUntil())) {
+              return;
+            }
+            markProcessed(row);
+          });
+      return ClaimOutcome.PROCESSED;
+    } catch (GapSnapshotNotReadyException notReady) {
+      return handleGapSnapshotNotReady(claimed, gap, notReady);
+    } catch (RuntimeException ex) {
+      recordFailure(claimed, ex);
+      return ClaimOutcome.HANDLED;
+    }
   }
 
   private InboxRow lock(UUID id) {
@@ -371,6 +466,144 @@ public class InboxWorker {
     aggregateLock.lock(jdbc, row.tenantId(), row.source(), row.aggregateId());
   }
 
+  private BatchPartition partitionBatch(List<Claimed> claimed) {
+    UUID[] ids = claimed.stream().map(Claimed::id).toArray(UUID[]::new);
+    List<ClaimMeta> metas = new ArrayList<>();
+    UUID previousTenant = TenantContext.tenantId();
+    UUID previousUser = TenantContext.userId();
+    try {
+      // claim_inbox_batch is SECURITY DEFINER; its metadata must still be read under RLS.
+      for (UUID tenantId : claimed.stream().map(Claimed::tenantId).distinct().toList()) {
+        TenantContext.set(tenantId, null);
+        metas.addAll(
+            applyTx.execute(
+                status ->
+                    jdbc.query(
+                        "SELECT id, source, aggregate_id, event_type FROM inbox_event WHERE id = ANY (?)",
+                        ps -> ps.setArray(1, ps.getConnection().createArrayOf("uuid", ids)),
+                        (rs, row) ->
+                            new ClaimMeta(
+                                rs.getObject("id", UUID.class),
+                                new AggregateKey(
+                                    tenantId, rs.getString("source"), rs.getString("aggregate_id")),
+                                rs.getString("event_type")))));
+      }
+    } finally {
+      if (previousTenant == null) {
+        TenantContext.clear();
+      } else {
+        TenantContext.set(previousTenant, previousUser);
+      }
+    }
+    Set<AggregateKey> aggregatesWithCreated = new HashSet<>();
+    Map<UUID, ClaimMeta> metaById = new HashMap<>();
+    for (ClaimMeta meta : metas) {
+      metaById.put(meta.id(), meta);
+      if ("order.created".equals(meta.eventType())) {
+        aggregatesWithCreated.add(meta.aggregate());
+      }
+    }
+    List<Claimed> toProcess = new ArrayList<>();
+    List<Claimed> yielded = new ArrayList<>();
+    for (Claimed claim : claimed) {
+      ClaimMeta meta = metaById.get(claim.id());
+      if (meta != null
+          && aggregatesWithCreated.contains(meta.aggregate())
+          && !"order.created".equals(meta.eventType())) {
+        yielded.add(claim);
+      } else {
+        toProcess.add(claim);
+      }
+    }
+    // Stable priority: recipient deltas queued with payment must land before external_version
+    // moves.
+    toProcess.sort(
+        java.util.Comparator.comparingInt(
+            claim -> {
+              ClaimMeta meta = metaById.get(claim.id());
+              return meta != null && "order.updated".equals(meta.eventType()) ? 0 : 1;
+            }));
+    return new BatchPartition(toProcess, yielded);
+  }
+
+  private void releaseClaim(Claimed claimed) {
+    UUID previousTenant = TenantContext.tenantId();
+    UUID previousUser = TenantContext.userId();
+    TenantContext.set(claimed.tenantId(), null);
+    try {
+      failureTx.executeWithoutResult(
+          status -> {
+            InboxRow row = lock(claimed.id());
+            if (row == null) {
+              return;
+            }
+            if (!"RECEIVED".equals(row.status()) && !"FAILED".equals(row.status())) {
+              return;
+            }
+            if (!leaseMatches(row.nextAttemptAt(), claimed.leaseUntil())) {
+              return;
+            }
+            pushBack(row, Duration.ZERO);
+          });
+    } finally {
+      if (previousTenant == null) {
+        TenantContext.clear();
+      } else {
+        TenantContext.set(previousTenant, previousUser);
+      }
+    }
+  }
+
+  private boolean blockedByOlderPendingUpdate(InboxRow row) {
+    if (row.aggregateVersion() <= 0) {
+      return false;
+    }
+    return Boolean.TRUE.equals(
+        jdbc.queryForObject(
+            """
+        SELECT EXISTS (
+          SELECT 1 FROM inbox_event
+          WHERE tenant_id = ? AND source = ? AND aggregate_id = ?
+            AND event_type = 'order.updated' AND status IN ('RECEIVED', 'FAILED')
+            AND aggregate_version > 0 AND aggregate_version < ?
+        )
+        """,
+            Boolean.class,
+            row.tenantId(),
+            row.source(),
+            row.aggregateId(),
+            row.aggregateVersion()));
+  }
+
+  private boolean blockedByNewerPending(InboxRow row) {
+    if (row.aggregateVersion() <= 0) {
+      return false;
+    }
+    Boolean blocked =
+        jdbc.queryForObject(
+            """
+            SELECT EXISTS (
+              SELECT 1
+              FROM inbox_event
+              WHERE tenant_id = ?
+                AND source = ?
+                AND aggregate_id = ?
+                AND event_type = ?
+                AND status IN ('RECEIVED', 'FAILED')
+                AND aggregate_version > ?
+                AND id <> ?
+            )
+            """,
+            Boolean.class,
+            row.tenantId(),
+            row.source(),
+            row.aggregateId(),
+            row.eventType(),
+            row.aggregateVersion(),
+            row.id());
+    return Boolean.TRUE.equals(blocked);
+  }
+
   private Long lastProcessedVersionForStale(InboxRow row) {
     if (InboxAggregateVersionPolicy.versionByEventType(row.eventType())) {
       return jdbc.queryForObject(
@@ -393,6 +626,84 @@ public class InboxWorker {
         row.source(),
         row.aggregateId(),
         row.id());
+  }
+
+  private ClaimOutcome handleGapSnapshotNotReady(
+      Claimed claimed, InboxGapRefetchRequired gap, GapSnapshotNotReadyException notReady) {
+    ClaimOutcome[] outcome = {ClaimOutcome.HANDLED};
+    failureTx.executeWithoutResult(
+        status -> {
+          InboxRow row = lock(claimed.id());
+          if (row == null || !leaseMatches(row.nextAttemptAt(), gap.leaseUntil())) {
+            return;
+          }
+          if (gapDeferExhausted(row)) {
+            if (exhaustGapInbox(claimed, gap, row)) {
+              outcome[0] = ClaimOutcome.PROCESSED;
+            }
+            return;
+          }
+          // Keep the claim attempt: stale REST snapshots consume the normal retry budget.
+          // Generic defers refund their attempt and would otherwise poll forever here.
+          Duration delay = jitter(BACKOFF[Math.max(1, row.attempts()) - 1]);
+          jdbc.update(
+              """
+              UPDATE inbox_event
+              SET next_attempt_at = pg_catalog.now() + (? * interval '1 millisecond'),
+                  last_error = 'GAP_SNAPSHOT_STALE'
+              WHERE id = ? AND next_attempt_at = ?
+                AND status IN ('RECEIVED', 'FAILED')
+              """,
+              delay.toMillis(),
+              row.id(),
+              row.nextAttemptAt());
+        });
+    return outcome[0];
+  }
+
+  private boolean gapDeferExhausted(InboxRow row) {
+    if (row.attempts() >= BACKOFF.length + 1) {
+      return true;
+    }
+    Instant received = row.receivedAt();
+    if (received == null) {
+      return false;
+    }
+    OffsetDateTime now = jdbc.queryForObject("SELECT now()", OffsetDateTime.class);
+    return received.isBefore(now.toInstant().minus(properties.getMaxDefer()));
+  }
+
+  private boolean exhaustGapInbox(Claimed claimed, InboxGapRefetchRequired gap, InboxRow row) {
+    boolean applied =
+        gapRefetch.applyAuthoritativeGapInbox(
+            gap.tenantId(),
+            gap.shopId(),
+            gap.externalOrderId(),
+            gap.eventType(),
+            gap.payload(),
+            "gap:" + gap.inboxId());
+    if (applied) {
+      markProcessed(row);
+      return true;
+    }
+    UUID orderId =
+        jdbc.query(
+            """
+            SELECT id FROM sales_order
+            WHERE tenant_id = ? AND external_order_id = ?
+            LIMIT 1
+            """,
+            rs -> rs.next() ? rs.getObject("id", UUID.class) : null,
+            gap.tenantId(),
+            gap.externalOrderId());
+    if (orderId != null) {
+      reconciliation.upsertOpen(gap.inboxId(), "GAP_SNAPSHOT_STALE", orderId, "{}");
+    } else {
+      reconciliation.upsertOpenWithoutOrder(
+          gap.inboxId(), "GAP_SNAPSHOT_STALE", gap.externalOrderId());
+    }
+    markDead(row, "GAP_SNAPSHOT_STALE");
+    return false;
   }
 
   private void pushBack(InboxRow row, Duration delay) {
@@ -541,6 +852,12 @@ public class InboxWorker {
   }
 
   private record Claimed(UUID id, UUID tenantId, OffsetDateTime leaseUntil) {}
+
+  private record AggregateKey(UUID tenantId, String source, String aggregateId) {}
+
+  private record ClaimMeta(UUID id, AggregateKey aggregate, String eventType) {}
+
+  private record BatchPartition(List<Claimed> toProcess, List<Claimed> yielded) {}
 
   private record InboxRow(
       UUID id,

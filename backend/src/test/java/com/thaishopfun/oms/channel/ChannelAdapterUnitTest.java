@@ -701,7 +701,8 @@ class ChannelAdapterUnitTest {
         null,
         List.of(),
         Instant.parse("2026-01-01T00:00:00Z"),
-        1L);
+        1L,
+        null);
   }
 
   private static void attachOrderHandler(

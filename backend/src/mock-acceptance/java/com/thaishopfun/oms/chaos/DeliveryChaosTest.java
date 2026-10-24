@@ -195,6 +195,7 @@ class DeliveryChaosTest {
   @Autowired private InboxEntitlementPolicy policy;
   @Autowired private ReconciliationIssueRepository reconciliation;
   @Autowired private com.thaishopfun.oms.inbox.InboxAggregateLock aggregateLock;
+  @Autowired private com.thaishopfun.oms.order.backfill.OrderGapRefetchService gapRefetch;
   @Autowired private JdbcTemplate jdbc;
   @Autowired private PlatformTransactionManager transactions;
   @Autowired private JsonMapper jsonMapper;
@@ -793,6 +794,7 @@ class DeliveryChaosTest {
         policy,
         reconciliation,
         aggregateLock,
+        gapRefetch,
         jdbc,
         transactions,
         jsonMapper,

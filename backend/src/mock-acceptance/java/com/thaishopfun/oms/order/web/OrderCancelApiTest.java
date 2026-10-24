@@ -9,6 +9,7 @@ import com.thaishopfun.oms.auth.AuthTestSupport;
 import com.thaishopfun.oms.catalog.CatalogHttp;
 import com.thaishopfun.oms.inbox.InboxWorker;
 import com.thaishopfun.oms.invariant.PiiLogAssertions;
+import com.thaishopfun.oms.order.MockTsfCatalogSync;
 import com.thaishopfun.oms.order.OrderRecipientRepository;
 import com.thaishopfun.oms.order.OrderStatusHistoryRepository;
 import com.thaishopfun.oms.order.SalesOrder;
@@ -98,7 +99,12 @@ class OrderCancelApiTest extends OrderIntegrationTest {
   }
 
   @BeforeEach
-  void fixture() {
+  void fixture() throws Exception {
+    // Each test owns its worker queue; prior suites can leave unrelated deferred rows.
+    try (Connection admin = AuthTestSupport.admin();
+        var statement = admin.createStatement()) {
+      statement.execute("TRUNCATE TABLE inbox_event");
+    }
     mock.getBean(OmsEndpoint.class).setBaseUrl("http://127.0.0.1:" + port);
     fixture = new OrderFixture(orders, recipients, history, transactions);
   }
@@ -549,6 +555,7 @@ class OrderCancelApiTest extends OrderIntegrationTest {
   }
 
   private void ingest(ObjectNode event) throws Exception {
+    MockTsfCatalogSync.note(event, mockPort());
     byte[] body = JSON.writeValueAsBytes(event);
     String eventId = event.path("event_id").asString();
     HttpRequest request =

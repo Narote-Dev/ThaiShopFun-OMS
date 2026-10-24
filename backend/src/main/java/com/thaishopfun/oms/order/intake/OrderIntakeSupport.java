@@ -246,6 +246,9 @@ public class OrderIntakeSupport {
     }
     holdEffects.maybeReadyToPick(
         orders.findById(orderId).orElseThrow(), account, reserveItems, now);
+    if (message.aggregateVersion() > 0) {
+      orders.updateExternalVersion(account.id(), payload.orderId(), message.aggregateVersion());
+    }
   }
 
   void handlePaid(InboxMessage message) {
@@ -257,10 +260,15 @@ public class OrderIntakeSupport {
       reconciliation.upsertOpen(message.id(), "PAID_AFTER_CANCEL", order.id(), "{}");
       return;
     }
+    Instant paidAt = eventOccurredAt(message);
     if ("PAID".equals(order.paymentStatus())) {
+      // Change: gap REST may mark PAID before this inbox event; still advance fulfillment.
+      List<ReserveItem> items = mappedReserveItems(order.id());
+      holdEffects.maybeReadyToPick(
+          orders.findById(order.id()).orElseThrow(), account, items, paidAt);
+      bumpExternalVersion(account, order, message);
       return;
     }
-    Instant paidAt = eventOccurredAt(message);
     order = applyPayment(order, "PAID", paidAt, account);
     List<ReserveItem> items = mappedReserveItems(order.id());
     boolean componentlessBundle =
@@ -300,6 +308,22 @@ public class OrderIntakeSupport {
       }
     }
     holdEffects.maybeReadyToPick(orders.findById(order.id()).orElseThrow(), account, items, paidAt);
+    bumpExternalVersion(account, order, message);
+  }
+
+  /** Re-runs fulfillment promotion after gap REST/inbox paid catch-up. */
+  void retryReadyToPick(String shopId, String externalOrderId) {
+    TsfAccount account =
+        channels
+            .tsfByExternalShopId(shopId)
+            .orElseThrow(() -> new IllegalStateException("TSF account missing for shop"));
+    SalesOrder order =
+        orders
+            .findByExternalId(account.id(), externalOrderId)
+            .orElseThrow(() -> new IllegalStateException("order missing for ready retry"));
+    List<ReserveItem> items = mappedReserveItems(order.id());
+    holdEffects.maybeReadyToPick(
+        orders.findById(order.id()).orElseThrow(), account, items, Instant.now(clock));
   }
 
   void handleCancelled(InboxMessage message) {
@@ -319,6 +343,7 @@ public class OrderIntakeSupport {
     stateMachine.applyOrderStatus(
         order, "CANCELLED", "TSF cancel", "TSF", guard(account, order, List.of()));
     recipients.scheduleRedaction(order.id(), clock.instant().plus(90, ChronoUnit.DAYS));
+    bumpExternalVersion(account, order, message);
     hooks.afterOutbox();
   }
 
@@ -326,6 +351,10 @@ public class OrderIntakeSupport {
     TsfAccount account = requireTsfAccount(message);
     String externalOrderId = requiredText(message.payload().path("data"), "order_id");
     SalesOrder order = requireOrder(account, externalOrderId);
+    long knownVersion = order.externalVersion() == null ? 0L : order.externalVersion();
+    if (message.aggregateVersion() > 0 && message.aggregateVersion() <= knownVersion) {
+      return;
+    }
     JsonNode data = message.payload().path("data");
     if (data.has("recipient")) {
       Recipient recipient = CreatedPayload.parseRecipient(data.path("recipient"));
@@ -333,7 +362,15 @@ public class OrderIntakeSupport {
     } else if (data.has("note")) {
       log.info("order.updated note ignored for external_order_id={}", externalOrderId);
     }
+    bumpExternalVersion(account, order, message);
     hooks.afterOutbox();
+  }
+
+  private void bumpExternalVersion(TsfAccount account, SalesOrder order, InboxMessage message) {
+    if (message.aggregateVersion() > 0) {
+      orders.updateExternalVersion(
+          account.id(), order.externalOrderId(), message.aggregateVersion());
+    }
   }
 
   private SalesOrder applyPayment(SalesOrder order, String to, Instant paidAt, TsfAccount account) {

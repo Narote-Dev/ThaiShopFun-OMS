@@ -210,6 +210,10 @@ public abstract class BaseChannelAdapter implements ChannelAdapter {
     } catch (RuntimeException ex) {
       outcome = "error";
       throw ex;
+    } catch (InterruptedException ex) {
+      Thread.currentThread().interrupt();
+      outcome = "unavailable";
+      throw new ChannelUnavailableException("Channel call interrupted for " + operation, ex);
     } catch (Exception ex) {
       outcome = "error";
       throw new ChannelUnavailableException("Channel call failed for " + operation, ex);

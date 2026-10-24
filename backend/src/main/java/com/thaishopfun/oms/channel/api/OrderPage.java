@@ -1,7 +1,8 @@
 package com.thaishopfun.oms.channel.api;
 
-import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.List;
+import tools.jackson.databind.PropertyNamingStrategies;
+import tools.jackson.databind.annotation.JsonNaming;
 
-public record OrderPage(
-    List<OrderSummary> orders, @JsonProperty("next_cursor") String nextCursor) {}
+@JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
+public record OrderPage(List<OrderSummary> orders, String nextCursor) {}

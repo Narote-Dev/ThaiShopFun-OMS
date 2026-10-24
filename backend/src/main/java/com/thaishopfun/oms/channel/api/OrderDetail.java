@@ -1,38 +1,42 @@
 package com.thaishopfun.oms.channel.api;
 
-import com.fasterxml.jackson.annotation.JsonProperty;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
+import tools.jackson.databind.PropertyNamingStrategies;
+import tools.jackson.databind.annotation.JsonNaming;
 
+@JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
 public record OrderDetail(
-    @JsonProperty("order_id") String orderId,
-    @JsonProperty("reservation_id") String reservationId,
-    @JsonProperty("payment_method") String paymentMethod,
-    @JsonProperty("payment_expires_at") Instant paymentExpiresAt,
+    String orderId,
+    String reservationId,
+    String paymentMethod,
+    Instant paymentExpiresAt,
     String currency,
     Totals totals,
     Recipient recipient,
-    @JsonProperty("ship_by") Instant shipBy,
+    Instant shipBy,
     List<Line> lines,
-    @JsonProperty("updated_at") Instant updatedAt,
-    @JsonProperty("aggregate_version") long aggregateVersion) {
+    Instant updatedAt,
+    long aggregateVersion,
+    String status) {
 
+  @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
   public record Totals(
-      BigDecimal subtotal,
-      @JsonProperty("shipping_fee") BigDecimal shippingFee,
-      BigDecimal discount,
-      @JsonProperty("grand_total") BigDecimal grandTotal) {}
+      BigDecimal subtotal, BigDecimal shippingFee, BigDecimal discount, BigDecimal grandTotal) {}
 
+  @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
   public record Recipient(String name, String phone, Address address) {}
 
+  @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
   public record Address(String line1, String district, String province, String postcode) {}
 
+  @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
   public record Line(
-      @JsonProperty("line_id") String lineId,
-      @JsonProperty("listing_sku_id") String listingSkuId,
-      @JsonProperty("seller_sku") String sellerSku,
+      String lineId,
+      String listingSkuId,
+      String sellerSku,
       String name,
       int qty,
-      @JsonProperty("unit_price") BigDecimal unitPrice) {}
+      BigDecimal unitPrice) {}
 }

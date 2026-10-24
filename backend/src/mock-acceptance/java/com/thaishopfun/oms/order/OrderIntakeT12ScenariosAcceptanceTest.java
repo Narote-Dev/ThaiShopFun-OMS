@@ -139,6 +139,7 @@ class OrderIntakeT12ScenariosAcceptanceTest {
   void setup() throws Exception {
     MAX_DEFER.set("24h");
     mock().getBean(OmsEndpoint.class).setBaseUrl("http://127.0.0.1:" + port);
+    enableMockWebhooks();
     fixture = new StockFixture(jdbc, transactions);
     IntakeTestConfig.failAfterOutbox.set(false);
     IntakeTestConfig.afterOutboxCalls.set(0);
@@ -595,7 +596,17 @@ class OrderIntakeT12ScenariosAcceptanceTest {
     JsonNode report = control("/control/events/shuffle", body);
     assertThat(report.path("sent")).hasSize(2);
 
-    assertThat(worker.processAvailable(10)).isEqualTo(2);
+    assertThat(worker.processAvailable(10)).isEqualTo(1);
+    assertThat(
+            text(
+                "SELECT status FROM inbox_event WHERE event_id = ?",
+                paid.path("event_id").asString()))
+        .isEqualTo("RECEIVED");
+    assertThat(
+            count(
+                "SELECT attempts FROM inbox_event WHERE event_id = ?",
+                paid.path("event_id").asString()))
+        .isZero();
     rewind(paid.path("event_id").asString());
     assertThat(worker.processAvailable(10)).isEqualTo(1);
     assertThat(
@@ -2072,6 +2083,24 @@ class OrderIntakeT12ScenariosAcceptanceTest {
     body.set("event", event);
     JsonNode report = control("/control/events/after-reservation-expiry", body);
     assertThat(report.path("sent").get(0).path("http_status").asInt()).isEqualTo(202);
+  }
+
+  private void enableMockWebhooks() throws Exception {
+    HttpResponse<String> response =
+        HTTP.send(
+            HttpRequest.newBuilder(
+                    URI.create(
+                        "http://127.0.0.1:"
+                            + OrderIntakeMockRuntime.mockPort()
+                            + "/control/webhooks"))
+                .timeout(HTTP_TIMEOUT)
+                .header("Content-Type", "application/json")
+                .POST(
+                    HttpRequest.BodyPublishers.ofString(
+                        "{\"enabled\":true}", StandardCharsets.UTF_8))
+                .build(),
+            HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+    assertThat(response.statusCode()).isEqualTo(200);
   }
 
   private JsonNode control(String path, ObjectNode body) throws Exception {
