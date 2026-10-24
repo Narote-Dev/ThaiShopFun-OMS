@@ -10,13 +10,17 @@ values or replace them with `[PII]`; metrics carry counts and bounded codes only
 `logback-spring.xml` wraps the existing Spring Boot console pattern in `PiiLogConverter`,
 including exception, cause and suppressed exception text. Existing levels and format
 remain. Precompiled patterns mask Thai local phones (9–10 digits, optional spaces or
-hyphens), +66/66 international forms, and emails. Known JSON keys are case insensitive:
+hyphens), +66/66 international forms, and emails. JSON and key=value / key: value keys are case insensitive and match name,
+recipient, address, phone, email, tel or mobile (including compound keys), plus
+Thai ชื่อ, ที่อยู่ and เบอร์. Existing additional address/note keys are also masked:
 name, phone, email, address, line1, line2, district, subdistrict, recipient,
 recipient_name, recipient_phone, recipient_address, first_name, last_name, full_name,
-street and note. Entire structured recipient/address values are masked, including
-nested objects/arrays and escaped strings. Contract fixture name/address sentinels
-are also masked if accidentally logged as free text. Arbitrary free-form names cannot
-be reliably identified by regex: application code must never log payloads or PII.
+street and note. Entire structured values under PII keys are masked, including
+nested objects/arrays and escaped strings. Unquoted pair values end at a comma,
+semicolon, closing bracket/brace, line end, or the next key/value pair.
+Free-text non-keyed names and addresses are a known limitation: no fuzzy name
+detection or sample-specific masking is used. Application code must never log
+payloads or PII.
 
 The test-wide `PiiLogGate` greps actual stdout/stderr bytes for the T00
 `PiiLogAssertions` sentinels and contract/fixture addresses. It applies automatically

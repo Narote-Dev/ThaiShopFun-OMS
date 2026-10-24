@@ -9,11 +9,29 @@ public final class PiiLogMask {
       Pattern.compile("(?<![\\d])(?:0(?:[ -]?\\d){8,9}|\\+?66(?:[ -]?\\d){8,9})(?![\\d])");
   private static final Pattern EMAIL =
       Pattern.compile("[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}");
+  private static final String KEY_CHARS = "[\\p{L}\\p{M}\\p{N}_.-]";
+  private static final String PII_KEY =
+      KEY_CHARS
+          + "*(?:name|recipient|address|phone|email|tel|mobile|ชื่อ|ที่อยู่|เบอร์)"
+          + KEY_CHARS
+          + "*|line[12]|district|subdistrict|street|note";
+  private static final String QUOTED_VALUE = "\"(?:\\\\.|[^\"\\\\])*\"|'(?:\\\\.|[^'\\\\])*'";
   private static final Pattern JSON =
       Pattern.compile(
-          "(?i)(\"(?:name|phone|email|address|line1|line2|district|subdistrict|recipient|recipient_name|recipient_phone|recipient_address|first_name|last_name|full_name|street|note)\"\\s*:\\s*)\"(?:\\\\.|[^\"\\\\])*\"");
+          "(?i)(\"(?:" + PII_KEY + ")\"\\s*:\\s*)(\"(?:\\\\.|[^\"\\\\])*\"|[^\\s,{}\\[\\]\"]+)");
   private static final Pattern STRUCTURED =
-      Pattern.compile("(?i)(\"(?:recipient|address)\"\\s*:\\s*)(?=[{\\[])");
+      Pattern.compile("(?i)(\"(?:" + PII_KEY + ")\"\\s*:\\s*)(?=[{\\[])");
+  // Unquoted values run to a delimiter, line end, or the next key/value pair.
+  private static final Pattern PAIRS =
+      Pattern.compile(
+          "(?i)(?<![\\p{L}\\p{M}\\p{N}_.\\-\"'])([\"']?(?:"
+              + PII_KEY
+              + ")[\"']?\\s*[=:]\\s*)("
+              + QUOTED_VALUE
+              + "|[^\\s,;{}\\[\\]](?:[^,;{}\\[\\]\\r\\n]*?[^\\s,;{}\\[\\]])?)"
+              + "(?=\\s+['\"]?"
+              + KEY_CHARS
+              + "+['\"]?\\s*[=:]|\\s*[,;{}\\[\\]\\r\\n]|\\s*$)");
 
   private PiiLogMask() {}
 
@@ -59,19 +77,24 @@ public final class PiiLogMask {
     boolean suspect = false;
     for (int i = 0; i < line.length(); i++) {
       char c = line.charAt(i);
-      if (c == '0' || c == '6' || c == '@' || c == '"' || c > 127) {
+      if (c == '0' || c == '6' || c == '@' || c == '"' || c == '=' || c == ':') {
         suspect = true;
         break;
       }
     }
     if (!suspect) return line;
     String masked = JSON.matcher(maskStructured(line)).replaceAll("$1\"[PII]\"");
+    masked =
+        PAIRS
+            .matcher(masked)
+            .replaceAll(
+                match -> {
+                  char first = match.group(2).charAt(0);
+                  String value = first == '\"' || first == '\'' ? first + "[PII]" + first : "[PII]";
+                  return Matcher.quoteReplacement(match.group(1) + value);
+                });
     masked = PHONE.matcher(masked).replaceAll("[PII]");
     masked = EMAIL.matcher(masked).replaceAll("[PII]");
-    // Contract sentinels also cover accidental unstructured name/address logging.
-    return masked
-        .replace("สมชาย ใจดี", "[PII]")
-        .replace("99/1 ถ.สุขุมวิท", "[PII]")
-        .replace("ซอยตัวอย่าง 1", "[PII]");
+    return masked;
   }
 }
