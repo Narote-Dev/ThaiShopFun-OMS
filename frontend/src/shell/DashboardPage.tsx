@@ -1,3 +1,4 @@
+import { holdDetailTh } from '../ui/labels'
 import { PackageCheck, PauseCircle, Plus, RefreshCw, ShoppingBag, TriangleAlert, Upload } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { fetchAllSkus } from '../catalog/listSkus'
@@ -232,7 +233,7 @@ export default function DashboardPage({ name }: { name: string }) {
                         </span>
                       </div>
                       <div className="mt-0.5 text-[11.5px] text-stone-500">
-                        {group.hold_detail ?? '—'} ·{' '}
+                        {holdDetailTh(group.hold_detail)} ·{' '}
                         <a
                           href={`#/orders/${sample.id}`}
                           className="font-mono text-stone-700 underline decoration-stone-300 underline-offset-2 hover:text-brand-700"

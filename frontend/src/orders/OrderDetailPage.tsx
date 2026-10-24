@@ -23,7 +23,7 @@ import { OrderDisplayBadge } from '../ui/OrderDisplayBadge'
 import { StatusBadge } from '../ui/StatusBadge'
 import { Timeline, type TimelineItem } from '../ui/Timeline'
 import { formatBangkokDateTime, formatMoney } from '../ui/format'
-import { labelTh, messageTh } from '../ui/labels'
+import { labelTh, messageTh, holdDetailTh } from '../ui/labels'
 import { holdReasonLabelTh } from '../ui/status'
 import { ordersAccess, type OrdersAccess } from './access'
 import { ordersApi, ordersMessage, type OrderDetail } from './api'
@@ -204,7 +204,7 @@ export default function OrderDetailPage({ id, me }: { id: string; me: Me }) {
           title={
             <>
               เหตุผลที่พัก: {holdReasonLabelTh(order.hold_reason)}
-              {order.hold_detail ? ` (${order.hold_detail})` : ''}
+              {order.hold_detail ? ` (${holdDetailTh(order.hold_detail)})` : ''}
               {order.hold_note ? ` — ${messageTh(order.hold_note, order.hold_note)}` : ''}
             </>
           }

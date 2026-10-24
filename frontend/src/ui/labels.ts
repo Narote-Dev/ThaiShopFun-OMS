@@ -12,6 +12,7 @@ const LABELS: Record<string, string> = {
   'TSF paid': 'ชำระเงินผ่าน TSF แล้ว',
   'stock ready': 'สต็อกพร้อมแล้ว',
   intake: 'รับออเดอร์เข้าระบบ',
+  BUNDLE_WITHOUT_COMPONENTS: 'สินค้าชุดยังไม่มีส่วนประกอบ',
   BUNDLE_REQUIRED: 'ต้องระบุว่าเป็นสินค้าชุดก่อนเพิ่มส่วนประกอบ',
   BUNDLE_NOT_STOCKABLE: 'สินค้าชุดไม่มีสต็อกของตัวเอง',
   AUTO_MATCH: 'จับคู่อัตโนมัติ',
@@ -163,4 +164,10 @@ export function importErrorTh(value: string): string {
   if (fields) return `ต้องมี ${fields[1]} ช่อง แต่พบ ${fields[2]} ช่อง`
   const code = value.split(':')[0]
   return messageTh(value, LABELS[code] ?? 'ข้อมูลไม่ถูกต้อง กรุณาตรวจสอบรูปแบบและค่าที่ระบุ')
+}
+
+/** Hold detail is either a known code (translated) or an identifier such as a SKU code (kept). */
+export function holdDetailTh(value: string | null | undefined): string {
+  if (!value) return '—'
+  return LABELS[value] ?? value
 }

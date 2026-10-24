@@ -6,7 +6,7 @@ import {
   DataTableRow,
   DataTableTh,
 } from '../ui/DataTable'
-import { labelTh } from '../ui/labels'
+import { labelTh, holdDetailTh } from '../ui/labels'
 import { HoldReasonBadge } from '../ui/HoldReasonBadge'
 import { PageContent } from '../ui/PageContent'
 import { PageHeader } from '../ui/PageHeader'
@@ -127,7 +127,7 @@ export default function HoldQueuePage() {
                 <DataTableCell>
                   {fixActionLinks(group)}
                   {group.hold_detail && group.hold_reason !== 'SKU_NOT_MAPPED' ? (
-                    <div className="mt-1 font-mono text-[11.5px] text-stone-500">{group.hold_detail}</div>
+                    <div className="mt-1 font-mono text-[11.5px] text-stone-500">{holdDetailTh(group.hold_detail)}</div>
                   ) : null}
                 </DataTableCell>
                 <DataTableCell>{group.count}</DataTableCell>
