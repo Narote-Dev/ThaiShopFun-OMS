@@ -16,7 +16,7 @@ import type { Me } from '../auth/AuthContext'
 export type NavItem = {
   href: string
   labelTh: string
-  /** English accessible name for tests and screen readers */
+  /** Thai accessible name for screen readers */
   ariaLabel: string
   icon: LucideIcon
   badgeKey?: 'orders' | 'holds'
@@ -37,7 +37,7 @@ export function buildNavSections(me: Me): NavSection[] {
         {
           href: '#/',
           labelTh: 'แดชบอร์ด',
-          ariaLabel: 'Dashboard',
+          ariaLabel: 'แดชบอร์ด',
           icon: LayoutDashboard,
         },
       ],
@@ -48,21 +48,21 @@ export function buildNavSections(me: Me): NavSection[] {
         {
           href: '#/orders',
           labelTh: 'ออเดอร์',
-          ariaLabel: 'Orders',
+          ariaLabel: 'ออเดอร์',
           icon: ShoppingBag,
           badgeKey: 'orders',
         },
         {
           href: '#/orders/holds',
           labelTh: 'คิวออเดอร์ค้าง',
-          ariaLabel: 'Hold queue',
+          ariaLabel: 'คิวออเดอร์ค้าง',
           icon: PauseCircle,
           badgeKey: 'holds',
         },
         {
           href: '#/channel/listings',
-          labelTh: 'Listings',
-          ariaLabel: 'Listings',
+          labelTh: 'รายการขาย',
+          ariaLabel: 'รายการขาย',
           icon: Store,
         },
       ],
@@ -72,15 +72,15 @@ export function buildNavSections(me: Me): NavSection[] {
       items: [
         {
           href: '#/catalog/products',
-          labelTh: 'สินค้า (Products)',
-          ariaLabel: 'Products',
+          labelTh: 'สินค้า',
+          ariaLabel: 'สินค้า',
           icon: Package,
         },
-        { href: '#/catalog/skus', labelTh: 'SKUs', ariaLabel: 'SKUs', icon: Barcode },
+        { href: '#/catalog/skus', labelTh: 'รหัสสินค้า', ariaLabel: 'รหัสสินค้า', icon: Barcode },
         {
           href: '#/catalog/import',
-          labelTh: 'นำเข้าข้อมูล (Import)',
-          ariaLabel: 'Import',
+          labelTh: 'นำเข้าข้อมูล',
+          ariaLabel: 'นำเข้าข้อมูล',
           icon: Upload,
         },
       ],
@@ -90,14 +90,14 @@ export function buildNavSections(me: Me): NavSection[] {
       items: [
         {
           href: '#/warehouses',
-          labelTh: 'คลัง (Warehouses)',
-          ariaLabel: 'Warehouses',
+          labelTh: 'คลังสินค้า',
+          ariaLabel: 'คลังสินค้า',
           icon: Warehouse,
         },
         {
           href: '#/stock/documents',
           labelTh: 'เอกสารสต็อก',
-          ariaLabel: 'Stock documents',
+          ariaLabel: 'เอกสารสต็อก',
           icon: ClipboardList,
         },
       ],
@@ -108,8 +108,8 @@ export function buildNavSections(me: Me): NavSection[] {
         ? [
             {
               href: '#/admin/outbox',
-              labelTh: 'Dead outbox',
-              ariaLabel: 'Dead outbox',
+              labelTh: 'เหตุการณ์ส่งไม่สำเร็จ',
+              ariaLabel: 'เหตุการณ์ส่งไม่สำเร็จ',
               icon: Inbox,
             },
           ]
@@ -125,18 +125,18 @@ export function breadcrumbParts(route: string): string[] {
   if (base.startsWith('#/orders/holds')) return ['คิวออเดอร์ค้าง']
   if (/^#\/orders\/[0-9a-f-]{36}$/.test(base)) return ['ออเดอร์', 'รายละเอียด']
   if (base.startsWith('#/orders')) return ['ออเดอร์']
-  if (base.startsWith('#/channel/listings')) return ['Listings']
+  if (base.startsWith('#/channel/listings')) return ['รายการขาย']
   if (base.startsWith('#/catalog/products')) return ['สินค้า']
-  if (base.startsWith('#/catalog/skus')) return ['SKUs']
+  if (base.startsWith('#/catalog/skus')) return ['รหัสสินค้า']
   if (base.startsWith('#/catalog/import')) return ['นำเข้าข้อมูล']
   if (base.startsWith('#/warehouses')) return ['คลัง']
   if (base.startsWith('#/stock/documents')) return ['เอกสารสต็อก']
-  if (base.startsWith('#/admin/outbox')) return ['Dead outbox']
-  return ['OMS']
+  if (base.startsWith('#/admin/outbox')) return ['เหตุการณ์ส่งไม่สำเร็จ']
+  return ['ระบบจัดการออเดอร์']
 }
 
 export function breadcrumbForRoute(route: string): string {
   const parts = breadcrumbParts(route)
-  return parts[parts.length - 1] ?? 'OMS'
+  return parts[parts.length - 1] ?? 'ระบบจัดการออเดอร์'
 }
 

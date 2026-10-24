@@ -19,6 +19,7 @@ import { Label } from '../ui/Label'
 import { OrderDisplayBadge } from '../ui/OrderDisplayBadge'
 import { PageContent } from '../ui/PageContent'
 import { PageHeader } from '../ui/PageHeader'
+import { labelTh } from '../ui/labels'
 import { Select } from '../ui/Select'
 import { StatusBadge } from '../ui/StatusBadge'
 import { TabBar } from '../ui/Tabs'
@@ -134,7 +135,7 @@ export default function OrdersListPage() {
         setError('')
       })
       .catch((err: unknown) => {
-        if (active) setError(ordersMessage(err, 'Could not load orders'))
+        if (active) setError(ordersMessage(err, 'โหลดออเดอร์ไม่สำเร็จ'))
       })
     return () => {
       active = false
@@ -233,7 +234,7 @@ export default function OrdersListPage() {
         title={
           <>
             <span aria-hidden="true">ออเดอร์</span>
-            <span className="sr-only">Orders</span>
+            <span className="sr-only">ออเดอร์</span>
           </>
         }
         subtitle="จัดการออเดอร์จากทุกช่องทาง"
@@ -241,15 +242,15 @@ export default function OrdersListPage() {
           <>
             <ComingSoonButton>
               <Download className="h-4 w-4" />
-              Export
+              ส่งออก
             </ComingSoonButton>
             <ComingSoonButton>
               <RefreshCw className="h-4 w-4" />
-              Sync
+              ซิงก์
             </ComingSoonButton>
             <ComingSoonButton>
               <Printer className="h-4 w-4" />
-              Print
+              พิมพ์
             </ComingSoonButton>
           </>
         }
@@ -262,7 +263,7 @@ export default function OrdersListPage() {
           title="มีออเดอร์ค้างที่ต้องแก้ไข"
           actions={
             <Button type="button" variant="secondary" asChild>
-              <a href="#/orders/holds">ดูคิว Hold →</a>
+              <a href="#/orders/holds">ดูคิวออเดอร์ค้าง →</a>
             </Button>
           }
         >
@@ -272,7 +273,7 @@ export default function OrdersListPage() {
 
       <Card className="mt-5 overflow-hidden">
         <TabBar
-          aria-label="Fulfillment tabs"
+          aria-label="แท็บการจัดส่ง"
           items={tabItems}
           activeId={activeTab}
           onSelect={(id) => selectTab(id as OrdersTabId)}
@@ -281,10 +282,10 @@ export default function OrdersListPage() {
         <form
           className="grid gap-4 border-b border-stone-100 p-4 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5"
           onSubmit={apply}
-          aria-label="Filter orders"
+          aria-label="ตัวกรองออเดอร์"
         >
           <div>
-            <Label htmlFor="orders-search">Search</Label>
+            <Label htmlFor="orders-search">ค้นหา</Label>
             <Input
               id="orders-search"
               value={filters.q}
@@ -292,84 +293,84 @@ export default function OrdersListPage() {
             />
           </div>
           <div>
-            <Label htmlFor="orders-hold">Hold</Label>
+            <Label htmlFor="orders-hold">พักออเดอร์</Label>
             <Select
               id="orders-hold"
-              aria-label="Hold filter"
+              aria-label="ตัวกรองการพักออเดอร์"
               value={filters.hold_reason}
               onChange={(e) => setFilters({ ...filters, hold_reason: e.target.value })}
             >
-              <option value="">Any</option>
-              <option value="NONE">None</option>
-              <option value="ANY">On hold</option>
-              <option value="SKU_NOT_MAPPED">SKU not mapped</option>
-              <option value="OUT_OF_STOCK">Out of stock</option>
-              <option value="ADDRESS_PROBLEM">Address problem</option>
-              <option value="PAYMENT_MISMATCH">Payment mismatch</option>
-              <option value="CHANNEL_CANCEL_PENDING">Channel cancel pending</option>
-              <option value="MANUAL">Manual</option>
+              <option value="">ทั้งหมด</option>
+              <option value="NONE">{labelTh('NONE')}</option>
+              <option value="ANY">พักออเดอร์</option>
+              <option value="SKU_NOT_MAPPED">{labelTh('SKU_NOT_MAPPED')}</option>
+              <option value="OUT_OF_STOCK">{labelTh('OUT_OF_STOCK')}</option>
+              <option value="ADDRESS_PROBLEM">{labelTh('ADDRESS_PROBLEM')}</option>
+              <option value="PAYMENT_MISMATCH">{labelTh('PAYMENT_MISMATCH')}</option>
+              <option value="CHANNEL_CANCEL_PENDING">{labelTh('CHANNEL_CANCEL_PENDING')}</option>
+              <option value="MANUAL">{labelTh('MANUAL')}</option>
             </Select>
           </div>
           <div>
-            <Label htmlFor="orders-fulfillment">Fulfillment status</Label>
+            <Label htmlFor="orders-fulfillment">สถานะการจัดส่ง</Label>
             <Select
               id="orders-fulfillment"
-              aria-label="Fulfillment status"
+              aria-label="สถานะการจัดส่ง"
               value={filters.fulfillment_status}
               onChange={(e) => setFilters({ ...filters, fulfillment_status: e.target.value })}
             >
-              <option value="">Any</option>
+              <option value="">ทั้งหมด</option>
               {FULFILLMENT_FILTER_VALUES.map((value) => (
                 <option key={value} value={value}>
-                  {value}
+                  {labelTh(value)}
                 </option>
               ))}
             </Select>
           </div>
           <div>
-            <Label htmlFor="orders-order-status">Order status</Label>
+            <Label htmlFor="orders-order-status">สถานะออเดอร์</Label>
             <Select
               id="orders-order-status"
               value={filters.order_status}
               onChange={(e) => setFilters({ ...filters, order_status: e.target.value })}
             >
-              <option value="">Any</option>
-              <option value="ACTIVE">Active</option>
-              <option value="CANCELLED">Cancelled</option>
-              <option value="COMPLETED">Completed</option>
+              <option value="">ทั้งหมด</option>
+              <option value="ACTIVE">{labelTh('ACTIVE')}</option>
+              <option value="CANCELLED">{labelTh('CANCELLED')}</option>
+              <option value="COMPLETED">{labelTh('COMPLETED')}</option>
             </Select>
           </div>
           <div>
-            <Label htmlFor="orders-payment-status">Payment status</Label>
+            <Label htmlFor="orders-payment-status">สถานะการชำระเงิน</Label>
             <Select
               id="orders-payment-status"
               value={filters.payment_status}
               onChange={(e) => setFilters({ ...filters, payment_status: e.target.value })}
             >
-              <option value="">Any</option>
-              <option value="PENDING">Pending</option>
-              <option value="PAID">Paid</option>
-              <option value="COD_PENDING">COD pending</option>
-              <option value="PARTIALLY_REFUNDED">Partially refunded</option>
-              <option value="REFUNDED">Refunded</option>
+              <option value="">ทั้งหมด</option>
+              <option value="PENDING">{labelTh('PENDING')}</option>
+              <option value="PAID">{labelTh('PAID')}</option>
+              <option value="COD_PENDING">{labelTh('COD_PENDING')}</option>
+              <option value="PARTIALLY_REFUNDED">{labelTh('PARTIALLY_REFUNDED')}</option>
+              <option value="REFUNDED">{labelTh('REFUNDED')}</option>
             </Select>
           </div>
           <div>
-            <Label htmlFor="orders-channel">Channel</Label>
+            <Label htmlFor="orders-channel">ช่องทาง</Label>
             <Select
               id="orders-channel"
               value={filters.channel}
               onChange={(e) => setFilters({ ...filters, channel: e.target.value })}
             >
-              <option value="">Any</option>
-              <option value="TSF">TSF</option>
-              <option value="SHOPEE">Shopee</option>
-              <option value="LAZADA">Lazada</option>
-              <option value="TIKTOK">TikTok</option>
+              <option value="">ทั้งหมด</option>
+              <option value="TSF">{labelTh('TSF')}</option>
+              <option value="SHOPEE">{labelTh('SHOPEE')}</option>
+              <option value="LAZADA">{labelTh('LAZADA')}</option>
+              <option value="TIKTOK">{labelTh('TIKTOK')}</option>
             </Select>
           </div>
           <div>
-            <Label htmlFor="orders-from">Ordered from</Label>
+            <Label htmlFor="orders-from">สั่งซื้อตั้งแต่</Label>
             <Input
               id="orders-from"
               type="date"
@@ -378,7 +379,7 @@ export default function OrdersListPage() {
             />
           </div>
           <div>
-            <Label htmlFor="orders-to">Ordered to</Label>
+            <Label htmlFor="orders-to">สั่งซื้อถึง</Label>
             <Input
               id="orders-to"
               type="date"
@@ -388,17 +389,17 @@ export default function OrdersListPage() {
           </div>
           <div className="flex items-end">
             <Button type="submit" variant="primary">
-              Apply
+              ใช้ตัวกรอง
             </Button>
           </div>
         </form>
 
-        <DataTable aria-label="Orders" className="rounded-none border-0 shadow-none">
+        <DataTable aria-label="ออเดอร์" className="rounded-none border-0 shadow-none">
           <DataTableHead>
             <tr>
               <DataTableTh className="w-10">
                 <Checkbox
-                  aria-label="Select all orders"
+                  aria-label="เลือกออเดอร์ทั้งหมด"
                   checked={allSelected}
                   onCheckedChange={toggleAll}
                 />
@@ -410,7 +411,7 @@ export default function OrdersListPage() {
               <DataTableTh className="text-right">ยอดรวม</DataTableTh>
               <DataTableTh>ชำระเงิน</DataTableTh>
               <DataTableTh>สถานะ</DataTableTh>
-              <DataTableTh>Hold</DataTableTh>
+              <DataTableTh>พักออเดอร์</DataTableTh>
             </tr>
           </DataTableHead>
           <tbody>
@@ -418,7 +419,7 @@ export default function OrdersListPage() {
               <DataTableRow key={row.id}>
                 <DataTableCell>
                   <Checkbox
-                    aria-label={`Select order ${row.external_order_id}`}
+                    aria-label={`เลือกออเดอร์ ${row.external_order_id}`}
                     checked={selected.has(row.id)}
                     onCheckedChange={(checked) => {
                       const next = new Set(selected)
@@ -476,7 +477,7 @@ export default function OrdersListPage() {
       ) : null}
 
       <TablePager
-        summary={total === 0 ? 'No orders' : `${page?.items.length ?? 0} on this page · ${total} matching`}
+        summary={total === 0 ? 'ไม่พบออเดอร์' : `${page?.items.length ?? 0} รายการในหน้านี้ · ${total} รายการที่ตรงกัน`}
       >
         <Button
           type="button"
@@ -490,7 +491,7 @@ export default function OrdersListPage() {
             writeHash(applied, prev)
           }}
         >
-          Previous
+          ก่อนหน้า
         </Button>
         <Button
           type="button"
@@ -503,7 +504,7 @@ export default function OrdersListPage() {
             writeHash(applied, page.next_cursor)
           }}
         >
-          Next
+          ถัดไป
         </Button>
       </TablePager>
     </PageContent>

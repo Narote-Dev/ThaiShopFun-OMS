@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { apiRequest, ApiError } from '../api/client'
+import { labelTh, messageTh } from '../ui/labels'
 import { Button } from '../ui/Button'
 import { PageContent } from '../ui/PageContent'
 import { PageHeader } from '../ui/PageHeader'
@@ -13,7 +14,7 @@ type DeadEvent = {
   attempts: number
 }
 
-const READ_ONLY = 'This shop is read-only until membership is renewed.'
+const READ_ONLY = 'ร้านค้านี้อ่านได้อย่างเดียวจนกว่าจะต่ออายุสมาชิก'
 
 export default function OutboxAdminPage({ readOnly = false }: { readOnly?: boolean }) {
   const [events, setEvents] = useState<DeadEvent[]>([])
@@ -30,7 +31,7 @@ export default function OutboxAdminPage({ readOnly = false }: { readOnly?: boole
       setLoaded(true)
     } catch (err) {
       setEvents([])
-      setError(messageFor(err, 'Load failed'))
+      setError(messageFor(err, 'โหลดไม่สำเร็จ'))
     } finally {
       setBusy(false)
     }
@@ -43,7 +44,7 @@ export default function OutboxAdminPage({ readOnly = false }: { readOnly?: boole
       await apiRequest(`/api/v1/outbox/${id}/retry`, { method: 'POST' })
       await load()
     } catch (err) {
-      setError(messageFor(err, 'Retry failed'))
+      setError(messageFor(err, 'ลองอีกครั้งไม่สำเร็จ'))
     } finally {
       setBusy(false)
     }
@@ -54,35 +55,35 @@ export default function OutboxAdminPage({ readOnly = false }: { readOnly?: boole
       <PageHeader
         title={
           <>
-            <span aria-hidden="true">Dead outbox</span>
-            <span className="sr-only">Dead outbox</span>
+            <span aria-hidden="true">เหตุการณ์ส่งไม่สำเร็จ</span>
+            <span className="sr-only">เหตุการณ์ส่งไม่สำเร็จ</span>
           </>
         }
       />
-      <p className="mt-4 text-[13px] text-stone-600">OWNER or ADMIN can send a DEAD event again. The session token stays in memory.</p>
+      <p className="mt-4 text-[13px] text-stone-600">เจ้าของร้านหรือผู้ดูแลระบบสามารถส่งเหตุการณ์ที่ส่งไม่สำเร็จอีกครั้งได้</p>
       <Button type="button" variant="primary" className="mt-4" onClick={() => void load()} disabled={busy}>
-        Load
+        โหลด
       </Button>
       {error ? <p role="alert" className="mt-4 text-[13px] text-red-700">{error}</p> : null}
       <ul className="mt-4 space-y-3">
         {events.map((event) => (
           <li key={event.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-stone-200 bg-white px-4 py-3 text-[13px]">
             <span>
-              {event.event_type} · {event.aggregate_id} · {event.attempts} attempts
+              {labelTh(event.event_type)} · {event.aggregate_id} · {event.attempts} ครั้งที่พยายาม
             </span>
             <Button type="button" size="sm" variant="secondary" onClick={() => void retry(event.id)} disabled={busy || readOnly}>
-              Retry
+              ลองอีกครั้ง
             </Button>
           </li>
         ))}
       </ul>
-      {loaded && events.length === 0 && !error ? <p className="mt-4 text-[13px] text-stone-600">No DEAD events.</p> : null}
+      {loaded && events.length === 0 && !error ? <p className="mt-4 text-[13px] text-stone-600">ไม่มีเหตุการณ์ส่งไม่สำเร็จ</p> : null}
     </PageContent>
   )
 }
 
 function messageFor(err: unknown, fallback: string): string {
   if (err instanceof ApiError && err.code === 'ENTITLEMENT_GRACE') return READ_ONLY
-  if (err instanceof ApiError) return err.message || `${fallback} (${err.status})`
+  if (err instanceof ApiError) return messageTh(err.message, fallback)
   return fallback
 }

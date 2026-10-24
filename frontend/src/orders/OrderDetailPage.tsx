@@ -23,6 +23,7 @@ import { OrderDisplayBadge } from '../ui/OrderDisplayBadge'
 import { StatusBadge } from '../ui/StatusBadge'
 import { Timeline, type TimelineItem } from '../ui/Timeline'
 import { formatBangkokDateTime, formatMoney } from '../ui/format'
+import { labelTh, messageTh } from '../ui/labels'
 import { holdReasonLabelTh } from '../ui/status'
 import { ordersAccess, type OrdersAccess } from './access'
 import { ordersApi, ordersMessage, type OrderDetail } from './api'
@@ -79,7 +80,7 @@ export default function OrderDetailPage({ id, me }: { id: string; me: Me }) {
         }
       })
       .catch((err: unknown) => {
-        if (active) setError(ordersMessage(err, 'Could not load order'))
+        if (active) setError(ordersMessage(err, 'โหลดออเดอร์ไม่สำเร็จ'))
       })
     return () => {
       active = false
@@ -96,7 +97,7 @@ export default function OrderDetailPage({ id, me }: { id: string; me: Me }) {
       const refreshed = await ordersApi.detail(id)
       setOrder(refreshed)
     } catch (err: unknown) {
-      setError(ordersMessage(err, 'Re-check failed'))
+      setError(ordersMessage(err, 'ตรวจสอบอีกครั้งไม่สำเร็จ'))
     } finally {
       setBusy(false)
     }
@@ -127,9 +128,9 @@ export default function OrderDetailPage({ id, me }: { id: string; me: Me }) {
       return {
         id: `${entry.dimension}-${index}`,
         icon: Icon,
-        title: `${entry.dimension}: ${entry.from_value} → ${entry.to_value}`,
+        title: `${labelTh(entry.dimension)}: ${labelTh(entry.from_value)} → ${labelTh(entry.to_value)}`,
         time: formatBangkokDateTime(entry.at),
-        description: entry.reason ? `${entry.reason} · ${entry.actor}` : entry.actor,
+        description: entry.reason ? `${messageTh(entry.reason, labelTh(entry.reason))} · ${labelTh(entry.actor)}` : labelTh(entry.actor),
       }
     })
   }, [order])
@@ -138,7 +139,7 @@ export default function OrderDetailPage({ id, me }: { id: string; me: Me }) {
     return (
       <PageContent wide>
         <p role="status" className="text-[13px] text-stone-600">
-          {error || 'Loading order…'}
+          {error || 'กำลังโหลดออเดอร์…'}
         </p>
       </PageContent>
     )
@@ -158,14 +159,14 @@ export default function OrderDetailPage({ id, me }: { id: string; me: Me }) {
     <PageContent wide>
       <p className="mb-3">
         <a href="#/orders" className="text-[13px] font-medium text-brand-700 hover:underline">
-          ← Orders
+          ← ออเดอร์
         </a>
       </p>
 
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1
-            aria-label={`Order ${order.external_order_id}`}
+            aria-label={`ออเดอร์ ${order.external_order_id}`}
             className="font-mono text-[22px] font-semibold tracking-tight text-stone-900"
           >
             {order.external_order_id}
@@ -178,14 +179,14 @@ export default function OrderDetailPage({ id, me }: { id: string; me: Me }) {
               <OrderDisplayBadge
                 order_status={order.order_status}
                 fulfillment_status={order.fulfillment_status}
-                hold_reason={order.hold_reason}
+                hold_reason={holdReasonLabelTh(order.hold_reason)}
               />
             ) : null}
             <StatusBadge value={order.payment_status} kind="payment" />
             <StatusBadge value={order.payment_method} kind="payment_method" />
           </div>
           <p className="mt-2 text-[13px] text-stone-500">
-            สั่งซื้อ {formatBangkokDateTime(order.ordered_at)} · {order.channel_account.channel} · v
+            สั่งซื้อ {formatBangkokDateTime(order.ordered_at)} · {order.channel_account.channel} · รุ่น
             {order.version}
           </p>
         </div>
@@ -202,16 +203,16 @@ export default function OrderDetailPage({ id, me }: { id: string; me: Me }) {
           variant="warning"
           title={
             <>
-              Hold: {order.hold_reason}
+              เหตุผลที่พัก: {holdReasonLabelTh(order.hold_reason)}
               {order.hold_detail ? ` (${order.hold_detail})` : ''}
-              {order.hold_note ? ` — ${order.hold_note}` : ''}
+              {order.hold_note ? ` — ${messageTh(order.hold_note, order.hold_note)}` : ''}
             </>
           }
           actions={
             <>
               {showRecheck ? (
                 <Button type="button" variant="secondary" disabled={busy} onClick={() => setRecheckOpen(true)}>
-                  Re-check hold
+                  ตรวจสอบออเดอร์ค้างอีกครั้ง
                 </Button>
               ) : null}
               {order.hold_reason === 'SKU_NOT_MAPPED' ? (
@@ -219,7 +220,7 @@ export default function OrderDetailPage({ id, me }: { id: string; me: Me }) {
                   <a
                     href={`#/channel/listings?channel_account_id=${encodeURIComponent(order.channel_account.id)}&mapped=false`}
                   >
-                    จับคู่ SKU
+                    จับคู่รหัสสินค้า
                   </a>
                 </Button>
               ) : null}
@@ -227,7 +228,7 @@ export default function OrderDetailPage({ id, me }: { id: string; me: Me }) {
           }
           footer={
             order.ship_by ? (
-              <span>Ship by {formatBangkokDateTime(order.ship_by)}</span>
+              <span>กำหนดส่งภายใน {formatBangkokDateTime(order.ship_by)}</span>
             ) : null
           }
         >
@@ -240,10 +241,10 @@ export default function OrderDetailPage({ id, me }: { id: string; me: Me }) {
         <div className="space-y-4 lg:col-span-2">
           <Card>
             <CardHeader title="รายการสินค้า" />
-            <DataTable aria-label="Order lines" className="rounded-none border-0 shadow-none">
+            <DataTable aria-label="รายการสินค้าในออเดอร์" className="rounded-none border-0 shadow-none">
               <DataTableHead>
                 <tr>
-                  <DataTableTh>SKU</DataTableTh>
+                  <DataTableTh>รหัสสินค้า</DataTableTh>
                   <DataTableTh>ชื่อ</DataTableTh>
                   <DataTableTh className="text-right">จำนวน</DataTableTh>
                   <DataTableTh className="text-right">ราคา</DataTableTh>
@@ -276,7 +277,7 @@ export default function OrderDetailPage({ id, me }: { id: string; me: Me }) {
                               className="text-[12px] text-brand-700 hover:underline"
                               href={`#/channel/listings?channel_account_id=${encodeURIComponent(order.channel_account.id)}&mapped=false&q=${encodeURIComponent(line.external_sku_id)}`}
                             >
-                              Not mapped
+                              ยังไม่จับคู่
                             </a>
                           </div>
                         ) : null}
@@ -308,25 +309,25 @@ export default function OrderDetailPage({ id, me }: { id: string; me: Me }) {
                 <tfoot className="border-t border-stone-100 bg-stone-50/60 text-[13px]">
                   <tr>
                     <td colSpan={4} className="px-4 py-2 text-right text-stone-500">
-                      Subtotal
+                      ยอดรวมสินค้า
                     </td>
                     <td className="px-4 py-2 text-right font-mono">{formatMoney(totals.subtotal)}</td>
                   </tr>
                   <tr>
                     <td colSpan={4} className="px-4 py-2 text-right text-stone-500">
-                      Shipping
+                      ค่าจัดส่ง
                     </td>
                     <td className="px-4 py-2 text-right font-mono">{formatMoney(totals.shipping)}</td>
                   </tr>
                   <tr>
                     <td colSpan={4} className="px-4 py-2 text-right text-stone-500">
-                      Discount
+                      ส่วนลด
                     </td>
                     <td className="px-4 py-2 text-right font-mono">−{formatMoney(totals.discount)}</td>
                   </tr>
                   <tr>
                     <td colSpan={4} className="px-4 py-1.5 text-right font-semibold text-stone-800">
-                      Total
+                      ยอดรวม
                     </td>
                     <td className="px-4 py-1.5 text-right font-mono font-semibold">
                       {formatMoney(totals.grand)}
@@ -339,7 +340,7 @@ export default function OrderDetailPage({ id, me }: { id: string; me: Me }) {
 
           {order.reservations.length > 0 ? (
             <Card>
-              <CardHeader title="Reservations" />
+              <CardHeader title="การจองสต็อก" />
               <CardBody>
                 <ul className="space-y-1 text-[13px]">
                   {order.reservations.map((r) => (
@@ -347,7 +348,7 @@ export default function OrderDetailPage({ id, me }: { id: string; me: Me }) {
                       <a href={`#/catalog/skus/${r.sku_id}/history`} className="font-mono text-brand-700">
                         {r.sku_code}
                       </a>{' '}
-                      · {r.qty} @ {r.warehouse_code} ({r.status})
+                      · {r.qty} @ {r.warehouse_code} ({labelTh(r.status)})
                     </li>
                   ))}
                 </ul>
@@ -357,12 +358,12 @@ export default function OrderDetailPage({ id, me }: { id: string; me: Me }) {
 
           {order.shipments.length > 0 ? (
             <Card>
-              <CardHeader title="Shipments" />
+              <CardHeader title="รายการจัดส่ง" />
               <CardBody>
                 <ul className="space-y-1 text-[13px]">
                   {order.shipments.map((s) => (
                     <li key={s.id}>
-                      {s.tracking_no ?? '—'} · {s.carrier ?? '—'} · {s.status}
+                      {s.tracking_no ?? '—'} · {s.carrier ?? '—'} · {labelTh(s.status)}
                     </li>
                   ))}
                 </ul>
@@ -377,20 +378,20 @@ export default function OrderDetailPage({ id, me }: { id: string; me: Me }) {
             <CardBody>
               <dl className="space-y-3 text-[13px]">
                 <div className="flex items-center justify-between gap-2">
-                  <dt className="text-stone-500">Order</dt>
+                  <dt className="text-stone-500">ออเดอร์</dt>
                   <dd>
                     <StatusBadge value={order.order_status} kind="order" />
                   </dd>
                 </div>
                 <div className="flex items-center justify-between gap-2">
-                  <dt className="text-stone-500">Payment</dt>
+                  <dt className="text-stone-500">การชำระเงิน</dt>
                   <dd>
                     <StatusBadge value={order.payment_status} kind="payment" />
                   </dd>
                 </div>
                 <div className="flex items-center justify-between gap-2">
-                  <dt className="text-stone-500">Fulfillment</dt>
-                  <dd>{order.fulfillment_status}</dd>
+                  <dt className="text-stone-500">การจัดส่ง</dt>
+                  <dd>{labelTh(order.fulfillment_status)}</dd>
                 </div>
               </dl>
             </CardBody>
@@ -401,23 +402,23 @@ export default function OrderDetailPage({ id, me }: { id: string; me: Me }) {
             <CardBody>
               <dl className="space-y-2 text-[13px]">
                 <div className="flex justify-between gap-2">
-                  <dt className="text-stone-500">Method</dt>
+                  <dt className="text-stone-500">วิธีชำระเงิน</dt>
                   <dd>
                     <StatusBadge value={order.payment_method} kind="payment_method" />
                   </dd>
                 </div>
                 <div className="flex justify-between gap-2">
-                  <dt className="text-stone-500">Status</dt>
+                  <dt className="text-stone-500">สถานะ</dt>
                   <dd>
                     <StatusBadge value={order.payment_status} kind="payment" />
                   </dd>
                 </div>
                 <div className="flex justify-between gap-2">
-                  <dt className="text-stone-500">Paid at</dt>
+                  <dt className="text-stone-500">ชำระเมื่อ</dt>
                   <dd className="tabular-nums">{formatBangkokDateTime(order.paid_at)}</dd>
                 </div>
                 <div className="flex justify-between gap-2">
-                  <dt className="text-stone-500">Total</dt>
+                  <dt className="text-stone-500">ยอดรวม</dt>
                   <dd className="font-mono">{formatMoney(order.grand_total)}</dd>
                 </div>
               </dl>
@@ -425,11 +426,11 @@ export default function OrderDetailPage({ id, me }: { id: string; me: Me }) {
           </Card>
 
           <Card>
-            <CardHeader title="การจัดส่ง" />
+            <CardHeader title="ข้อมูลการจัดส่ง" />
             <CardBody>
               {order.recipient.pii_status === 'REDACTED' ? (
                 <>
-                  <AlertBanner variant="info" title="ข้อมูลผู้รับถูกลบตามนโยบาย PDPA แล้ว (เหลือจังหวัด/รหัสไปรษณีย์)" />
+                  <AlertBanner variant="info" title="ข้อมูลผู้รับถูกลบตามนโยบายคุ้มครองข้อมูลส่วนบุคคล แล้ว (เหลือจังหวัด/รหัสไปรษณีย์)" />
                   <p className="mt-3 text-[13px] text-stone-700">
                     {order.recipient.province} {order.recipient.postcode}
                   </p>
@@ -445,23 +446,23 @@ export default function OrderDetailPage({ id, me }: { id: string; me: Me }) {
               )}
               {order.ship_by ? (
                 <p className="mt-2 text-[12px] text-stone-500">
-                  Ship by {formatBangkokDateTime(order.ship_by)}
+                  กำหนดส่งภายใน {formatBangkokDateTime(order.ship_by)}
                 </p>
               ) : null}
             </CardBody>
           </Card>
 
           <Card>
-            <CardHeader title="Timeline" />
-            <Timeline items={timelineItems} aria-label="Status timeline" />
+            <CardHeader title="ประวัติสถานะ" />
+            <Timeline items={timelineItems} aria-label="ประวัติการเปลี่ยนสถานะ" />
           </Card>
         </div>
       </div>
 
       {showRecheck && order.hold_reason === 'NONE' ? (
-        <section className="mt-4" aria-label="Hold recheck actions">
+        <section className="mt-4" aria-label="การตรวจสอบออเดอร์ค้าง">
           <Button type="button" variant="secondary" disabled={busy} onClick={() => setRecheckOpen(true)}>
-            Re-check hold
+            ตรวจสอบออเดอร์ค้างอีกครั้ง
           </Button>
         </section>
       ) : null}

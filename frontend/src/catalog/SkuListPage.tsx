@@ -41,7 +41,7 @@ export default function SkuListPage({ canWrite }: { canWrite: boolean }) {
       .catch((err: unknown) => {
         if (!active) return
         setPage(null)
-        setError(messageFor(err, 'Could not load SKUs'))
+        setError(messageFor(err, 'โหลดรหัสสินค้าไม่สำเร็จ'))
         setLoadedKey(key)
       })
     return () => {
@@ -62,46 +62,46 @@ export default function SkuListPage({ canWrite }: { canWrite: boolean }) {
       <PageHeader
         title={
           <>
-            <span aria-hidden="true">SKUs</span>
-            <span className="sr-only">SKUs</span>
+            <span aria-hidden="true">รหัสสินค้า</span>
+            <span className="sr-only">รหัสสินค้า</span>
           </>
         }
       />
       <Card className="mt-4">
         <form className="flex flex-wrap items-end gap-4 p-4" onSubmit={search}>
           <div className="min-w-[240px] flex-1">
-            <Label htmlFor="sku-search">Search SKUs</Label>
+            <Label htmlFor="sku-search">ค้นหารหัสสินค้า</Label>
             <Input
               id="sku-search"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Code prefix, exact barcode, or name"
+              placeholder="ส่วนต้นของรหัส บาร์โค้ด หรือชื่อ"
             />
           </div>
           <Button type="submit" variant="primary" disabled={busy}>
-            Search
+            ค้นหา
           </Button>
           {canWrite ? (
             <a href="#/catalog/skus/new" className="text-[13px] font-medium text-brand-700 hover:underline">
-              New SKU
+              เพิ่มรหัสสินค้า
             </a>
           ) : null}
         </form>
       </Card>
       {error ? <p role="alert" className="mt-4 text-[13px] text-red-700">{error}</p> : null}
-      {page && page.items.length === 0 ? <p className="mt-4 text-[13px] text-stone-600">No SKUs found.</p> : null}
+      {page && page.items.length === 0 ? <p className="mt-4 text-[13px] text-stone-600">ไม่พบรหัสสินค้า</p> : null}
       {page && page.items.length > 0 ? (
         <div className="mt-4">
-          <DataTable aria-label="SKUs">
+          <DataTable aria-label="รหัสสินค้า">
             <DataTableHead>
               <tr>
-                <DataTableTh>Code</DataTableTh>
-                <DataTableTh>Name</DataTableTh>
-                <DataTableTh>Product</DataTableTh>
-                <DataTableTh>Barcode</DataTableTh>
-                <DataTableTh>Type</DataTableTh>
-                <DataTableTh>On hand</DataTableTh>
-                <DataTableTh>Stock</DataTableTh>
+                <DataTableTh>รหัส</DataTableTh>
+                <DataTableTh>ชื่อ</DataTableTh>
+                <DataTableTh>สินค้า</DataTableTh>
+                <DataTableTh>บาร์โค้ด</DataTableTh>
+                <DataTableTh>ประเภท</DataTableTh>
+                <DataTableTh>คงเหลือ</DataTableTh>
+                <DataTableTh>สต็อก</DataTableTh>
               </tr>
             </DataTableHead>
             <tbody>
@@ -115,13 +115,13 @@ export default function SkuListPage({ canWrite }: { canWrite: boolean }) {
                   <DataTableCell>{sku.name}</DataTableCell>
                   <DataTableCell>{sku.product_name}</DataTableCell>
                   <DataTableCell>{sku.barcode ?? ''}</DataTableCell>
-                  <DataTableCell>{sku.is_bundle ? `Bundle (${sku.component_count})` : 'SKU'}</DataTableCell>
+                  <DataTableCell>{sku.is_bundle ? `สินค้าชุด (${sku.component_count})` : 'รหัสสินค้า'}</DataTableCell>
                   <DataTableCell>{sku.on_hand ?? '—'}</DataTableCell>
                   <DataTableCell>
                     {/* Change: T08A stock history per SKU. Bundles have no stock of their own. */}
                     {sku.is_bundle ? null : (
                       <a href={`#/catalog/skus/${sku.id}/history`} className="font-medium text-brand-700 hover:underline">
-                        History
+                        ประวัติ
                       </a>
                     )}
                   </DataTableCell>
@@ -135,7 +135,7 @@ export default function SkuListPage({ canWrite }: { canWrite: boolean }) {
         <TablePager
           summary={
             <span>
-              {offset + 1}–{last} of {total}
+              {offset + 1}–{last} จาก {total}
             </span>
           }
         >
@@ -145,10 +145,10 @@ export default function SkuListPage({ canWrite }: { canWrite: boolean }) {
             disabled={busy || offset === 0}
             onClick={() => setOffset(Math.max(offset - PAGE_SIZE, 0))}
           >
-            Previous
+            ก่อนหน้า
           </Button>
           <Button type="button" variant="secondary" disabled={busy || last >= total} onClick={() => setOffset(offset + PAGE_SIZE)}>
-            Next
+            ถัดไป
           </Button>
         </TablePager>
       ) : null}

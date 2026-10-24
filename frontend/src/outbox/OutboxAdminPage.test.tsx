@@ -44,10 +44,10 @@ describe('OutboxAdminPage', () => {
     configureApi({ getAccessToken: () => 'memory-token', fetchImpl })
 
     render(<OutboxAdminPage />)
-    fireEvent.click(screen.getByRole('button', { name: 'Load' }))
-    expect(await screen.findByText(/stock.updated/)).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
-    expect(await screen.findByText('No DEAD events.')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'โหลด' }))
+    expect(await screen.findByText(/ปรับปรุงสต็อก/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'ลองอีกครั้ง' }))
+    expect(await screen.findByText('ไม่มีเหตุการณ์ส่งไม่สำเร็จ')).toBeInTheDocument()
     expect(fetchImpl).toHaveBeenCalledWith(
       '/api/v1/outbox/11111111-1111-7111-8111-111111111111/retry',
       expect.objectContaining({ method: 'POST' }),
@@ -68,8 +68,8 @@ describe('OutboxAdminPage', () => {
       ),
     })
     render(<OutboxAdminPage />)
-    fireEvent.click(screen.getByRole('button', { name: 'Load' }))
-    expect(await screen.findByRole('alert')).toHaveTextContent('Invalid or expired token')
+    fireEvent.click(screen.getByRole('button', { name: 'โหลด' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('เซสชันไม่ถูกต้องหรือหมดอายุ กรุณาเข้าสู่ระบบอีกครั้ง')
   })
 
   it('disables retry while the shop is in grace', async () => {
@@ -83,8 +83,8 @@ describe('OutboxAdminPage', () => {
       ),
     })
     render(<OutboxAdminPage readOnly />)
-    fireEvent.click(screen.getByRole('button', { name: 'Load' }))
-    expect(await screen.findByRole('button', { name: 'Retry' })).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: 'โหลด' }))
+    expect(await screen.findByRole('button', { name: 'ลองอีกครั้ง' })).toBeDisabled()
   })
 
   it('shows a read-only message when a write is rejected with ENTITLEMENT_GRACE', async () => {
@@ -104,10 +104,10 @@ describe('OutboxAdminPage', () => {
       }),
     })
     render(<OutboxAdminPage />)
-    fireEvent.click(screen.getByRole('button', { name: 'Load' }))
-    fireEvent.click(await screen.findByRole('button', { name: 'Retry' }))
+    fireEvent.click(screen.getByRole('button', { name: 'โหลด' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'ลองอีกครั้ง' }))
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      'This shop is read-only until membership is renewed.',
+      'ร้านค้านี้อ่านได้อย่างเดียวจนกว่าจะต่ออายุสมาชิก',
     )
   })
 })

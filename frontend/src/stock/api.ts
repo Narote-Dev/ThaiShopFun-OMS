@@ -1,3 +1,4 @@
+import { labelTh, messageTh } from '../ui/labels'
 import { apiRequest, ApiError } from '../api/client'
 import type { Page } from '../catalog/api'
 
@@ -22,11 +23,11 @@ export const LEDGER_REASONS = [
 ] as const
 
 export const TYPE_LABELS: Record<DocumentType, string> = {
-  OPENING: 'Opening balance',
-  RECEIVE: 'Receive',
-  ADJUSTMENT: 'Adjustment',
-  COUNT: 'Stock count',
-  WRITE_OFF: 'Write-off',
+  OPENING: labelTh('OPENING'),
+  RECEIVE: labelTh('RECEIVE'),
+  ADJUSTMENT: labelTh('ADJUSTMENT'),
+  COUNT: labelTh('COUNT'),
+  WRITE_OFF: labelTh('WRITE_OFF'),
 }
 
 export type DocumentLine = {
@@ -179,16 +180,16 @@ export function problemsOf(err: unknown): LineProblem[] {
 }
 
 const MESSAGES: Record<string, string> = {
-  ENTITLEMENT_GRACE: 'This shop is read-only until membership is renewed.',
-  FORBIDDEN: 'Only an OWNER or ADMIN can post this document type or void a document.',
-  BELOW_RESERVED: 'Stock would drop below what is reserved for orders. Release or move those orders first.',
-  REASON_REQUIRED: 'Every adjustment line needs a reason.',
-  OPENING_ALREADY_SET: 'This SKU already has stock history. Use an adjustment instead.',
+  ENTITLEMENT_GRACE: 'ร้านค้านี้อ่านได้อย่างเดียวจนกว่าจะต่ออายุสมาชิก',
+  FORBIDDEN: 'เฉพาะเจ้าของร้านหรือผู้ดูแลระบบเท่านั้นที่ลงบัญชีหรือยกเลิกเอกสารได้',
+  BELOW_RESERVED: 'สต็อกจะต่ำกว่ายอดจองของออเดอร์ กรุณาปล่อยหรือย้ายออเดอร์เหล่านั้นก่อน',
+  REASON_REQUIRED: 'ทุกรายการปรับสต็อกต้องระบุเหตุผล',
+  OPENING_ALREADY_SET: 'สินค้านี้มีประวัติสต็อกแล้ว กรุณาใช้เอกสารปรับสต็อก',
 }
 
 export function stockMessage(err: unknown, fallback: string): string {
-  if (err instanceof ApiError && MESSAGES[err.code]) return `${MESSAGES[err.code]} (${err.code})`
-  if (err instanceof ApiError) return `${err.message || fallback} (${err.code})`
-  if (err instanceof Error && err.message) return err.message
+  if (err instanceof ApiError && MESSAGES[err.code]) return MESSAGES[err.code]
+  if (err instanceof ApiError) return messageTh(err.message, labelTh(err.code) === 'ไม่ระบุ' ? fallback : labelTh(err.code))
+  if (err instanceof Error && err.message) return messageTh(err.message, fallback)
   return fallback
 }

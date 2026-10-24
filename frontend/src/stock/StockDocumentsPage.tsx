@@ -14,6 +14,7 @@ import { Input } from '../ui/Input'
 import { Label } from '../ui/Label'
 import { PageContent } from '../ui/PageContent'
 import { PageHeader } from '../ui/PageHeader'
+import { labelTh } from '../ui/labels'
 import { Select } from '../ui/Select'
 import type { StockAccess } from './access'
 import {
@@ -53,7 +54,7 @@ export default function StockDocumentsPage({ access }: { access: StockAccess }) 
         setError('')
       })
       .catch((err: unknown) => {
-        if (active) setError(stockMessage(err, 'Could not load stock documents'))
+        if (active) setError(stockMessage(err, 'โหลดเอกสารสต็อกไม่สำเร็จ'))
       })
     return () => {
       active = false
@@ -75,7 +76,7 @@ export default function StockDocumentsPage({ access }: { access: StockAccess }) 
       const created = await stockApi.createDocument(type, reference.trim() || null, note.trim() || null)
       window.location.hash = `#/stock/documents/${created.id}`
     } catch (err) {
-      setError(stockMessage(err, 'Could not create the document'))
+      setError(stockMessage(err, 'สร้างเอกสารไม่สำเร็จ'))
     } finally {
       setBusy(false)
     }
@@ -89,7 +90,7 @@ export default function StockDocumentsPage({ access }: { access: StockAccess }) 
         title={
           <>
             <span aria-hidden="true">เอกสารสต็อก</span>
-            <span className="sr-only">Stock documents</span>
+            <span className="sr-only">เอกสารสต็อก</span>
           </>
         }
       />
@@ -98,10 +99,10 @@ export default function StockDocumentsPage({ access }: { access: StockAccess }) 
           <form
             className="grid gap-4 p-4 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5"
             onSubmit={create}
-            aria-label="New stock document"
+            aria-label="เอกสารสต็อกใหม่"
           >
             <div>
-              <Label htmlFor="new-doc-type">New document type</Label>
+              <Label htmlFor="new-doc-type">ประเภทเอกสารใหม่</Label>
               <Select id="new-doc-type" value={type} onChange={(event) => setType(event.target.value as DocumentType)}>
                 {DOCUMENT_TYPES.map((value) => (
                   <option key={value} value={value}>
@@ -111,16 +112,16 @@ export default function StockDocumentsPage({ access }: { access: StockAccess }) 
               </Select>
             </div>
             <div>
-              <Label htmlFor="new-doc-ref">Reference no.</Label>
+              <Label htmlFor="new-doc-ref">เลขที่อ้างอิง</Label>
               <Input id="new-doc-ref" value={reference} onChange={(event) => setReference(event.target.value)} />
             </div>
             <div>
-              <Label htmlFor="new-doc-note">Note</Label>
+              <Label htmlFor="new-doc-note">หมายเหตุ</Label>
               <Input id="new-doc-note" value={note} onChange={(event) => setNote(event.target.value)} />
             </div>
             <div className="flex items-end">
               <Button type="submit" variant="primary" disabled={busy}>
-                Create document
+                สร้างเอกสาร
               </Button>
             </div>
           </form>
@@ -130,16 +131,16 @@ export default function StockDocumentsPage({ access }: { access: StockAccess }) 
         <form
           className="grid gap-4 p-4 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5"
           onSubmit={applyFilters}
-          aria-label="Filter stock documents"
+          aria-label="ตัวกรองเอกสารสต็อก"
         >
           <div>
-            <Label htmlFor="filter-doc-type">Type</Label>
+            <Label htmlFor="filter-doc-type">ประเภท</Label>
             <Select
               id="filter-doc-type"
               value={filters.type}
               onChange={(event) => setFilters({ ...filters, type: event.target.value })}
             >
-              <option value="">All types</option>
+              <option value="">ทุกประเภท</option>
               {DOCUMENT_TYPES.map((value) => (
                 <option key={value} value={value}>
                   {TYPE_LABELS[value]}
@@ -148,20 +149,20 @@ export default function StockDocumentsPage({ access }: { access: StockAccess }) 
             </Select>
           </div>
           <div>
-            <Label htmlFor="filter-doc-status">Status</Label>
+            <Label htmlFor="filter-doc-status">สถานะ</Label>
             <Select
               id="filter-doc-status"
               value={filters.status}
               onChange={(event) => setFilters({ ...filters, status: event.target.value })}
             >
-              <option value="">All statuses</option>
-              <option value="DRAFT">Draft</option>
-              <option value="POSTED">Posted</option>
-              <option value="VOID">Void</option>
+              <option value="">ทุกสถานะ</option>
+              <option value="DRAFT">{labelTh('DRAFT')}</option>
+              <option value="POSTED">{labelTh('POSTED')}</option>
+              <option value="VOID">{labelTh('VOID')}</option>
             </Select>
           </div>
           <div>
-            <Label htmlFor="filter-doc-from">From</Label>
+            <Label htmlFor="filter-doc-from">ตั้งแต่</Label>
             <Input
               id="filter-doc-from"
               type="date"
@@ -170,7 +171,7 @@ export default function StockDocumentsPage({ access }: { access: StockAccess }) 
             />
           </div>
           <div>
-            <Label htmlFor="filter-doc-to">To</Label>
+            <Label htmlFor="filter-doc-to">ถึง</Label>
             <Input
               id="filter-doc-to"
               type="date"
@@ -180,24 +181,24 @@ export default function StockDocumentsPage({ access }: { access: StockAccess }) 
           </div>
           <div className="flex items-end">
             <Button type="submit" variant="primary">
-              Filter
+              กรอง
             </Button>
           </div>
         </form>
       </Card>
       {error ? <p role="alert" className="mt-4 text-[13px] text-red-700">{error}</p> : null}
-      {page && page.items.length === 0 ? <p className="mt-4 text-[13px] text-stone-600">No stock documents.</p> : null}
+      {page && page.items.length === 0 ? <p className="mt-4 text-[13px] text-stone-600">ยังไม่มีเอกสารสต็อก</p> : null}
       {page && page.items.length > 0 ? (
         <div className="mt-4">
-          <DataTable aria-label="Stock documents">
+          <DataTable aria-label="เอกสารสต็อก">
             <DataTableHead>
               <tr>
-                <DataTableTh>Created</DataTableTh>
-                <DataTableTh>Type</DataTableTh>
-                <DataTableTh>Reference</DataTableTh>
-                <DataTableTh>Status</DataTableTh>
-                <DataTableTh>Lines</DataTableTh>
-                <DataTableTh>Posted</DataTableTh>
+                <DataTableTh>สร้างเมื่อ</DataTableTh>
+                <DataTableTh>ประเภท</DataTableTh>
+                <DataTableTh>อ้างอิง</DataTableTh>
+                <DataTableTh>สถานะ</DataTableTh>
+                <DataTableTh>รายการ</DataTableTh>
+                <DataTableTh>ลงบัญชีแล้ว</DataTableTh>
               </tr>
             </DataTableHead>
             <tbody>
@@ -210,7 +211,7 @@ export default function StockDocumentsPage({ access }: { access: StockAccess }) 
                   </DataTableCell>
                   <DataTableCell>{TYPE_LABELS[doc.type]}</DataTableCell>
                   <DataTableCell>{doc.reference_no ?? ''}</DataTableCell>
-                  <DataTableCell>{doc.status}</DataTableCell>
+                  <DataTableCell>{labelTh(doc.status)}</DataTableCell>
                   <DataTableCell>{doc.line_count}</DataTableCell>
                   <DataTableCell>{doc.posted_at ? new Date(doc.posted_at).toLocaleString() : ''}</DataTableCell>
                 </DataTableRow>
@@ -223,7 +224,7 @@ export default function StockDocumentsPage({ access }: { access: StockAccess }) 
         <TablePager
           summary={
             <span>
-              {offset + 1}–{last} of {total}
+              {offset + 1}–{last} จาก {total}
             </span>
           }
         >
@@ -233,10 +234,10 @@ export default function StockDocumentsPage({ access }: { access: StockAccess }) 
             disabled={offset === 0}
             onClick={() => setOffset(Math.max(offset - DOCUMENT_PAGE_SIZE, 0))}
           >
-            Previous
+            ก่อนหน้า
           </Button>
           <Button type="button" variant="secondary" disabled={last >= total} onClick={() => setOffset(offset + DOCUMENT_PAGE_SIZE)}>
-            Next
+            ถัดไป
           </Button>
         </TablePager>
       ) : null}

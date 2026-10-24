@@ -85,7 +85,7 @@ async function request<T>(path: string, init: RequestInit, attempt: Attempt): Pr
   const token = deps.getAccessToken()
   if (!token) {
     deps.onLoginRequired()
-    throw new ApiError(401, 'UNAUTHORIZED', 'Sign in required', null)
+    throw new ApiError(401, 'UNAUTHORIZED', 'กรุณาเข้าสู่ระบบ', null)
   }
   const sentToken = token
   const headers = new Headers(init.headers)
@@ -153,7 +153,7 @@ function isPaywall(code: string): code is PaywallCode {
 
 async function readError(response: Response): Promise<ApiError> {
   let code = 'UNKNOWN'
-  let message = response.statusText || 'Request failed'
+  let message = response.statusText || 'ดำเนินการไม่สำเร็จ'
   let traceId: string | null = null
   let details: unknown = null
   try {

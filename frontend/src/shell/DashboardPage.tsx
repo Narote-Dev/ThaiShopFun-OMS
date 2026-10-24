@@ -66,7 +66,7 @@ export default function DashboardPage({ name }: { name: string }) {
         setError('')
       })
       .catch((err: unknown) => {
-        if (active) setError(ordersMessage(err, 'Could not load dashboard'))
+        if (active) setError(ordersMessage(err, 'โหลดแดชบอร์ดไม่สำเร็จ'))
       })
     return () => {
       active = false
@@ -153,7 +153,7 @@ export default function DashboardPage({ name }: { name: string }) {
         <KpiCard
           label="รอหยิบ"
           value={readyCount}
-          hint="สถานะ READY_TO_PICK พร้อมแพ็ก"
+          hint="สถานะพร้อมหยิบสินค้าเพื่อแพ็ก"
           icon={<PackageCheck className="h-4 w-4" />}
           iconClassName="bg-emerald-50 text-emerald-600"
         />
@@ -174,7 +174,7 @@ export default function DashboardPage({ name }: { name: string }) {
                   </span>
                   <span className="flex items-center gap-1">
                     <span className="h-2 w-2 rounded-sm bg-amber-400" />
-                    SKU ไม่จับคู่ {unmappedHolds}
+                    รหัสสินค้ายังไม่จับคู่ {unmappedHolds}
                   </span>
                 </div>
               </div>
@@ -188,7 +188,7 @@ export default function DashboardPage({ name }: { name: string }) {
         <KpiCard
           label="สต็อกใกล้หมด"
           value={lowStockCount}
-          hint={`SKU คงเหลือพร้อมขาย ≤ ${LOW_STOCK_THRESHOLD} ชิ้น`}
+          hint={`สินค้าคงเหลือพร้อมขาย ≤ ${LOW_STOCK_THRESHOLD} ชิ้น`}
           icon={<TriangleAlert className="h-4 w-4" />}
           iconClassName="bg-amber-50 text-amber-600"
         />
@@ -259,16 +259,16 @@ export default function DashboardPage({ name }: { name: string }) {
             action={
               <a
                 href="#/catalog/skus"
-                aria-label="Open SKU list"
+                aria-label="เปิดรายการรหัสสินค้า"
                 className="text-[12.5px] font-medium text-stone-600 hover:text-brand-700"
               >
-                SKUs
+                รหัสสินค้า
               </a>
             }
           />
           <ul className="divide-y divide-stone-100">
             {lowStockPreview.length === 0 ? (
-              <li className="px-5 py-6 text-[13px] text-stone-500">ไม่มี SKU ใกล้หมด</li>
+              <li className="px-5 py-6 text-[13px] text-stone-500">ไม่มีรหัสสินค้าใกล้หมด</li>
             ) : (
               lowStockPreview.map((sku) => {
                 const pct = Math.min(100, Math.round((Math.max(0, sku.available) / LOW_STOCK_THRESHOLD) * 100))
@@ -311,14 +311,14 @@ export default function DashboardPage({ name }: { name: string }) {
             </a>
           }
         />
-        <DataTable aria-label="Latest orders" className="border-0 shadow-none">
+        <DataTable aria-label="ออเดอร์ล่าสุด" className="border-0 shadow-none">
           <DataTableHead>
             <tr>
-              <DataTableTh>Order</DataTableTh>
-              <DataTableTh>Channel</DataTableTh>
-              <DataTableTh>Payment</DataTableTh>
-              <DataTableTh>Total</DataTableTh>
-              <DataTableTh>Status</DataTableTh>
+              <DataTableTh>ออเดอร์</DataTableTh>
+              <DataTableTh>ช่องทาง</DataTableTh>
+              <DataTableTh>การชำระเงิน</DataTableTh>
+              <DataTableTh>ยอดรวม</DataTableTh>
+              <DataTableTh>สถานะ</DataTableTh>
             </tr>
           </DataTableHead>
           <tbody>

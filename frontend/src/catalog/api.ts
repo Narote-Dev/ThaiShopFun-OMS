@@ -1,3 +1,4 @@
+import { labelTh, messageTh } from '../ui/labels'
 import { apiRequest, ApiError } from '../api/client'
 
 export type Page<T> = { items: T[]; total: number; limit: number; offset: number }
@@ -124,12 +125,12 @@ export const catalogApi = {
   },
 }
 
-const READ_ONLY = 'This shop is read-only until membership is renewed.'
+const READ_ONLY = 'ร้านค้านี้อ่านได้อย่างเดียวจนกว่าจะต่ออายุสมาชิก'
 
 export function messageFor(err: unknown, fallback: string): string {
   if (err instanceof ApiError && err.code === 'ENTITLEMENT_GRACE') return READ_ONLY
-  if (err instanceof ApiError && err.code === 'FORBIDDEN') return 'Only an OWNER or ADMIN can change the catalog.'
-  if (err instanceof ApiError) return `${err.message || fallback} (${err.code})`
-  if (err instanceof Error && err.message) return err.message
+  if (err instanceof ApiError && err.code === 'FORBIDDEN') return 'เฉพาะเจ้าของร้านหรือผู้ดูแลระบบเท่านั้นที่แก้ไขแคตตาล็อกได้'
+  if (err instanceof ApiError) return messageTh(err.message, labelTh(err.code) === 'ไม่ระบุ' ? fallback : labelTh(err.code))
+  if (err instanceof Error && err.message) return messageTh(err.message, fallback)
   return fallback
 }

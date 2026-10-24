@@ -41,7 +41,7 @@ export function Dialog({
             </div>
             <DialogPrimitive.Close
               className="rounded-md p-1 text-stone-400 hover:bg-stone-100 hover:text-stone-700"
-              aria-label="Close"
+              aria-label="ปิด"
             >
               <X className="h-4 w-4" />
             </DialogPrimitive.Close>

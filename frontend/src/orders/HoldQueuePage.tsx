@@ -6,6 +6,7 @@ import {
   DataTableRow,
   DataTableTh,
 } from '../ui/DataTable'
+import { labelTh } from '../ui/labels'
 import { HoldReasonBadge } from '../ui/HoldReasonBadge'
 import { PageContent } from '../ui/PageContent'
 import { PageHeader } from '../ui/PageHeader'
@@ -25,7 +26,7 @@ function fixActionLinks(group: HoldGroup) {
           href={`#/channel/listings?channel_account_id=${encodeURIComponent(row.channel_account_id)}&mapped=false`}
           className="font-medium text-brand-700 hover:underline"
         >
-          Map unmapped listings ({row.count})
+          จับคู่รายการขายที่ยังไม่จับคู่ ({row.count})
         </a>
       </div>
     ))
@@ -78,7 +79,7 @@ export default function HoldQueuePage() {
         }
       })
       .catch((err: unknown) => {
-        if (active) setError(ordersMessage(err, 'Could not load hold queue'))
+        if (active) setError(ordersMessage(err, 'โหลดคิวออเดอร์ค้างไม่สำเร็จ'))
       })
     return () => {
       active = false
@@ -89,7 +90,7 @@ export default function HoldQueuePage() {
     <PageContent wide>
       <p className="text-[13px]">
         <a href="#/orders" className="font-medium text-brand-700 hover:underline">
-          ← Orders
+          ← ออเดอร์
         </a>
       </p>
       <PageHeader
@@ -97,7 +98,7 @@ export default function HoldQueuePage() {
         title={
           <>
             <span aria-hidden="true">คิวออเดอร์ค้าง</span>
-            <span className="sr-only">Hold queue</span>
+            <span className="sr-only">คิวออเดอร์ค้าง</span>
           </>
         }
       />
@@ -107,13 +108,13 @@ export default function HoldQueuePage() {
         </p>
       ) : null}
       <div className="mt-4">
-        <DataTable aria-label="Hold groups">
+        <DataTable aria-label="กลุ่มออเดอร์ค้าง">
           <DataTableHead>
             <tr>
-              <DataTableTh>Reason</DataTableTh>
-              <DataTableTh>Detail / action</DataTableTh>
-              <DataTableTh>Count</DataTableTh>
-              <DataTableTh>Sample</DataTableTh>
+              <DataTableTh>เหตุผล</DataTableTh>
+              <DataTableTh>รายละเอียด / การดำเนินการ</DataTableTh>
+              <DataTableTh>จำนวน</DataTableTh>
+              <DataTableTh>ตัวอย่าง</DataTableTh>
             </tr>
           </DataTableHead>
           <tbody>
@@ -121,7 +122,7 @@ export default function HoldQueuePage() {
               <DataTableRow key={`${group.hold_reason}-${group.hold_detail ?? ''}`}>
                 <DataTableCell>
                   <HoldReasonBadge reason={group.hold_reason} detail={group.hold_detail} />
-                  <span className="sr-only">{group.hold_reason}</span>
+                  <span className="sr-only">{labelTh(group.hold_reason)}</span>
                 </DataTableCell>
                 <DataTableCell>
                   {fixActionLinks(group)}

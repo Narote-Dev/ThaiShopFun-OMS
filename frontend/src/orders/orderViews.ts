@@ -6,7 +6,7 @@ export type OrdersTabId = 'all' | 'ready' | 'hold' | 'cancelled' | 'cancel_pendi
 export const ORDER_TAB_LABELS: Record<OrdersTabId, string> = {
   all: 'ทั้งหมด',
   ready: 'รอหยิบ',
-  hold: 'ค้าง (Hold)',
+  hold: 'ค้าง',
   cancelled: 'ยกเลิก',
   cancel_pending: 'รอยกเลิก',
 }

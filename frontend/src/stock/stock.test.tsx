@@ -90,15 +90,15 @@ describe('StockDocumentsPage', () => {
     render(<StockDocumentsPage access={stockAccess(me('STAFF'))} />)
     expect(await screen.findByText('ADJ-1')).toBeInTheDocument()
 
-    const filters = screen.getByRole('form', { name: 'Filter stock documents' })
-    fireEvent.change(within(filters).getByLabelText('Status'), { target: { value: 'POSTED' } })
-    fireEvent.change(within(filters).getByLabelText('From'), { target: { value: '2026-09-01' } })
-    fireEvent.click(within(filters).getByRole('button', { name: 'Filter' }))
+    const filters = screen.getByRole('form', { name: 'ตัวกรองเอกสารสต็อก' })
+    fireEvent.change(within(filters).getByLabelText('สถานะ'), { target: { value: 'POSTED' } })
+    fireEvent.change(within(filters).getByLabelText('ตั้งแต่'), { target: { value: '2026-09-01' } })
+    fireEvent.click(within(filters).getByRole('button', { name: 'กรอง' }))
     await waitFor(() => expect(calls.some((c) => c.url.includes('status=POSTED') && c.url.includes('from=2026-09-01'))).toBe(true))
 
-    fireEvent.change(screen.getByLabelText('New document type'), { target: { value: 'RECEIVE' } })
-    fireEvent.change(screen.getByLabelText('Reference no.'), { target: { value: 'PO-9' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Create document' }))
+    fireEvent.change(screen.getByLabelText('ประเภทเอกสารใหม่'), { target: { value: 'RECEIVE' } })
+    fireEvent.change(screen.getByLabelText('เลขที่อ้างอิง'), { target: { value: 'PO-9' } })
+    fireEvent.click(screen.getByRole('button', { name: 'สร้างเอกสาร' }))
     await waitFor(() => expect(window.location.hash).toBe('#/stock/documents/new-doc'))
     const post = calls.find((c) => c.method === 'POST')
     expect(JSON.parse(String(post?.init?.body))).toEqual({ type: 'RECEIVE', reference_no: 'PO-9', note: null })
@@ -108,16 +108,16 @@ describe('StockDocumentsPage', () => {
     const { fetchImpl } = stubFetch(() => ({ body: { items: [], total: 0, limit: 25, offset: 0 } }))
     configureApi({ getAccessToken: () => 't', fetchImpl })
     render(<StockDocumentsPage access={READ_ONLY_ACCESS} />)
-    expect(await screen.findByText('No stock documents.')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Create document' })).toBeNull()
+    expect(await screen.findByText('ยังไม่มีเอกสารสต็อก')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'สร้างเอกสาร' })).toBeNull()
   })
 })
 
 describe('StockDocumentPage', () => {
   it.each([
-    ['Post', 'DRAFT', 'ลงบัญชีเอกสารสต็อก'],
-    ['Delete draft', 'DRAFT', 'ลบเอกสารฉบับร่าง'],
-    ['Void', 'POSTED', 'ยกเลิกเอกสารสต็อก'],
+    ['ลงบัญชี', 'DRAFT', 'ลงบัญชีเอกสารสต็อก'],
+    ['ลบฉบับร่าง', 'DRAFT', 'ลบเอกสารฉบับร่าง'],
+    ['ยกเลิกเอกสาร', 'POSTED', 'ยกเลิกเอกสารสต็อก'],
   ])('cancels %s through Dialog without an API mutation', async (button, status, title) => {
     const { fetchImpl, calls } = stubFetch(({ url }) => {
       if (url === '/api/v1/warehouses') return { body: warehouses }
@@ -163,23 +163,23 @@ describe('StockDocumentPage', () => {
     })
     configureApi({ getAccessToken: () => 't', fetchImpl })
     render(<StockDocumentPage id={DOC_ID} access={stockAccess(me('OWNER'))} />)
-    expect(await screen.findByText('Adjustment · DRAFT')).toBeInTheDocument()
+    expect(await screen.findByText('ปรับสต็อก · ฉบับร่าง')).toBeInTheDocument()
 
     // Step 1: Add a line: the body carries the code, warehouse, qty, and reason.
-    const add = screen.getByRole('form', { name: 'Add line' })
-    fireEvent.change(within(add).getByLabelText('SKU code'), { target: { value: 'MUG-RED' } })
-    fireEvent.change(within(add).getByLabelText('Qty'), { target: { value: '3' } })
-    fireEvent.change(within(add).getByLabelText('Reason'), { target: { value: 'FOUND' } })
-    fireEvent.click(within(add).getByRole('button', { name: 'Add line' }))
+    const add = screen.getByRole('form', { name: 'เพิ่มรายการ' })
+    fireEvent.change(within(add).getByLabelText('รหัสสินค้า'), { target: { value: 'MUG-RED' } })
+    fireEvent.change(within(add).getByLabelText('จำนวน'), { target: { value: '3' } })
+    fireEvent.change(within(add).getByLabelText('เหตุผล'), { target: { value: 'FOUND' } })
+    fireEvent.click(within(add).getByRole('button', { name: 'เพิ่มรายการ' }))
     await waitFor(() => expect(calls.some((c) => c.url.endsWith('/lines') && c.method === 'POST')).toBe(true))
     const added = calls.find((c) => c.url.endsWith('/lines') && c.method === 'POST')
     expect(JSON.parse(String(added?.init?.body))).toEqual({ warehouse_id: WH, qty: 3, reason_code: 'FOUND', sku_code: 'MUG-RED' })
 
     // Step 2: Post after confirming; the per-line problem appears in that row.
-    fireEvent.click(await screen.findByRole('button', { name: 'Post' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'ลงบัญชี' }))
     fireEvent.click(within(screen.getByRole('dialog', { name: 'ลงบัญชีเอกสารสต็อก' })).getByRole('button', { name: 'ยืนยัน' }))
-    const lines = screen.getByRole('table', { name: 'Lines' })
-    expect(await within(lines).findByRole('alert')).toHaveTextContent('BELOW_RESERVED: on_hand 5 + -2 would be below reserved 4')
+    const lines = screen.getByRole('table', { name: 'รายการ' })
+    expect(await within(lines).findByRole('alert')).toHaveTextContent('คงเหลือ 5 ปรับ -2 จะต่ำกว่ายอดจอง 4')
   })
 
   it('hides Post from STAFF on an adjustment and everything in a read-only shop', async () => {
@@ -190,15 +190,15 @@ describe('StockDocumentPage', () => {
     })
     configureApi({ getAccessToken: () => 't', fetchImpl })
     const { unmount } = render(<StockDocumentPage id={DOC_ID} access={stockAccess(me('STAFF'))} />)
-    expect(await screen.findByText('Only an OWNER or ADMIN can post this document.')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Post' })).toBeNull()
-    expect(screen.getByRole('button', { name: 'Add line' })).toBeInTheDocument()
+    expect(await screen.findByText('เฉพาะเจ้าของร้านหรือผู้ดูแลระบบเท่านั้นที่ลงบัญชีเอกสารนี้ได้')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'ลงบัญชี' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'เพิ่มรายการ' })).toBeInTheDocument()
     unmount()
 
     render(<StockDocumentPage id={DOC_ID} access={READ_ONLY_ACCESS} />)
-    expect(await screen.findByText('This shop is read-only.')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Post' })).toBeNull()
-    expect(screen.queryByRole('form', { name: 'Add line' })).toBeNull()
+    expect(await screen.findByText('ร้านค้านี้อ่านได้อย่างเดียว')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'ลงบัญชี' })).toBeNull()
+    expect(screen.queryByRole('form', { name: 'เพิ่มรายการ' })).toBeNull()
   })
 
   it('starts a count, edits the counted column, and voids a posted document after confirming', async () => {
@@ -221,11 +221,11 @@ describe('StockDocumentPage', () => {
     configureApi({ getAccessToken: () => 't', fetchImpl })
     const { unmount } = render(<StockDocumentPage id={DOC_ID} access={stockAccess(me('OWNER'))} />)
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Start count' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'เริ่มตรวจนับ' }))
     expect(await screen.findByText('10')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Start count' })).toBeNull()
-    fireEvent.change(screen.getByLabelText('Counted for MUG-RED'), { target: { value: '9' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    expect(screen.queryByRole('button', { name: 'เริ่มตรวจนับ' })).toBeNull()
+    fireEvent.change(screen.getByLabelText('ตรวจนับแล้ว สำหรับ MUG-RED'), { target: { value: '9' } })
+    fireEvent.click(screen.getByRole('button', { name: 'บันทึก' }))
     await waitFor(() => expect(calls.some((c) => c.method === 'PUT')).toBe(true))
     const put = calls.find((c) => c.method === 'PUT')
     expect(JSON.parse(String(put?.init?.body))).toEqual({ warehouse_id: WH, counted_qty: 9, sku_id: SKU_ID })
@@ -233,9 +233,9 @@ describe('StockDocumentPage', () => {
 
     current = doc({ type: 'COUNT', status: 'POSTED', posted_at: '2026-09-30T05:00:00Z' })
     render(<StockDocumentPage id={DOC_ID} access={stockAccess(me('ADMIN'))} />)
-    fireEvent.click(await screen.findByRole('button', { name: 'Void' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'ยกเลิกเอกสาร' }))
     fireEvent.click(within(screen.getByRole('dialog', { name: 'ยกเลิกเอกสารสต็อก' })).getByRole('button', { name: 'ยืนยัน' }))
-    expect(await screen.findByRole('status')).toHaveTextContent('Voided. 1 reversing entries written.')
+    expect(await screen.findByRole('status')).toHaveTextContent('ยกเลิกแล้ว บันทึกรายการกลับบัญชี 1 รายการ')
   })
 })
 
@@ -285,17 +285,17 @@ describe('StockHistoryPage', () => {
     configureApi({ getAccessToken: () => 't', fetchImpl })
     render(<StockHistoryPage skuId={SKU_ID} />)
 
-    expect(await screen.findByRole('link', { name: 'Receive PO-1' })).toHaveAttribute('href', `#/stock/documents/${DOC_ID}`)
-    expect(screen.getByText('Order ord-77')).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Stock history · MUG-RED' })).toBeInTheDocument()
+    expect(await screen.findByRole('link', { name: 'รับเข้า PO-1' })).toHaveAttribute('href', `#/stock/documents/${DOC_ID}`)
+    expect(screen.getByText('ออเดอร์ ord-77')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'ประวัติสต็อก · MUG-RED' })).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Load more' }))
-    expect(await screen.findByText('OPENING_BALANCE')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Load more' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'โหลดเพิ่มเติม' }))
+    expect(await screen.findByText('ยอดยกมา')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'โหลดเพิ่มเติม' })).toBeNull()
 
-    fireEvent.change(screen.getByLabelText('Reason'), { target: { value: 'SHIP' } })
-    fireEvent.change(screen.getByLabelText('To'), { target: { value: '2026-09-30' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Filter' }))
+    fireEvent.change(screen.getByLabelText('เหตุผล'), { target: { value: 'SHIP' } })
+    fireEvent.change(screen.getByLabelText('ถึง'), { target: { value: '2026-09-30' } })
+    fireEvent.click(screen.getByRole('button', { name: 'กรอง' }))
     await waitFor(() => expect(calls.some((c) => c.url.includes('reason=SHIP') && c.url.includes('to=2026-09-30'))).toBe(true))
   })
 
@@ -306,6 +306,6 @@ describe('StockHistoryPage', () => {
     })
     configureApi({ getAccessToken: () => 't', fetchImpl })
     render(<StockHistoryPage skuId={SKU_ID} />)
-    expect(await screen.findByRole('alert')).toHaveTextContent('A bundle has no stock of its own (BUNDLE_NOT_STOCKABLE)')
+    expect(await screen.findByRole('alert')).toHaveTextContent('สินค้าชุดไม่มีสต็อกของตัวเอง')
   })
 })

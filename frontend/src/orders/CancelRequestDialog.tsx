@@ -26,7 +26,7 @@ export function CancelRequestDialog({ onClose, onSubmit, busy, error }: {
       open
       onOpenChange={(open) => { if (!open && !busy) onClose() }}
       title="ขอยกเลิกออเดอร์"
-      description="OMS จะส่งคำขอไป TSF — TSF เป็นผู้ตัดสิน"
+      description="ระบบจะส่งคำขอไป TSF — TSF เป็นผู้ตัดสิน"
     >
       <form
         className="space-y-4"

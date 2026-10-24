@@ -1,3 +1,4 @@
+import { labelTh, messageTh } from '../ui/labels'
 import { apiRequest, ApiError } from '../api/client'
 export type OrderListItem = {
   id: string
@@ -167,7 +168,7 @@ export function ordersMessage(err: unknown, fallback: string): string {
     if (messages[err.code]) return messages[err.code]
     if (err.status === 429) return 'ส่งคำขอถี่เกินไป กรุณาลองอีกครั้งภายหลัง'
     if (err.status === 502 || err.status === 503) return 'ช่องทางไม่พร้อมให้บริการ กรุณาลองอีกครั้งภายหลัง'
-    return err.message || fallback
+    return messageTh(err.message, labelTh(err.code) === 'ไม่ระบุ' ? fallback : labelTh(err.code))
   }
   return fallback
 }

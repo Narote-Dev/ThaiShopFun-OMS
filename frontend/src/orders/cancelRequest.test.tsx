@@ -47,7 +47,7 @@ async function openCancel() {
 it('validates missing, blank and overlong other reasons inline, accepts 500 characters, then shows pending state', async () => {
   const calls = setup()
   const dialog = await openCancel()
-  expect(dialog.getByText('OMS จะส่งคำขอไป TSF — TSF เป็นผู้ตัดสิน')).toBeInTheDocument()
+  expect(dialog.getByText('ระบบจะส่งคำขอไป TSF — TSF เป็นผู้ตัดสิน')).toBeInTheDocument()
   fireEvent.click(dialog.getByRole('button', { name: 'ส่งคำขอยกเลิก' }))
   expect(dialog.getByText('กรุณาระบุเหตุผล')).toBeInTheDocument()
   fireEvent.change(dialog.getByLabelText('เหตุผล', { exact: true }), { target: { value: 'อื่นๆ' } })
@@ -87,7 +87,7 @@ it.each([
   ['OWNER', 'ACTIVE', { supports_cancel_request: false }],
 ] as const)('hides cancel for %s / %s / %j', async (role, status, overrides) => {
   setup({ ...order, ...overrides }, { ...me, role, entitlement: { ...me.entitlement, status } })
-  await screen.findByRole('heading', { name: 'Order ORDER-1' })
+  await screen.findByRole('heading', { name: 'ออเดอร์ ORDER-1' })
   expect(screen.queryByRole('button', { name: 'ขอยกเลิก' })).toBeNull()
   expect(screen.queryByRole('dialog')).toBeNull()
 })
@@ -101,7 +101,7 @@ it('allows ADMIN to open the cancel dialog', async () => {
 it.each(['cancel', 'recheck'])('cancels %s confirmation without an API mutation', async (action) => {
   const calls = setup()
   if (action === 'cancel') await openCancel()
-  else fireEvent.click(await screen.findByRole('button', { name: 'Re-check hold' }))
+  else fireEvent.click(await screen.findByRole('button', { name: 'ตรวจสอบออเดอร์ค้างอีกครั้ง' }))
   const dialog = screen.getByRole('dialog')
   expect(dialog).toBeInTheDocument()
   expect(calls.filter((c) => c.method !== 'GET')).toHaveLength(0)
@@ -150,20 +150,20 @@ it('fifth tab queries pending hold reason, displays its count, preserves dates, 
   const { unmount } = render(<OrdersListPage />)
   const tab = screen.getByRole('button', { name: /^รอยกเลิก/ })
   await waitFor(() => expect(tab).toHaveTextContent(/^รอยกเลิก3$/))
-  const tabs = within(screen.getByRole('navigation', { name: 'Fulfillment tabs' })).getAllByRole('button')
+  const tabs = within(screen.getByRole('navigation', { name: 'แท็บการจัดส่ง' })).getAllByRole('button')
   expect(tabs).toHaveLength(5)
   expect(tabs[4]).toBe(tab)
   fireEvent.click(tab)
   await screen.findByRole('link', { name: 'ORDER-1' })
-  expect(screen.getByLabelText('Hold filter')).toHaveValue('CHANNEL_CANCEL_PENDING')
-  expect(screen.getByLabelText('Ordered from')).toHaveValue('2026-10-01')
-  expect(screen.getByLabelText('Ordered to')).toHaveValue('2026-10-24')
+  expect(screen.getByLabelText('ตัวกรองการพักออเดอร์')).toHaveValue('CHANNEL_CANCEL_PENDING')
+  expect(screen.getByLabelText('สั่งซื้อตั้งแต่')).toHaveValue('2026-10-01')
+  expect(screen.getByLabelText('สั่งซื้อถึง')).toHaveValue('2026-10-24')
   await waitFor(() => expect(window.location.hash).toContain('hold_reason=CHANNEL_CANCEL_PENDING'))
   expect(calls.some((c) => c.url.includes('hold_reason=CHANNEL_CANCEL_PENDING') && c.url.includes('ordered_from=2026-10-01') && c.url.includes('ordered_to=2026-10-24'))).toBe(true)
   unmount()
   render(<OrdersListPage />)
   await screen.findByRole('link', { name: 'ORDER-1' })
-  expect(screen.getByLabelText('Hold filter')).toHaveValue('CHANNEL_CANCEL_PENDING')
+  expect(screen.getByLabelText('ตัวกรองการพักออเดอร์')).toHaveValue('CHANNEL_CANCEL_PENDING')
 })
 
 it('links the pending hold group to the fifth tab without a detail search constraint', async () => {

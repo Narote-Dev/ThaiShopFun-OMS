@@ -54,7 +54,7 @@ test('active shop sees its name on the dashboard', async ({ page }) => {
   })
   const tokens = await signIn(page, /^Active Shop/)
   await expect(page.getByRole('heading', { name: 'Active Shop' })).toBeVisible()
-  await expect(page.getByText('OWNER · PRO')).toBeVisible()
+  await expect(page.getByText('เจ้าของร้าน · โปร')).toBeVisible()
   await expect.poll(() => authorization).toBe(`Bearer ${tokens.access}`)
   expect(tokens.access).not.toBe(tokens.id)
   await expectNoStoredTokens(page, tokens)
@@ -63,7 +63,7 @@ test('active shop sees its name on the dashboard', async ({ page }) => {
 test('returns to the outbox page after sign-in', async ({ page }) => {
   await page.goto('/#/admin/outbox')
   await page.getByRole('link', { name: /^Active Shop/ }).click()
-  await expect(page.getByRole('heading', { name: 'Dead outbox' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'เหตุการณ์ส่งไม่สำเร็จ' })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Active Shop' })).toHaveCount(0)
   expect(page.url()).toContain('#/admin/outbox')
   expect(page.url()).not.toContain('code=')
@@ -71,22 +71,22 @@ test('returns to the outbox page after sign-in', async ({ page }) => {
 
 test('expired membership sees the paywall', async ({ page }) => {
   const tokens = await signIn(page, /^Expired Shop/)
-  await expect(page.getByRole('heading', { name: 'Membership needed' })).toBeVisible()
-  await expect(page.getByRole('link', { name: 'TSF Seller Center' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'ต้องต่ออายุสมาชิก' })).toBeVisible()
+  await expect(page.getByRole('link', { name: 'ศูนย์ผู้ขาย TSF' })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Expired Shop' })).toHaveCount(0)
   await expectNoStoredTokens(page, tokens)
 })
 
 test('suspended membership sees the paywall', async ({ page }) => {
   await signIn(page, /^Suspended Shop/)
-  await expect(page.getByRole('heading', { name: 'Membership needed' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'ต้องต่ออายุสมาชิก' })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Suspended Shop' })).toHaveCount(0)
 })
 
 test('grace membership shows the read-only banner', async ({ page }) => {
   await signIn(page, /^Grace Shop/)
   await expect(page.getByRole('heading', { name: 'Grace Shop' })).toBeVisible()
-  await expect(page.getByRole('status')).toContainText(/read-only/i)
+  await expect(page.getByRole('status')).toContainText(/อ่านได้อย่างเดียว/i)
 })
 
 test('reload signs in again through authorize', async ({ page }) => {
@@ -103,6 +103,6 @@ test('reload signs in again through authorize', async ({ page }) => {
 test('log out returns to the signed-out screen', async ({ page }) => {
   await signIn(page, /^Active Shop/)
   await expect(page.getByRole('heading', { name: 'Active Shop' })).toBeVisible()
-  await page.getByRole('button', { name: 'Log out' }).click()
-  await expect(page.getByRole('button', { name: 'Sign in' })).toBeVisible()
+  await page.getByRole('button', { name: 'ออกจากระบบ' }).click()
+  await expect(page.getByRole('button', { name: 'เข้าสู่ระบบ' })).toBeVisible()
 })

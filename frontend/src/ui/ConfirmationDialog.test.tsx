@@ -20,7 +20,7 @@ it.each(['escape', 'close', 'cancel'])('dismisses via %s without confirming', (a
   const onOpenChange = vi.fn()
   render(<ConfirmationDialog open title="ตรวจสอบ" description="ตรวจสอบอีกครั้ง?" onOpenChange={onOpenChange} onConfirm={onConfirm} />)
   if (action === 'escape') fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' })
-  else fireEvent.click(screen.getByRole('button', { name: action === 'close' ? 'Close' : 'ยกเลิก' }))
+  else fireEvent.click(screen.getByRole('button', { name: action === 'close' ? 'ปิด' : 'ยกเลิก' }))
   expect(onOpenChange).toHaveBeenCalledWith(false)
   expect(onConfirm).not.toHaveBeenCalled()
 })

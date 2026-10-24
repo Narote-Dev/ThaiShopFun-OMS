@@ -36,7 +36,7 @@ export default function WarehousesPage({ canWrite }: { canWrite: boolean }) {
         setEdits(Object.fromEntries(body.items.map((w) => [w.id, { code: w.code, name: w.name }])))
       })
       .catch((err: unknown) => {
-        if (active) setError(messageFor(err, 'Could not load warehouses'))
+        if (active) setError(messageFor(err, 'โหลดคลังสินค้าไม่สำเร็จ'))
       })
     return () => {
       active = false
@@ -60,7 +60,7 @@ export default function WarehousesPage({ canWrite }: { canWrite: boolean }) {
 
   async function create(event: FormEvent) {
     event.preventDefault()
-    if (await run(() => catalogApi.createWarehouse(code.trim(), name.trim()), 'Could not create the warehouse')) {
+    if (await run(() => catalogApi.createWarehouse(code.trim(), name.trim()), 'สร้างคลังสินค้าไม่สำเร็จ')) {
       setCode('')
       setName('')
     }
@@ -71,20 +71,20 @@ export default function WarehousesPage({ canWrite }: { canWrite: boolean }) {
       <PageHeader
         title={
           <>
-            <span aria-hidden="true">คลัง (Warehouses)</span>
-            <span className="sr-only">Warehouses</span>
+            <span aria-hidden="true">คลังสินค้า</span>
+            <span className="sr-only">คลังสินค้า</span>
           </>
         }
       />
       {error ? <p role="alert" className="mt-4 text-[13px] text-red-700">{error}</p> : null}
       <div className="mt-4">
-        <DataTable aria-label="Warehouses">
+        <DataTable aria-label="คลังสินค้า">
           <DataTableHead>
             <tr>
-              <DataTableTh>Code</DataTableTh>
-              <DataTableTh>Name</DataTableTh>
-              <DataTableTh>Default</DataTableTh>
-              {canWrite ? <DataTableTh>Actions</DataTableTh> : null}
+              <DataTableTh>รหัส</DataTableTh>
+              <DataTableTh>ชื่อ</DataTableTh>
+              <DataTableTh>ค่าเริ่มต้น</DataTableTh>
+              {canWrite ? <DataTableTh>การดำเนินการ</DataTableTh> : null}
             </tr>
           </DataTableHead>
           <tbody>
@@ -96,7 +96,7 @@ export default function WarehousesPage({ canWrite }: { canWrite: boolean }) {
                   <DataTableCell>
                     {canWrite ? (
                       <Input
-                        aria-label={`Code of ${warehouse.code}`}
+                        aria-label={`รหัสของ ${warehouse.code}`}
                         value={edit.code}
                         className="mt-0"
                         onChange={(event) => setEdits({ ...edits, [warehouse.id]: { ...edit, code: event.target.value } })}
@@ -108,7 +108,7 @@ export default function WarehousesPage({ canWrite }: { canWrite: boolean }) {
                   <DataTableCell>
                     {canWrite ? (
                       <Input
-                        aria-label={`Name of ${warehouse.code}`}
+                        aria-label={`ชื่อของ ${warehouse.code}`}
                         value={edit.name}
                         className="mt-0"
                         onChange={(event) => setEdits({ ...edits, [warehouse.id]: { ...edit, name: event.target.value } })}
@@ -117,7 +117,7 @@ export default function WarehousesPage({ canWrite }: { canWrite: boolean }) {
                       warehouse.name
                     )}
                   </DataTableCell>
-                  <DataTableCell>{warehouse.is_default ? 'Default' : ''}</DataTableCell>
+                  <DataTableCell>{warehouse.is_default ? 'ค่าเริ่มต้น' : ''}</DataTableCell>
                   {canWrite ? (
                     <DataTableCell>
                       <div className="flex flex-wrap gap-2">
@@ -129,30 +129,30 @@ export default function WarehousesPage({ canWrite }: { canWrite: boolean }) {
                             void run(
                               () =>
                                 catalogApi.updateWarehouse(warehouse.id, edit.code.trim(), edit.name.trim(), warehouse.address),
-                              'Could not save the warehouse',
+                              'บันทึกคลังสินค้าไม่สำเร็จ',
                             )
                           }
                         >
-                          Save
+                          บันทึก
                         </Button>
                         <Button
                           type="button"
                           size="sm"
                           disabled={busy || warehouse.is_default}
                           onClick={() =>
-                            void run(() => catalogApi.setDefaultWarehouse(warehouse.id), 'Could not change the default')
+                            void run(() => catalogApi.setDefaultWarehouse(warehouse.id), 'เปลี่ยนค่าเริ่มต้นไม่สำเร็จ')
                           }
                         >
-                          Set default
+                          ตั้งเป็นค่าเริ่มต้น
                         </Button>
                         <Button
                           type="button"
                           size="sm"
                           variant="ghost"
                           disabled={busy || warehouse.is_default}
-                          onClick={() => void run(() => catalogApi.deleteWarehouse(warehouse.id), 'Could not delete')}
+                          onClick={() => void run(() => catalogApi.deleteWarehouse(warehouse.id), 'ลบไม่สำเร็จ')}
                         >
-                          Delete
+                          ลบ
                         </Button>
                       </div>
                     </DataTableCell>
@@ -167,15 +167,15 @@ export default function WarehousesPage({ canWrite }: { canWrite: boolean }) {
         <Card className="mt-4">
           <form className="flex flex-wrap items-end gap-4 p-4" onSubmit={create}>
             <div>
-              <Label htmlFor="wh-code">Code</Label>
+              <Label htmlFor="wh-code">รหัส</Label>
               <Input id="wh-code" value={code} onChange={(event) => setCode(event.target.value)} />
             </div>
             <div>
-              <Label htmlFor="wh-name">Name</Label>
+              <Label htmlFor="wh-name">ชื่อ</Label>
               <Input id="wh-name" value={name} onChange={(event) => setName(event.target.value)} />
             </div>
             <Button type="submit" variant="primary" disabled={busy || !code.trim() || !name.trim()}>
-              Add warehouse
+              เพิ่มคลังสินค้า
             </Button>
           </form>
         </Card>

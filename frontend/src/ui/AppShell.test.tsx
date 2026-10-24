@@ -52,8 +52,8 @@ describe('AppShell navigation', () => {
         <p>page</p>
       </AppShell>,
     )
-    expect(screen.getByRole('link', { name: 'SKUs' })).toHaveAttribute('href', '#/catalog/skus')
-    expect(screen.getByRole('link', { name: 'Orders' })).toHaveAttribute('href', '#/orders')
+    expect(screen.getByRole('link', { name: 'รหัสสินค้า' })).toHaveAttribute('href', '#/catalog/skus')
+    expect(screen.getByRole('link', { name: 'ออเดอร์' })).toHaveAttribute('href', '#/orders')
   })
 
   it('hides Dead outbox for STAFF but shows for OWNER', () => {
@@ -62,7 +62,7 @@ describe('AppShell navigation', () => {
         <p>page</p>
       </AppShell>,
     )
-    expect(screen.queryByRole('link', { name: 'Dead outbox' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'เหตุการณ์ส่งไม่สำเร็จ' })).not.toBeInTheDocument()
 
     cleanup()
     render(
@@ -70,6 +70,6 @@ describe('AppShell navigation', () => {
         <p>page</p>
       </AppShell>,
     )
-    expect(screen.getByRole('link', { name: 'Dead outbox' })).toHaveAttribute('href', '#/admin/outbox')
+    expect(screen.getByRole('link', { name: 'เหตุการณ์ส่งไม่สำเร็จ' })).toHaveAttribute('href', '#/admin/outbox')
   })
 })

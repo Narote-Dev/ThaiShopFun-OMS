@@ -38,7 +38,7 @@ export default function BundleEditor({
       .filter((line) => line.code.trim() !== '')
       .map((line) => ({ component_sku_code: line.code.trim(), qty: Number(line.qty) }))
     if (components.some((c) => !Number.isInteger(c.qty) || c.qty < 1)) {
-      setError('Quantities must be whole numbers of at least 1.')
+      setError('จำนวนต้องเป็นจำนวนเต็มอย่างน้อย 1')
       return
     }
     setBusy(true)
@@ -47,28 +47,28 @@ export default function BundleEditor({
     try {
       const saved = await catalogApi.replaceComponents(sku.id, components)
       setLines(linesOf(saved))
-      setNotice('Components saved.')
+      setNotice('บันทึกส่วนประกอบแล้ว')
       onSaved(saved)
     } catch (err) {
-      setError(messageFor(err, 'Could not save components'))
+      setError(messageFor(err, 'บันทึกส่วนประกอบไม่สำเร็จ'))
     } finally {
       setBusy(false)
     }
   }
 
   return (
-    <Card aria-label="Bundle components">
+    <Card aria-label="ส่วนประกอบสินค้าชุด">
       <div className="border-b border-stone-100 px-5 py-3.5">
-        <h2 className="text-[14.5px] font-semibold text-stone-900">Bundle components</h2>
-        <p className="mt-1 text-[12px] text-stone-500">Components must be plain SKUs. Stock of a bundle is derived from its components.</p>
+        <h2 className="text-[14.5px] font-semibold text-stone-900">ส่วนประกอบสินค้าชุด</h2>
+        <p className="mt-1 text-[12px] text-stone-500">ส่วนประกอบต้องเป็นสินค้าปกติ สต็อกสินค้าชุดคำนวณจากส่วนประกอบ</p>
       </div>
       <div className="space-y-4 p-5">
-        {lines.length === 0 ? <p className="text-[13px] text-stone-600">No components yet.</p> : null}
+        {lines.length === 0 ? <p className="text-[13px] text-stone-600">ยังไม่มีส่วนประกอบ</p> : null}
         <ul className="space-y-4">
           {lines.map((line, index) => (
             <li key={line.key} className="flex flex-wrap items-end gap-4">
               <div className="min-w-[160px] flex-1">
-                <Label htmlFor={`bundle-code-${line.key}`}>Component {index + 1} code</Label>
+                <Label htmlFor={`bundle-code-${line.key}`}>ส่วนประกอบ {index + 1} รหัส</Label>
                 <Input
                   id={`bundle-code-${line.key}`}
                   value={line.code}
@@ -77,7 +77,7 @@ export default function BundleEditor({
                 />
               </div>
               <div className="w-24">
-                <Label htmlFor={`bundle-qty-${line.key}`}>Qty</Label>
+                <Label htmlFor={`bundle-qty-${line.key}`}>จำนวน</Label>
                 <Input
                   id={`bundle-qty-${line.key}`}
                   type="number"
@@ -89,7 +89,7 @@ export default function BundleEditor({
               </div>
               {canWrite ? (
                 <Button type="button" variant="ghost" size="sm" onClick={() => setLines(lines.filter((l) => l.key !== line.key))}>
-                  Remove
+                  นำออก
                 </Button>
               ) : null}
             </li>
@@ -104,10 +104,10 @@ export default function BundleEditor({
         {canWrite ? (
           <div className="flex flex-wrap gap-2">
             <Button type="button" variant="secondary" onClick={() => setLines([...lines, { key: nextKey++, code: '', qty: '1' }])}>
-              Add component
+              เพิ่มส่วนประกอบ
             </Button>
             <Button type="button" variant="primary" disabled={busy} onClick={() => void save()}>
-              Save components
+              บันทึกส่วนประกอบ
             </Button>
           </div>
         ) : null}

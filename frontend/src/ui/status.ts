@@ -1,3 +1,5 @@
+import { labelTh } from './labels'
+
 export type StatusKind =
   | 'fulfillment'
   | 'order'
@@ -28,74 +30,66 @@ export type StatusStyle = {
 }
 
 const FULFILLMENT: Record<string, StatusStyle> = {
-  READY_TO_PICK: { variant: 'success', label: 'READY_TO_PICK' },
-  PICKING: { variant: 'info', label: 'PICKING' },
-  PACKED: { variant: 'info', label: 'PACKED' },
-  SHIPPED: { variant: 'neutral', label: 'SHIPPED' },
-  DELIVERED: { variant: 'success', label: 'DELIVERED' },
-  UNFULFILLED: { variant: 'muted', label: 'UNFULFILLED' },
+  READY_TO_PICK: { variant: 'success', label: labelTh('READY_TO_PICK') },
+  PICKING: { variant: 'info', label: labelTh('PICKING') },
+  PACKED: { variant: 'info', label: labelTh('PACKED') },
+  SHIPPED: { variant: 'neutral', label: labelTh('SHIPPED') },
+  DELIVERED: { variant: 'success', label: labelTh('DELIVERED') },
+  UNFULFILLED: { variant: 'muted', label: labelTh('UNFULFILLED') },
 }
 
 const ORDER: Record<string, StatusStyle> = {
-  ACTIVE: { variant: 'success', label: 'ACTIVE' },
-  CANCELLED: { variant: 'muted', label: 'CANCELLED', strikethrough: true },
-  COMPLETED: { variant: 'neutral', label: 'COMPLETED' },
+  ACTIVE: { variant: 'success', label: labelTh('ACTIVE') },
+  CANCELLED: { variant: 'muted', label: labelTh('CANCELLED'), strikethrough: true },
+  COMPLETED: { variant: 'neutral', label: labelTh('COMPLETED') },
 }
 
 const PAYMENT: Record<string, StatusStyle> = {
-  PENDING: { variant: 'warning', label: 'PENDING' },
-  PAID: { variant: 'success', label: 'PAID' },
-  COD_PENDING: { variant: 'violet', label: 'COD_PENDING' },
-  PARTIALLY_REFUNDED: { variant: 'warning', label: 'PARTIALLY_REFUNDED' },
-  REFUNDED: { variant: 'muted', label: 'REFUNDED' },
+  PENDING: { variant: 'warning', label: labelTh('PENDING') },
+  PAID: { variant: 'success', label: labelTh('PAID') },
+  COD_PENDING: { variant: 'violet', label: labelTh('COD_PENDING') },
+  PARTIALLY_REFUNDED: { variant: 'warning', label: labelTh('PARTIALLY_REFUNDED') },
+  REFUNDED: { variant: 'muted', label: labelTh('REFUNDED') },
 }
 
 const HOLD_REASON: Record<string, StatusStyle> = {
   NONE: { variant: 'muted', label: '—' },
-  SKU_NOT_MAPPED: { variant: 'warning', label: 'SKU_NOT_MAPPED' },
-  OUT_OF_STOCK: { variant: 'danger', label: 'OUT_OF_STOCK' },
-  ADDRESS_PROBLEM: { variant: 'danger', label: 'ADDRESS_PROBLEM' },
-  PAYMENT_MISMATCH: { variant: 'danger', label: 'PAYMENT_MISMATCH' },
-  CHANNEL_CANCEL_PENDING: { variant: 'danger', label: 'CHANNEL_CANCEL_PENDING' },
-  MANUAL: { variant: 'warning', label: 'MANUAL' },
+  SKU_NOT_MAPPED: { variant: 'warning', label: labelTh('SKU_NOT_MAPPED') },
+  OUT_OF_STOCK: { variant: 'danger', label: labelTh('OUT_OF_STOCK') },
+  ADDRESS_PROBLEM: { variant: 'danger', label: labelTh('ADDRESS_PROBLEM') },
+  PAYMENT_MISMATCH: { variant: 'danger', label: labelTh('PAYMENT_MISMATCH') },
+  CHANNEL_CANCEL_PENDING: { variant: 'danger', label: labelTh('CHANNEL_CANCEL_PENDING') },
+  MANUAL: { variant: 'warning', label: labelTh('MANUAL') },
 }
 
-export const HOLD_REASON_TH: Record<string, string> = {
-  OUT_OF_STOCK: 'สต็อกไม่พอ',
-  SKU_NOT_MAPPED: 'SKU ยังไม่ได้จับคู่',
-  ADDRESS_PROBLEM: 'ที่อยู่มีปัญหา',
-  PAYMENT_MISMATCH: 'ยอดชำระไม่ตรง',
-  CHANNEL_CANCEL_PENDING: 'รอยกเลิกจากช่องทาง',
-  MANUAL: 'พักด้วยมือ',
-}
 
 const PAYMENT_METHOD: Record<string, StatusStyle> = {
-  COD: { variant: 'violet', label: 'COD' },
-  PREPAID: { variant: 'info', label: 'PREPAID' },
+  COD: { variant: 'violet', label: labelTh('COD') },
+  PREPAID: { variant: 'info', label: labelTh('PREPAID') },
 }
 
 const CHANNEL: Record<string, StatusStyle> = {
-  TSF: { variant: 'channel', label: 'TSF' },
-  SHOPEE: { variant: 'neutral', label: 'SHOPEE' },
-  LAZADA: { variant: 'neutral', label: 'LAZADA' },
-  TIKTOK: { variant: 'neutral', label: 'TIKTOK' },
+  TSF: { variant: 'channel', label: labelTh('TSF') },
+  SHOPEE: { variant: 'neutral', label: labelTh('SHOPEE') },
+  LAZADA: { variant: 'neutral', label: labelTh('LAZADA') },
+  TIKTOK: { variant: 'neutral', label: labelTh('TIKTOK') },
 }
 
 const STOCK_DOCUMENT: Record<string, StatusStyle> = {
-  DRAFT: { variant: 'warning', label: 'DRAFT' },
-  POSTED: { variant: 'success', label: 'POSTED' },
-  VOID: { variant: 'muted', label: 'VOID' },
+  DRAFT: { variant: 'warning', label: labelTh('DRAFT') },
+  POSTED: { variant: 'success', label: labelTh('POSTED') },
+  VOID: { variant: 'muted', label: labelTh('VOID') },
 }
 
 const PRODUCT: Record<string, StatusStyle> = {
-  ACTIVE: { variant: 'success', label: 'ACTIVE' },
-  INACTIVE: { variant: 'muted', label: 'INACTIVE' },
+  ACTIVE: { variant: 'success', label: labelTh('ACTIVE') },
+  INACTIVE: { variant: 'muted', label: labelTh('INACTIVE') },
 }
 
 const OUTBOX: Record<string, StatusStyle> = {
-  DEAD: { variant: 'danger', label: 'DEAD' },
-  PENDING: { variant: 'warning', label: 'PENDING' },
-  SENT: { variant: 'success', label: 'SENT' },
+  DEAD: { variant: 'danger', label: labelTh('DEAD') },
+  PENDING: { variant: 'warning', label: labelTh('PENDING') },
+  SENT: { variant: 'success', label: labelTh('SENT') },
 }
 
 export function resolveStatus(value: string, kind: StatusKind = 'generic'): StatusStyle {
@@ -117,14 +111,14 @@ export function resolveStatus(value: string, kind: StatusKind = 'generic'): Stat
   const map = maps[kind]
   if (map && map[key]) return map[key]
   if ((kind === 'hold' || kind === 'hold_reason') && key !== 'NONE') {
-    return { variant: 'danger', label: key }
+    return { variant: 'danger', label: labelTh(key) }
   }
-  return { variant: 'neutral', label: key }
+  return { variant: 'neutral', label: labelTh(key) }
 }
 
 export function holdReasonLabelTh(reason: string): string {
   if (reason === 'NONE' || !reason) return '—'
-  return HOLD_REASON_TH[reason] ?? reason
+  return labelTh(reason)
 }
 
 export type OrderDisplayInput = {
@@ -136,10 +130,10 @@ export type OrderDisplayInput = {
 /** Combined list/detail status: CANCELLED > ON HOLD > fulfillment. */
 export function resolveOrderDisplayStatus(order: OrderDisplayInput): StatusStyle {
   if (order.order_status === 'CANCELLED') {
-    return { variant: 'muted', label: 'CANCELLED', strikethrough: true }
+    return { variant: 'muted', label: labelTh('CANCELLED'), strikethrough: true }
   }
   if (order.hold_reason && order.hold_reason !== 'NONE') {
-    return { variant: 'danger', label: 'ON HOLD' }
+    return { variant: 'danger', label: labelTh('ON HOLD') }
   }
   return resolveStatus(order.fulfillment_status, 'fulfillment')
 }

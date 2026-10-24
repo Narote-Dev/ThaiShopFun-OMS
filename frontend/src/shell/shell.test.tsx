@@ -31,29 +31,29 @@ describe('route guard', () => {
         <h1>Active Shop</h1>
       </RequireSession>,
     )
-    expect(screen.getByRole('button', { name: 'Sign in' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'เข้าสู่ระบบ' })).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Active Shop' })).not.toBeInTheDocument()
   })
 
   it('renders the page the user asked for once they are signed in', () => {
     render(
       <RequireSession signedIn fallback={<LoginPage error={null} onSignIn={() => undefined} />}>
-        <h1>Dead outbox</h1>
+        <h1>เหตุการณ์ส่งไม่สำเร็จ</h1>
       </RequireSession>,
     )
-    expect(screen.getByRole('heading', { name: 'Dead outbox' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'เหตุการณ์ส่งไม่สำเร็จ' })).toBeInTheDocument()
   })
 })
 
 describe('paywall and grace', () => {
   it('shows the paywall without shop data', () => {
     render(<Paywall onLogout={() => undefined} />)
-    expect(screen.getByRole('heading', { name: 'Membership needed' })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'TSF Seller Center' })).toHaveAttribute(
+    expect(screen.getByRole('heading', { name: 'ต้องต่ออายุสมาชิก' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'ศูนย์ผู้ขาย TSF' })).toHaveAttribute(
       'href',
       'https://seller.thaishopfun.example/membership',
     )
-    expect(screen.getByRole('button', { name: 'Log out' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'ออกจากระบบ' })).toBeInTheDocument()
     expect(screen.queryByText('Active Shop')).not.toBeInTheDocument()
     expect(screen.queryByText('Expired Shop')).not.toBeInTheDocument()
   })
@@ -62,15 +62,15 @@ describe('paywall and grace', () => {
     render(
       <AppLayout me={me} route="#/" userDisplayName={null} readOnlyNotice={null} onLogout={() => undefined}>
         <button type="button" disabled>
-          Retry
+          ลองอีกครั้ง
         </button>
       </AppLayout>,
     )
-    expect(screen.getByRole('status')).toHaveTextContent('read-only until 2026-10-30')
+    expect(screen.getByRole('status')).toHaveTextContent('อ่านได้อย่างเดียวจนถึง 2026-10-30')
     expect(screen.getAllByText('Grace Shop').length).toBeGreaterThan(0)
-    expect(screen.getByText('OWNER')).toBeInTheDocument()
-    expect(screen.getByText('PRO · GRACE')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Retry' })).toBeDisabled()
+    expect(screen.getByText('เจ้าของร้าน')).toBeInTheDocument()
+    expect(screen.getByText('โปร · รอต่ออายุ')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'ลองอีกครั้ง' })).toBeDisabled()
   })
 
   it('renders a grace expiry on its own', () => {
@@ -84,7 +84,7 @@ describe('setting up', () => {
     render(<SettingUp message="Shop is not registered yet" onRetry={() => undefined} />)
     expect(screen.getAllByText('Shop is not registered yet')).toHaveLength(1)
     expect(screen.queryByText(/Retrying/)).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'ลองอีกครั้ง' })).toBeInTheDocument()
   })
 })
 
@@ -92,7 +92,7 @@ describe('login', () => {
   it('starts sign-in from the signed-out screen', () => {
     const onSignIn = vi.fn()
     render(<LoginPage error={null} onSignIn={onSignIn} />)
-    screen.getByRole('button', { name: 'Sign in' }).click()
+    screen.getByRole('button', { name: 'เข้าสู่ระบบ' }).click()
     expect(onSignIn).toHaveBeenCalledTimes(1)
   })
 })
@@ -111,10 +111,10 @@ describe('catalog navigation and write access', () => {
       </AppLayout>,
     )
     for (const [name, href] of [
-      ['SKUs', '#/catalog/skus'],
-      ['Products', '#/catalog/products'],
-      ['Import', '#/catalog/import'],
-      ['Warehouses', '#/warehouses'],
+      ['รหัสสินค้า', '#/catalog/skus'],
+      ['สินค้า', '#/catalog/products'],
+      ['นำเข้าข้อมูล', '#/catalog/import'],
+      ['คลังสินค้า', '#/warehouses'],
     ]) {
       expect(screen.getByRole('link', { name })).toHaveAttribute('href', href)
     }

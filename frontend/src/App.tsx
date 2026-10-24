@@ -64,7 +64,7 @@ function page(route: string, me: Me): ReactNode {
   }
   return (
     <PageContent>
-      <PageHeader title="Not found" />
+      <PageHeader title="ไม่พบหน้า" />
     </PageContent>
   )
 }
@@ -86,7 +86,7 @@ function Shell() {
     return (
       <PageContent>
         <p role="status" className="text-[13px] text-stone-600">
-          Signing in…
+          กำลังเข้าสู่ระบบ…
         </p>
       </PageContent>
     )
@@ -95,7 +95,7 @@ function Shell() {
   let body = (
     <PageContent>
       <p role="status" className="text-[13px] text-stone-600">
-        Loading shop…
+        กำลังโหลดร้านค้า…
       </p>
     </PageContent>
   )
@@ -104,7 +104,7 @@ function Shell() {
   } else if (auth.gate === 'setting-up' && !auth.me) {
     body = (
       <SettingUp
-        message={auth.setupMessage ?? 'Your shop is being set up.'}
+        message={auth.setupMessage ?? 'กำลังตั้งค่าร้านค้าของคุณ'}
         onRetry={auth.setupFailed ? auth.retrySetup : null}
       />
     )
@@ -115,7 +115,7 @@ function Shell() {
           {auth.profileError}
         </p>
         <Button type="button" variant="secondary" className="mt-4" onClick={auth.signOut}>
-          Log out
+          ออกจากระบบ
         </Button>
       </PageContent>
     )
