@@ -51,6 +51,7 @@ export default function SkuFormPage({ id, canWrite }: { id: string | null; canWr
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [busy, setBusy] = useState(false)
+  const [loaded, setLoaded] = useState(false)
 
   // Step 1: Load the product list and, when editing, the SKU with its components.
   useEffect(() => {
@@ -65,6 +66,7 @@ export default function SkuFormPage({ id, canWrite }: { id: string | null; canWr
         } else if (page.items.length > 0) {
           setDraft((current) => ({ ...current, productId: page.items[0].id }))
         }
+        setLoaded(true)
       })
       .catch((err: unknown) => {
         if (active) setError(messageFor(err, 'Could not load the SKU'))
@@ -130,7 +132,8 @@ export default function SkuFormPage({ id, canWrite }: { id: string | null; canWr
     }
   }
 
-  const readOnly = !canWrite
+  // Defaults must settle before edits; a late product response used to replace the selection.
+  const readOnly = !canWrite || !loaded
   const heading = id ? (sku ? sku.sku_code : 'SKU') : 'New SKU'
   return (
     <PageContent>
@@ -140,7 +143,7 @@ export default function SkuFormPage({ id, canWrite }: { id: string | null; canWr
         </a>
       </p>
       <PageHeader className="mt-2" title={heading} />
-      {readOnly ? <p className="mt-2 text-[13px] text-stone-600">You can view this SKU. Only an OWNER or ADMIN can change it.</p> : null}
+      {!canWrite ? <p className="mt-2 text-[13px] text-stone-600">You can view this SKU. Only an OWNER or ADMIN can change it.</p> : null}
       <Card className="mt-4">
         <form className="grid gap-4 p-5 sm:grid-cols-2" onSubmit={submit}>
           <div>
@@ -231,7 +234,7 @@ export default function SkuFormPage({ id, canWrite }: { id: string | null; canWr
           {notice ? <p className="sm:col-span-2 text-[13px] text-stone-600">{notice}</p> : null}
           {canWrite ? (
             <div className="flex flex-wrap gap-2 sm:col-span-2">
-              <Button type="submit" variant="primary" disabled={busy}>
+              <Button type="submit" variant="primary" disabled={busy || !loaded}>
                 {sku ? 'Save' : 'Create SKU'}
               </Button>
               {sku ? (

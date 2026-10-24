@@ -26,6 +26,8 @@ oms:
       enabled: false
   order:
     hold-resolver:
+      # Cached Spring contexts share Postgres. Only explicit job calls may resolve test orders.
+      enabled: false
       # T12B ac06: immediate retry on the next sweeper batch in tests (backoff suite overrides).
       backoff-base: 0s
     backfill:
@@ -33,4 +35,6 @@ oms:
   invariant:
     enabled: false
   inbox:
+    # All test contexts share the queue, including contexts retained in Spring's cache.
+    worker-enabled: false
     defer-delay: 1ms

@@ -6,9 +6,12 @@ import ch.qos.logback.classic.LoggerContext;
 import ch.qos.logback.classic.encoder.PatternLayoutEncoder;
 import ch.qos.logback.core.OutputStreamAppender;
 import java.io.ByteArrayOutputStream;
+import java.lang.management.ManagementFactory;
+import java.lang.management.ThreadMXBean;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -173,14 +176,39 @@ class PiiLogMaskTest {
       "order lookup id=019abc version=2",
       "{\"phone\":\"0812341234\",\"id\":\"order-abc\"}"
     };
-    for (int i = 0; i < 30_000; i++) PiiLogMask.mask(lines[i % lines.length]);
-    long start = System.nanoTime();
-    int chars = 0;
-    for (int i = 0; i < 100_000; i++) chars += PiiLogMask.mask(lines[i % lines.length]).length();
-    long nanos = System.nanoTime() - start;
+    ThreadMXBean threads = ManagementFactory.getThreadMXBean();
+    assertThat(threads.isCurrentThreadCpuTimeSupported())
+        .as("thread CPU timing supported")
+        .isTrue();
+    assertThat(threads.isThreadCpuTimeEnabled()).as("thread CPU timing enabled").isTrue();
+    // Budget CPU work, not descheduling/GC pauses imposed by a shared CI runner. Warm up
+    // the same mixed workload, then take the median batch to limit JIT/GC noise.
+    int iterations = 100_000;
+    int chars = maskLines(lines, iterations);
+    long[] samples = new long[7];
+    for (int batch = 0; batch < samples.length; batch++) {
+      long start = threads.getCurrentThreadCpuTime();
+      chars += maskLines(lines, iterations);
+      samples[batch] = threads.getCurrentThreadCpuTime() - start;
+      assertThat(samples[batch]).isPositive();
+    }
     assertThat(chars).isPositive();
-    assertThat(nanos / 100_000.0).isLessThan(10_000);
+    Arrays.sort(samples);
+    double medianNanosPerLine = samples[samples.length / 2] / (double) iterations;
+    assertThat(medianNanosPerLine)
+        .as(
+            "median thread CPU ns/line over %s batches; budget remains 10 microseconds",
+            samples.length)
+        .isLessThan(10_000);
     String simple = "inbox processed event=abc attempts=1";
     assertThat(PiiLogMask.mask(simple)).isSameAs(simple);
+  }
+
+  private static int maskLines(String[] lines, int iterations) {
+    int chars = 0;
+    for (int i = 0; i < iterations; i++) {
+      chars += PiiLogMask.mask(lines[i % lines.length]).length();
+    }
+    return chars;
   }
 }

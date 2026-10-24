@@ -1,6 +1,7 @@
 package com.thaishopfun.oms.inbox;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.awaitility.Awaitility.await;
 
 import com.thaishopfun.oms.auth.AuthTestSupport;
 import com.thaishopfun.oms.auth.UuidV7;
@@ -37,6 +38,8 @@ import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.parallel.Execution;
+import org.junit.jupiter.api.parallel.ExecutionMode;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -45,6 +48,7 @@ import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -53,9 +57,11 @@ import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
+@Execution(ExecutionMode.SAME_THREAD)
 @ActiveProfiles({"test", "inbox-api-test"})
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @Import(InboxApiTest.Handlers.class)
+@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 class InboxApiTest {
 
   private static final String CURRENT = "test-inbox-secret";
@@ -271,22 +277,26 @@ class InboxApiTest {
     String signature = sign(CURRENT, now(), body);
     int threads = 8;
     ExecutorService pool = Executors.newFixedThreadPool(threads);
-    CountDownLatch start = new CountDownLatch(1);
-    List<Future<Integer>> futures = new ArrayList<>();
-    for (int i = 0; i < threads; i++) {
-      futures.add(
-          pool.submit(
-              () -> {
-                start.await(5, TimeUnit.SECONDS);
-                return post(body, eventId, signature, serviceToken).status();
-              }));
-    }
-    start.countDown();
     List<Integer> statuses = new ArrayList<>();
-    for (Future<Integer> future : futures) {
-      statuses.add(future.get(10, TimeUnit.SECONDS));
+    try {
+      CountDownLatch start = new CountDownLatch(1);
+      List<Future<Integer>> futures = new ArrayList<>();
+      for (int i = 0; i < threads; i++) {
+        futures.add(
+            pool.submit(
+                () -> {
+                  assertThat(start.await(5, TimeUnit.SECONDS)).isTrue();
+                  return post(body, eventId, signature, serviceToken).status();
+                }));
+      }
+      start.countDown();
+      for (Future<Integer> future : futures) {
+        statuses.add(future.get(10, TimeUnit.SECONDS));
+      }
+    } finally {
+      pool.shutdownNow();
+      assertThat(pool.awaitTermination(15, TimeUnit.SECONDS)).isTrue();
     }
-    pool.shutdownNow();
     assertThat(statuses.stream().filter(status -> status == 202).count()).isEqualTo(1);
     assertThat(statuses.stream().filter(status -> status == 200).count()).isEqualTo(threads - 1);
     assertThat(count("SELECT count(*) FROM inbox_event WHERE event_id = ?", eventId)).isEqualTo(1);
@@ -305,13 +315,17 @@ class InboxApiTest {
         .isEqualTo(202);
 
     ExecutorService pool = Executors.newFixedThreadPool(2);
-    CountDownLatch start = new CountDownLatch(1);
-    Future<Integer> left = pool.submit(() -> awaitThenProcess(start));
-    Future<Integer> right = pool.submit(() -> awaitThenProcess(start));
-    start.countDown();
-    left.get(10, TimeUnit.SECONDS);
-    right.get(10, TimeUnit.SECONDS);
-    pool.shutdownNow();
+    try {
+      CountDownLatch start = new CountDownLatch(1);
+      Future<Integer> left = pool.submit(() -> awaitThenProcess(start));
+      Future<Integer> right = pool.submit(() -> awaitThenProcess(start));
+      start.countDown();
+      left.get(10, TimeUnit.SECONDS);
+      right.get(10, TimeUnit.SECONDS);
+    } finally {
+      pool.shutdownNow();
+      assertThat(pool.awaitTermination(15, TimeUnit.SECONDS)).isTrue();
+    }
 
     assertThat(orderCreated.calls.get()).isEqualTo(1);
     assertThat(text("SELECT status FROM inbox_event WHERE event_id = ?", eventId))
@@ -358,38 +372,26 @@ class InboxApiTest {
     String first = id();
     String second = id();
     postOrder(shop, first, "same-agg", 1);
-    postOrder(shop, second, "same-agg", 2);
     orderCreated.block = true;
     orderCreated.entered = new CountDownLatch(1);
     orderCreated.release = new CountDownLatch(1);
     ExecutorService pool = Executors.newFixedThreadPool(2);
     try {
-      CountDownLatch start = new CountDownLatch(1);
-      Future<Integer> left = pool.submit(() -> awaitThenProcessOne(start));
-      Future<Integer> right =
-          pool.submit(
-              () -> {
-                if (!start.await(5, TimeUnit.SECONDS)) {
-                  throw new IllegalStateException("start timed out");
-                }
-                assertThat(orderCreated.entered.await(10, TimeUnit.SECONDS)).isTrue();
-                return worker.processAvailable(1);
-              });
-      start.countDown();
+      Future<Integer> left = pool.submit(() -> worker.processAvailable(1));
       assertThat(orderCreated.entered.await(10, TimeUnit.SECONDS)).isTrue();
-      assertThat(awaitAdvisoryWaiter()).isTrue();
+      // The first handler owns the aggregate before the second event can be claimed.
+      postOrder(shop, second, "same-agg", 2);
+      Future<Integer> right = pool.submit(() -> worker.processAvailable(1));
+      awaitAdvisoryWaiter(shop, "same-agg");
       assertThat(orderCreated.calls.get()).isEqualTo(1);
+      assertThat(orderCreated.inFlight.get()).isEqualTo(1);
       orderCreated.release.countDown();
-      left.get(15, TimeUnit.SECONDS);
-      right.get(15, TimeUnit.SECONDS);
-      long drainUntil = System.nanoTime() + TimeUnit.SECONDS.toNanos(15);
-      while (System.nanoTime() < drainUntil && orderCreated.calls.get() < 2) {
-        worker.processAvailable(1);
-        Thread.sleep(50);
-      }
+      assertThat(left.get(15, TimeUnit.SECONDS)).isEqualTo(1);
+      assertThat(right.get(15, TimeUnit.SECONDS)).isEqualTo(1);
     } finally {
       orderCreated.release.countDown();
       pool.shutdownNow();
+      assertThat(pool.awaitTermination(15, TimeUnit.SECONDS)).isTrue();
     }
     assertThat(orderCreated.calls.get()).isEqualTo(2);
     assertThat(orderCreated.maxInFlight.get()).isEqualTo(1);
@@ -421,6 +423,7 @@ class InboxApiTest {
     } finally {
       orderCreated.release.countDown();
       pool.shutdownNow();
+      assertThat(pool.awaitTermination(15, TimeUnit.SECONDS)).isTrue();
     }
     assertThat(orderCreated.calls.get()).isEqualTo(2);
   }
@@ -1036,14 +1039,25 @@ class InboxApiTest {
     return worker.processAvailable(1);
   }
 
-  private boolean awaitAdvisoryWaiter() throws Exception {
-    for (int i = 0; i < 100; i++) {
-      if (count("SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND NOT granted") >= 1) {
-        return true;
-      }
-      Thread.sleep(50);
-    }
-    return false;
+  private void awaitAdvisoryWaiter(Shop shop, String aggregateId) {
+    String key = shop.id() + "\u001f" + InboxIngestService.SOURCE + "\u001f" + aggregateId;
+    await()
+        .alias("second worker waiting for this aggregate lock")
+        .atMost(Duration.ofSeconds(5))
+        .untilAsserted(
+            () ->
+                assertThat(
+                        count(
+                            """
+                            SELECT count(*) FROM pg_locks
+                            WHERE locktype = 'advisory' AND NOT granted
+                              AND database = (SELECT oid FROM pg_database WHERE datname = current_database())
+                              AND classid::bigint = ((hashtextextended(?, 11) >> 32) & 4294967295)
+                              AND objid::bigint = (hashtextextended(?, 11) & 4294967295)
+                            """,
+                            key,
+                            key))
+                    .isEqualTo(1));
   }
 
   private void postOrder(Shop shop, String eventId, String aggregateId, long version)

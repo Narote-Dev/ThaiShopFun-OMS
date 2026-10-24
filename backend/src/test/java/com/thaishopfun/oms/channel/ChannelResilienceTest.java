@@ -35,10 +35,13 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 /** Unit tests for {@link BaseChannelAdapter} resilience decorators. No Spring context. */
 class ChannelResilienceTest {
@@ -262,13 +265,14 @@ class ChannelResilienceTest {
     }
   }
 
-  @Test
-  void retryBackoffUsesFullJitterWithinBounds() throws Exception {
+  @ParameterizedTest
+  @ValueSource(longs = {0, 100})
+  void retryBackoffUsesFullJitterWithinBounds(long maxMillis) throws Exception {
     RecordingSleeper sleeper = new RecordingSleeper();
     ChannelProperties properties = properties();
     properties.getTsf().setRetryMaxAttempts(4);
     properties.getTsf().setRetryWaitBase(Duration.ofMillis(100));
-    properties.getTsf().setRetryWaitMax(Duration.ofMillis(100));
+    properties.getTsf().setRetryWaitMax(Duration.ofMillis(maxMillis));
     AtomicInteger attempts = new AtomicInteger();
     TestChannelAdapter adapter =
         adapter(
@@ -285,7 +289,7 @@ class ChannelResilienceTest {
     assertThat(sleeper.durations()).hasSize(3);
     for (Duration sleep : sleeper.durations()) {
       assertThat(sleep.compareTo(Duration.ZERO)).isGreaterThanOrEqualTo(0);
-      assertThat(sleep.compareTo(Duration.ofMillis(100))).isLessThanOrEqualTo(0);
+      assertThat(sleep.compareTo(Duration.ofMillis(maxMillis))).isLessThanOrEqualTo(0);
     }
   }
 
@@ -440,13 +444,10 @@ class ChannelResilienceTest {
             });
     adapter.getOrder(accountRef(), "x");
     assertThat(attempts).hasValue(2);
-    // Full jitter may pick zero ms; retry is still observable via metrics.
-    if (sleeper.durations().isEmpty()) {
-      assertThat(meters.find("oms.channel.retries").tag("reason", "unavailable").counter())
-          .isNotNull();
-    } else {
-      assertThat(sleeper.durations()).isNotEmpty();
-    }
+    assertThat(sleeper.durations()).hasSize(1);
+    assertThat(sleeper.durations().get(0)).isBetween(Duration.ZERO, Duration.ofMillis(100));
+    assertThat(meters.find("oms.channel.retries").tag("reason", "unavailable").counter())
+        .isNotNull();
   }
 
   @Test
@@ -950,31 +951,45 @@ class ChannelResilienceTest {
     ChannelProperties properties = properties();
     properties.getTsf().setRetryMaxAttempts(3);
     AtomicInteger attempts = new AtomicInteger();
+    AtomicInteger sleepCalls = new AtomicInteger();
+    InterruptedException interrupted = new InterruptedException("stop");
+    Clock clock = Clock.fixed(Instant.parse("2026-01-01T00:00:00Z"), ZoneOffset.UTC);
     TestChannelAdapter adapter =
-        adapter(
+        new TestChannelAdapter(
+            new AccountResilienceRegistry(properties, new ChannelMetrics(meters)),
             properties,
+            new ChannelMetrics(meters),
             duration -> {
-              throw new InterruptedException("stop");
+              // Full jitter permits zero backoff. Retry-After guarantees this path is exercised.
+              assertThat(duration).isGreaterThanOrEqualTo(Duration.ofSeconds(1));
+              sleepCalls.incrementAndGet();
+              throw interrupted;
             },
+            clock,
             () -> {
               attempts.incrementAndGet();
-              throw new ChannelUnavailableException("retry");
+              throw new ChannelRateLimitedException("retry", 1);
             });
-    java.util.concurrent.atomic.AtomicBoolean interruptedOnWorker =
-        new java.util.concurrent.atomic.AtomicBoolean();
-    Thread runner =
-        new Thread(
+    FutureTask<Boolean> result =
+        new FutureTask<>(
             () -> {
-              try {
-                adapter.getOrder(accountRef(), "interrupt");
-              } catch (ChannelUnavailableException ex) {
-                interruptedOnWorker.set(Thread.currentThread().isInterrupted());
-              }
+              assertThat(Thread.currentThread().isInterrupted()).isFalse();
+              assertThatThrownBy(() -> adapter.getOrder(accountRef(), "interrupt"))
+                  .isInstanceOf(ChannelUnavailableException.class)
+                  .hasCauseReference(interrupted);
+              return Thread.currentThread().isInterrupted();
             });
+    Thread runner = new Thread(result, "channel-retry-interrupt-test");
     runner.start();
-    runner.join(5000);
-    assertThat(interruptedOnWorker).isTrue();
-    assertThat(attempts.get()).isGreaterThanOrEqualTo(1);
+    try {
+      assertThat(result.get(5, TimeUnit.SECONDS)).isTrue();
+      assertThat(sleepCalls).hasValue(1);
+      assertThat(attempts).hasValue(1);
+    } finally {
+      runner.interrupt();
+      runner.join(5000);
+      assertThat(runner.isAlive()).isFalse();
+    }
   }
 
   @Test
@@ -1135,7 +1150,7 @@ class ChannelResilienceTest {
 
     @Override
     public void sleep(Duration duration) {
-      if (duration != null && !duration.isZero() && !duration.isNegative()) {
+      if (duration != null && !duration.isNegative()) {
         durations.add(duration);
       }
     }

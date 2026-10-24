@@ -169,6 +169,11 @@ class ListingLifecycleT12BFUAcceptanceTest {
 
   @BeforeEach
   void setup() throws Exception {
+    TenantContext.clear();
+    faults.reset();
+    listingSyncLatch.disarm();
+    StockSkuLookupTestSupport.clearOmitSku();
+    unhideAllMockListings();
     listingAggregateVersion.set(0);
     clock.resetOffset();
     OrderIntakeMockRuntime.mock().getBean(OmsEndpoint.class).setBaseUrl("http://127.0.0.1:" + port);
@@ -254,7 +259,7 @@ class ListingLifecycleT12BFUAcceptanceTest {
     ingest(
         OrderIntakeScenarioSupport.orderCreated(
             JSON, externalOrderId, shopId, null, "COD", listingSku, 1, 1));
-    worker.processAvailable(10);
+    assertThat(worker.processAvailable(10)).isEqualTo(1);
     assertThat(holdReason(shop, externalOrderId)).isEqualTo("SKU_NOT_MAPPED");
 
     fixture.inTenant(
@@ -497,7 +502,7 @@ class ListingLifecycleT12BFUAcceptanceTest {
         ingest(
             OrderIntakeScenarioSupport.orderCreated(
                 JSON, externalOrderId, shopId, null, "COD", listingSku, 1, 1));
-        worker.processAvailable(10);
+        assertThat(worker.processAvailable(10)).isEqualTo(1);
         assertThat(holdReason(shop, externalOrderId)).isEqualTo("SKU_NOT_MAPPED");
       }
 
@@ -507,7 +512,7 @@ class ListingLifecycleT12BFUAcceptanceTest {
       assertThat(body.path("auto_mapped").asInt()).isGreaterThanOrEqualTo(2);
       assertThat(body.path("deferred").asInt()).isGreaterThanOrEqualTo(2);
 
-      resolverJob.runScheduledBatch();
+      assertThat(resolverJob.runScheduledBatch()).isEqualTo(2);
       for (String externalOrderId : externalOrderIds) {
         assertThat(holdReason(shop, externalOrderId)).isEqualTo("NONE");
       }
@@ -1130,28 +1135,21 @@ class ListingLifecycleT12BFUAcceptanceTest {
   private void ingest(ObjectNode event) throws Exception {
     byte[] body = JSON.writeValueAsBytes(event);
     String eventId = event.path("event_id").asString();
-    int status = 0;
-    for (int attempt = 0; attempt < 5; attempt++) {
-      String timestamp = now();
-      HttpRequest request =
-          HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + "/internal/v1/events"))
-              .timeout(HTTP_TIMEOUT)
-              .header("Content-Type", "application/json")
-              .header("X-Event-Id", eventId)
-              .header("X-Signature", sign(INBOX_SECRET, timestamp, body))
-              .header(
-                  "Authorization",
-                  "Bearer "
-                      + OrderIntakeMockRuntime.mock().getBean(TokenIssuer.class).tsfServiceToken())
-              .POST(HttpRequest.BodyPublishers.ofByteArray(body))
-              .build();
-      status = HTTP.send(request, HttpResponse.BodyHandlers.ofString()).statusCode();
-      if (status == 202) {
-        return;
-      }
-      Thread.sleep(150L * (attempt + 1));
-    }
-    assertThat(status).isEqualTo(202);
+    String timestamp = now();
+    HttpRequest request =
+        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + "/internal/v1/events"))
+            .timeout(HTTP_TIMEOUT)
+            .header("Content-Type", "application/json")
+            .header("X-Event-Id", eventId)
+            .header("X-Signature", sign(INBOX_SECRET, timestamp, body))
+            .header(
+                "Authorization",
+                "Bearer "
+                    + OrderIntakeMockRuntime.mock().getBean(TokenIssuer.class).tsfServiceToken())
+            .POST(HttpRequest.BodyPublishers.ofByteArray(body))
+            .build();
+    HttpResponse<String> response = HTTP.send(request, HttpResponse.BodyHandlers.ofString());
+    assertThat(response.statusCode()).as("inbox acceptance: %s", response.body()).isEqualTo(202);
   }
 
   private String userToken(String shopId) throws Exception {

@@ -8,7 +8,7 @@ import SkuListPage, { PAGE_SIZE } from './SkuListPage'
 import { catalogApi } from './api'
 import { stubFetch, sku } from './testFetch'
 
-const products = { items: [{ id: 'p-1', name: 'Mug', status: 'ACTIVE', sku_count: 1 }], total: 1, limit: 200, offset: 0 }
+const products = { items: [{ id: 'p-1', name: 'Mug', status: 'ACTIVE' as const, sku_count: 1 }], total: 1, limit: 200, offset: 0 }
 
 beforeEach(() => {
   resetApiForTests()
@@ -58,8 +58,15 @@ describe('SkuFormPage', () => {
       if (url === '/api/v1/skus' && method === 'POST') return { status: 201, body: sku({ id: 'new-id' }) }
       return undefined
     })
+    let finishProducts!: (page: Awaited<ReturnType<typeof catalogApi.listProducts>>) => void
+    vi.spyOn(catalogApi, 'listProducts').mockReturnValue(new Promise((resolve) => { finishProducts = resolve }))
     configureApi({ getAccessToken: () => 't', fetchImpl })
     render(<SkuFormPage id={null} canWrite />)
+    expect(screen.getByLabelText('Product')).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Create SKU' })).toBeDisabled()
+    finishProducts(products)
+    await waitFor(() => expect(screen.getByLabelText('Product')).toBeEnabled())
+    fireEvent.change(screen.getByLabelText('Product'), { target: { value: '__new__' } })
     fireEvent.change(await screen.findByLabelText('New product name'), { target: { value: 'Mug' } })
     fireEvent.change(screen.getByLabelText('SKU code'), { target: { value: 'MUG-RED' } })
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Red mug' } })
@@ -85,7 +92,8 @@ describe('SkuFormPage', () => {
     })
     configureApi({ getAccessToken: () => 't', fetchImpl })
     render(<SkuFormPage id={null} canWrite />)
-    fireEvent.change(await screen.findByLabelText('SKU code'), { target: { value: 'MUG-RED' } })
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Create SKU' })).toBeEnabled())
+    fireEvent.change(screen.getByLabelText('SKU code'), { target: { value: 'MUG-RED' } })
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Red mug' } })
     fireEvent.click(screen.getByRole('button', { name: 'Create SKU' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('sku_code already exists (SKU_CODE_EXISTS)')

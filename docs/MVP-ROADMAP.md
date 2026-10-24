@@ -495,7 +495,7 @@ T42, T43, T25, T24 → Pilot 5 ขั้น → Launch   │
 | 6 | **Migration bootstrap vs runtime role** — deploy ใช้ privileged bootstrap (superuser/URL user) สำหรับ Flyway; app ต้องเป็น `oms_app` · แก้ `railway.ts` ที่ส่ง superuser เป็น `DATABASE_USERNAME` | backlog | สูง | staging (S5, I6) |
 | 7 | **Repo ต้อง private ก่อนออนไลน์** | backlog | สูง | staging online |
 | 8 | README ส่วน "Staging on Railway" เก่า (ยังไม่เคย deploy, `railway.ts` map superuser) และ README บอก "Flyway V1, V2, V3" ทั้งที่มีถึง V11 | backlog + ตรวจพบ | กลาง | T26 |
-| 9 | `InboxApiTest` flaky | backlog | กลาง | ใช้ CI เป็นด่าน deploy |
+| 9 | `InboxApiTest` flake fixed — isolated workers and deterministic lock waits | ✅ fixed | กลาง | ใช้ CI เป็นด่าน deploy |
 | 10 | T16 leftovers | backlog | ต่ำ–กลาง | TBD รายการละเอียด |
 | 11 | T12A P3s | review | ต่ำ | TBD รายการละเอียด |
 | 12 | T13 P3s: durable orphan marker แทนการใช้ `last_error`, ใส่ SKU id field ใน `StockOperationException` ฯลฯ | review | ต่ำ | — |
@@ -575,7 +575,7 @@ cd frontend && npm ci && npm run dev                              # UI :5173
 | E2E | `cd frontend && npm run test:e2e` (หรือ `frontend/scripts/e2e-stack.sh`) | Playwright SSO · job **Frontend e2e** |
 | Invariant (หลัง T00) | `@VerifyInvariants` → `InvariantChecker.checkAll()` ท้าย integration/acceptance ที่แตะสต๊อก/ออเดอร์; nightly `InvariantJob` | `docs/invariants.md` |
 
-**CI ที่รู้จัก flaky:** `InboxApiTest` (backlog C4) — ยังถือว่า CI "เขียว" ถ้า job Backend ผ่าน แต่ **ห้ามใช้เป็นด่าน deploy จนกว่าแก้ flake**
+**CI ที่รู้จัก flaky:** `InboxApiTest`, catalog/stock e2e และ listing lifecycle ac02/ac06 แก้แล้ว — isolated workers, form readiness และ deterministic waits (repeat-run verification requires Docker).
 
 ---
 
