@@ -7,9 +7,15 @@
 import { chromium, expect } from '@playwright/test'
 import { mkdir } from 'node:fs/promises'
 import path from 'node:path'
+import { captureStockControl } from './screenshot-stock-control.mjs'
 
 const base = process.env.PLAYWRIGHT_BASE_URL ?? 'http://127.0.0.1:5173'
-const outDir = path.resolve(process.argv[2] ?? 'docs/ui/screenshots')
+const stockControlOnly = process.argv.includes('--stock-control')
+const outDir = path.resolve((stockControlOnly ? process.argv[3] : process.argv[2]) ?? 'docs/ui/screenshots')
+if (stockControlOnly) {
+  await captureStockControl(base, outDir)
+  process.exit(0)
+}
 
 async function signInOnce(page) {
   await page.goto(base)
@@ -123,4 +129,5 @@ await navTo(page, 'Dead outbox')
 await capture(page, 'outbox')
 
 await browser.close()
+await captureStockControl(base, outDir)
 console.log(`Wrote screenshots to ${outDir}`)

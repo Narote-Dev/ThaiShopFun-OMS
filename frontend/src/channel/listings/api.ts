@@ -59,7 +59,8 @@ export const listingsApi = {
     q: string,
     limit: number,
     offset: number,
-  ): Promise<Page<ChannelListing>> {
+    stockControl: boolean | null = null,
+  ): Promise<Page<ChannelListing> & { mode?: string; allowlist_coverage_pct?: number }> {
     const params = new URLSearchParams()
     params.set('channel_account_id', channelAccountId)
     params.set('limit', String(limit))
@@ -67,7 +68,24 @@ export const listingsApi = {
     if (mapped !== null) params.set('mapped', mapped ? 'true' : 'false')
     if (removedOnly) params.set('removed', 'true')
     if (q) params.set('q', q)
+    if (stockControl !== null) params.set('stock_control', String(stockControl))
     return apiRequest(`/api/v1/channel-listings?${params}`)
+  },
+  setStockControl(listingId: string, enabled: boolean): Promise<{ changed: number }> {
+    return apiRequest(`/api/v1/channel-listings/${listingId}/stock-control`, {
+      method: 'PUT',
+      body: JSON.stringify({ enabled }),
+    })
+  },
+  bulkStockControl(
+    channelAccountId: string,
+    listingIds: string[],
+    enabled: boolean,
+  ): Promise<{ changed: number }> {
+    return apiRequest('/api/v1/channel-listings/stock-control', {
+      method: 'POST',
+      body: JSON.stringify({ channel_account_id: channelAccountId, listing_ids: listingIds, enabled }),
+    })
   },
   putMapping(listingId: string, skuId: string): Promise<MappingPutResponse> {
     return apiRequest(`/api/v1/channel-listings/${listingId}/mapping`, {

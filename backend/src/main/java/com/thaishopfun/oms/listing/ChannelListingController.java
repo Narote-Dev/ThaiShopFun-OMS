@@ -6,6 +6,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -18,11 +19,15 @@ class ChannelListingController {
 
   private final ChannelListingQueryService queries;
   private final ChannelListingMappingService mapping;
+  private final ChannelListingStockControlService stockControl;
 
   ChannelListingController(
-      ChannelListingQueryService queries, ChannelListingMappingService mapping) {
+      ChannelListingQueryService queries,
+      ChannelListingMappingService mapping,
+      ChannelListingStockControlService stockControl) {
     this.queries = queries;
     this.mapping = mapping;
+    this.stockControl = stockControl;
   }
 
   @GetMapping
@@ -32,9 +37,23 @@ class ChannelListingController {
       @RequestParam(name = "removed", required = false) Boolean removedOnly,
       @RequestParam(name = "q", required = false) String q,
       @RequestParam(name = "limit", required = false) Integer limit,
-      @RequestParam(name = "offset", required = false) Integer offset) {
+      @RequestParam(name = "offset", required = false) Integer offset,
+      @RequestParam(name = "stock_control", required = false) Boolean controlled) {
     UUID accountId = parseChannelAccountId(channelAccountId);
-    return ok(queries.list(accountId, mapped, removedOnly, q, limit, offset));
+    return ok(queries.list(accountId, mapped, removedOnly, q, limit, offset, controlled));
+  }
+
+  @PutMapping("/{id}/stock-control")
+  ResponseEntity<ChannelListingViews.StockControlResult> stockControl(
+      @PathVariable UUID id, @RequestBody ChannelListingViews.StockControlBody body) {
+    return ok(stockControl.change(null, java.util.List.of(id), body.enabled()));
+  }
+
+  @PostMapping("/stock-control")
+  ResponseEntity<ChannelListingViews.StockControlResult> bulkStockControl(
+      @RequestBody ChannelListingViews.BulkStockControlBody body) {
+    if (body.channelAccountId() == null) throw ListingApiException.missingChannelAccountId();
+    return ok(stockControl.change(body.channelAccountId(), body.listingIds(), body.enabled()));
   }
 
   private static UUID parseChannelAccountId(String raw) {

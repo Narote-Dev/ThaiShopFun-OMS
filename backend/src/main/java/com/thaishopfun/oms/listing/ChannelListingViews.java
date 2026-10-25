@@ -9,7 +9,13 @@ final class ChannelListingViews {
 
   private ChannelListingViews() {}
 
-  record Page(List<ListingView> items, long total, int limit, int offset) {}
+  record Page(
+      List<ListingView> items,
+      long total,
+      int limit,
+      int offset,
+      String mode,
+      @JsonProperty("allowlist_coverage_pct") double allowlistCoveragePct) {}
 
   record ListingView(
       UUID id,
@@ -25,6 +31,15 @@ final class ChannelListingViews {
       @JsonProperty("removed_at") Instant removedAt,
       @JsonProperty("stock_control") boolean stockControl,
       @JsonProperty("held_orders") long heldOrders) {}
+
+  record StockControlBody(Boolean enabled) {}
+
+  record BulkStockControlBody(
+      @JsonProperty("channel_account_id") UUID channelAccountId,
+      @JsonProperty("listing_ids") List<UUID> listingIds,
+      Boolean enabled) {}
+
+  record StockControlResult(int changed) {}
 
   record MappingBody(@JsonProperty("sku_id") UUID skuId) {}
 
