@@ -78,6 +78,33 @@ public class OrderDemoCatalogService {
     }
   }
 
+  public Map<String, Object> stockControlMode(boolean control, boolean reset) {
+    UUID previous = TenantContext.tenantId();
+    UUID user = TenantContext.userId();
+    try {
+      UUID tenant = resolveTsfShopTenantId();
+      if (tenant == null) throw new DemoCatalogTenantMissingException();
+      TenantContext.set(tenant, null);
+      return transactionTemplate.execute(
+          status -> {
+            UUID account = resolveForTenant(tenant).channelAccountId();
+            if (reset)
+              jdbc.update(
+                  "UPDATE channel_listing SET stock_control = false, updated_at = now() WHERE channel_account_id = ? AND external_sku_id LIKE 'L-demo-%'",
+                  account);
+            jdbc.update(
+                "UPDATE channel_account SET mode = ? WHERE id = ?",
+                control ? "CONTROL" : "ACTIVE",
+                account);
+            return Map.<String, Object>of(
+                "channel_account_id", account, "mode", control ? "CONTROL" : "ACTIVE");
+          });
+    } finally {
+      if (previous == null) TenantContext.clear();
+      else TenantContext.set(previous, user);
+    }
+  }
+
   private UUID resolveTsfShopTenantId() {
     List<UUID> ids =
         jdbc.query(

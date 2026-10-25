@@ -107,6 +107,17 @@ public class ChannelListingRepository {
 
   public List<ListingRow> list(
       UUID channelAccountId, Boolean mapped, Boolean removedOnly, String q, int limit, int offset) {
+    return list(channelAccountId, mapped, removedOnly, q, limit, offset, null);
+  }
+
+  public List<ListingRow> list(
+      UUID channelAccountId,
+      Boolean mapped,
+      Boolean removedOnly,
+      String q,
+      int limit,
+      int offset,
+      Boolean stockControl) {
     StringBuilder sql =
         new StringBuilder(
             """
@@ -130,6 +141,10 @@ public class ChannelListingRepository {
     if (Boolean.TRUE.equals(removedOnly)) {
       sql.append(" AND cl.removed_at IS NOT NULL ");
     }
+    if (stockControl != null) {
+      sql.append(" AND cl.stock_control = ? ");
+      args.add(stockControl);
+    }
     if (mapped != null) {
       sql.append(mapped ? " AND cl.sku_id IS NOT NULL " : " AND cl.sku_id IS NULL ");
     }
@@ -147,6 +162,11 @@ public class ChannelListingRepository {
   }
 
   public long count(UUID channelAccountId, Boolean mapped, Boolean removedOnly, String q) {
+    return count(channelAccountId, mapped, removedOnly, q, null);
+  }
+
+  public long count(
+      UUID channelAccountId, Boolean mapped, Boolean removedOnly, String q, Boolean stockControl) {
     StringBuilder sql =
         new StringBuilder(
             """
@@ -157,6 +177,10 @@ public class ChannelListingRepository {
     args.add(channelAccountId);
     if (Boolean.TRUE.equals(removedOnly)) {
       sql.append(" AND cl.removed_at IS NOT NULL ");
+    }
+    if (stockControl != null) {
+      sql.append(" AND cl.stock_control = ? ");
+      args.add(stockControl);
     }
     if (mapped != null) {
       sql.append(mapped ? " AND cl.sku_id IS NOT NULL " : " AND cl.sku_id IS NULL ");

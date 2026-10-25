@@ -30,6 +30,16 @@ public class ListingAudit {
     write(actor, "CHANNEL_LISTING_UNMAPPED", listingId, before, Map.of());
   }
 
+  public void stockControl(
+      ChannelListingAccess.Actor actor, UUID id, boolean before, boolean after) {
+    write(
+        actor,
+        "CHANNEL_LISTING_STOCK_CONTROL_CHANGED",
+        id,
+        Map.of("stock_control", before),
+        Map.of("stock_control", after));
+  }
+
   private void write(
       ChannelListingAccess.Actor actor,
       String action,

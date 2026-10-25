@@ -1,5 +1,15 @@
 // UI labels only: keep API values and identifiers unchanged.
 const LABELS: Record<string, string> = {
+  CONTROL: 'คุมเฉพาะที่เลือก',
+  OBSERVE: 'สังเกตการณ์',
+  SHADOW: 'ทดลองควบคุม',
+  STOCK_CONTROL: 'คุมสต็อกโดย OMS',
+  STOCK_CONTROL_FILTER_ON: 'ที่เปิดคุมสต็อก',
+  STOCK_CONTROL_FILTER_OFF: 'ที่ปิดคุมสต็อก',
+  STOCK_CONTROL_ENABLED: 'คุมอยู่',
+  STOCK_CONTROL_DISABLED: 'ไม่ได้คุม',
+  STOCK_CONTROL_ON: 'เปิดคุมสต็อก',
+  STOCK_CONTROL_OFF: 'ปิดคุมสต็อก',
   LABEL_READY: 'ใบปะหน้าพร้อมแล้ว',
   FAILED: 'ไม่สำเร็จ',
   RETURNED_TO_SENDER: 'ตีกลับผู้ส่ง',

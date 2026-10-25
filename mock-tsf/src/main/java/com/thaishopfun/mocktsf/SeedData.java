@@ -39,6 +39,17 @@ public class SeedData {
     Instant grace = now.plus(30, ChronoUnit.DAYS).truncatedTo(ChronoUnit.SECONDS);
     Instant past = now.minus(1, ChronoUnit.DAYS).truncatedTo(ChronoUnit.SECONDS);
     users.add(user("owner-active", "shop_active", "Active Shop", "ACTIVE", future));
+    users.add(
+        new ShopUser(
+            "staff-active",
+            "staff@example.test",
+            "shop_active",
+            "พนักงานร้านสาธิต",
+            "STAFF",
+            "PRO",
+            "ACTIVE",
+            future,
+            1));
     users.add(user("owner-grace", "shop_grace", "Grace Shop", "GRACE", grace));
     // Change: dedicated shop so membership tests do not move shop_active.
     users.add(user("owner-bump", "shop_bump", "Bump Shop", "ACTIVE", future));

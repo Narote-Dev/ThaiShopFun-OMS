@@ -1,9 +1,14 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useContext, useEffect, useMemo, useRef, useState } from 'react'
 import type { Me } from '../../auth/AuthContext'
 import { catalogApi, type Sku } from '../../catalog/api'
 import { Badge } from '../../ui/Badge'
 import { Button } from '../../ui/Button'
 import { ConfirmationDialog } from '../../ui/ConfirmationDialog'
+import { ToastContext } from '../../ui/toast-context'
+import { Checkbox } from '../../ui/Checkbox'
+import { StatusBadge } from '../../ui/StatusBadge'
+import { KpiCard } from '../../ui/Card'
+import { messageTh } from '../../ui/labels'
 import { Card } from '../../ui/Card'
 import { Dialog } from '../../ui/Dialog'
 import {
@@ -89,12 +94,20 @@ function writeHash(
 
 export default function ListingsPage({ me }: { me: Me }) {
   const access = listingsAccess(me)
+  const toast = useContext(ToastContext)
   const [channelAccountId, setChannelAccountId] = useState(() => parseHash().channelAccountId)
   const [mappedFilter, setMappedFilter] = useState<'unmapped' | 'mapped' | 'all'>(() => parseHash().mapped)
   const [removedOnly, setRemovedOnly] = useState(() => parseHash().removedOnly)
   const [q, setQ] = useState(() => parseHash().q)
   const [items, setItems] = useState<ChannelListing[]>([])
   const [total, setTotal] = useState(0)
+  const [mode, setMode] = useState('')
+  const [coverage, setCoverage] = useState(0)
+  const [stockFilter, setStockFilter] = useState<boolean | null>(null)
+  const [selected, setSelected] = useState<string[]>([])
+  const [bulkEnabled, setBulkEnabled] = useState<boolean | null>(null)
+  const [notice, setNotice] = useState('')
+  const canControl = access.canWrite && mode === 'CONTROL'
   const [offset, setOffset] = useState(() => parseHash().offset)
   const [accounts, setAccounts] = useState<{ id: string; external_shop_id: string }[]>([])
   const [searchDraft, setSearchDraft] = useState(() => parseHash().q)
@@ -187,11 +200,14 @@ export default function ListingsPage({ me }: { me: Me }) {
     if (!channelAccountId) return
     let active = true
     listingsApi
-      .list(channelAccountId, mappedParam, removedOnly, q, PAGE_SIZE, offset)
+      .list(channelAccountId, mappedParam, removedOnly, q, PAGE_SIZE, offset, stockFilter)
       .then((page) => {
         if (!active) return
+        setSelected([])
         setItems(page.items)
         setTotal(page.total)
+        setMode(page.mode ?? '')
+        setCoverage(page.allowlist_coverage_pct ?? 0)
         setError('')
       })
       .catch((err: unknown) => {
@@ -200,7 +216,7 @@ export default function ListingsPage({ me }: { me: Me }) {
     return () => {
       active = false
     }
-  }, [channelAccountId, mappedParam, removedOnly, q, offset])
+  }, [channelAccountId, mappedParam, removedOnly, q, offset, stockFilter])
 
   async function applyFilters() {
     setOffset(0)
@@ -215,9 +231,11 @@ export default function ListingsPage({ me }: { me: Me }) {
       const response = await listingsApi.putMapping(activeListing.id, pickerSku.id)
       setSummary(response.reevaluation)
       closeMapPicker()
-      const page = await listingsApi.list(channelAccountId, mappedParam, removedOnly, q, PAGE_SIZE, offset)
+      const page = await listingsApi.list(channelAccountId, mappedParam, removedOnly, q, PAGE_SIZE, offset, stockFilter)
       setItems(page.items)
       setTotal(page.total)
+      setMode(page.mode ?? '')
+      setCoverage(page.allowlist_coverage_pct ?? 0)
     } catch (err: unknown) {
       setError(listingsMessage(err, 'จับคู่ไม่สำเร็จ'))
     } finally {
@@ -230,9 +248,11 @@ export default function ListingsPage({ me }: { me: Me }) {
     setBusy(true)
     try {
       await listingsApi.deleteMapping(listing.id)
-      const page = await listingsApi.list(channelAccountId, mappedParam, removedOnly, q, PAGE_SIZE, offset)
+      const page = await listingsApi.list(channelAccountId, mappedParam, removedOnly, q, PAGE_SIZE, offset, stockFilter)
       setItems(page.items)
       setTotal(page.total)
+      setMode(page.mode ?? '')
+      setCoverage(page.allowlist_coverage_pct ?? 0)
     } catch (err: unknown) {
       setError(listingsMessage(err, 'ยกเลิกการจับคู่ไม่สำเร็จ'))
     } finally {
@@ -247,9 +267,11 @@ export default function ListingsPage({ me }: { me: Me }) {
     try {
       const result = await listingsApi.syncListings(channelAccountId)
       setSyncResult(result)
-      const page = await listingsApi.list(channelAccountId, mappedParam, removedOnly, q, PAGE_SIZE, offset)
+      const page = await listingsApi.list(channelAccountId, mappedParam, removedOnly, q, PAGE_SIZE, offset, stockFilter)
       setItems(page.items)
       setTotal(page.total)
+      setMode(page.mode ?? '')
+      setCoverage(page.allowlist_coverage_pct ?? 0)
     } catch (err: unknown) {
       setError(listingsMessage(err, 'ซิงก์ไม่สำเร็จ'))
     } finally {
@@ -274,6 +296,28 @@ export default function ListingsPage({ me }: { me: Me }) {
     }
   }, [skuQuery])
 
+  async function changeControl(enabled: boolean, listingId?: string) {
+    if (!canControl || busy) return
+    setBusy(true)
+    setError('')
+    try {
+      const result = listingId
+        ? await listingsApi.setStockControl(listingId, enabled)
+        : await listingsApi.bulkStockControl(channelAccountId, selected, enabled)
+      setBulkEnabled(null)
+      setSelected([])
+      if (toast) toast.push(`ปรับปรุงแล้ว ${result.changed} รายการ`)
+      else setNotice(`ปรับปรุงแล้ว ${result.changed} รายการ`)
+      const page = await listingsApi.list(channelAccountId, mappedParam, removedOnly, q, PAGE_SIZE, offset, stockFilter)
+      setItems(page.items)
+      setTotal(page.total)
+      setMode(page.mode ?? '')
+      setCoverage(page.allowlist_coverage_pct ?? 0)
+    } catch (err) {
+      setError(messageTh(listingsMessage(err, ''), 'ปรับการคุมสต็อกไม่สำเร็จ กรุณาตรวจสอบว่ารายการจับคู่แล้วและยังไม่ถูกลบ'))
+    } finally { setBusy(false) }
+  }
+
   const visibleSkuHits = skuQuery.trim() ? skuHits : []
 
   return (
@@ -286,6 +330,8 @@ export default function ListingsPage({ me }: { me: Me }) {
           </>
         }
       />
+      <KpiCard label="ครอบคลุมรายการที่อนุญาต" value={`${coverage.toFixed(1)}%`} icon={null}
+        hint={<StatusBadge value={mode} kind="generic" />} />
       <Card className="mt-4">
         <div className="grid gap-4 p-4 sm:grid-cols-2 lg:grid-cols-4">
           <div>
@@ -358,6 +404,8 @@ export default function ListingsPage({ me }: { me: Me }) {
         </Card>
       ) : null}
       <FilterBar className="mt-4">
+        <Button size="sm" aria-pressed={stockFilter === true} variant={stockFilter === true ? 'primary' : 'secondary'} onClick={() => { setStockFilter(stockFilter === true ? null : true); setOffset(0) }}>{labelTh('STOCK_CONTROL_FILTER_ON')}</Button>
+        <Button size="sm" aria-pressed={stockFilter === false} variant={stockFilter === false ? 'primary' : 'secondary'} onClick={() => { setStockFilter(stockFilter === false ? null : false); setOffset(0) }}>{labelTh('STOCK_CONTROL_FILTER_OFF')}</Button>
         <Button
           type="button"
           size="sm"
@@ -377,6 +425,12 @@ export default function ListingsPage({ me }: { me: Me }) {
           ถูกลบจาก TSF
         </Button>
       </FilterBar>
+      {notice ? <p role="status" className="mt-4">{notice}</p> : null}
+      {canControl && selected.length > 0 ? <FilterBar className="mt-4">
+        <span>เลือก {selected.length} รายการ</span>
+        <Button disabled={busy} onClick={() => setBulkEnabled(true)}>{labelTh('STOCK_CONTROL_ON')}</Button>
+        <Button disabled={busy} onClick={() => setBulkEnabled(false)}>{labelTh('STOCK_CONTROL_OFF')}</Button>
+      </FilterBar> : null}
       {summary ? (
         <p role="status" className="mt-2 text-[13px] text-stone-600">
           ตรวจสอบอีกครั้ง: ปล่อยออเดอร์แล้ว {summary.released}, สต็อกไม่พอ {summary.out_of_stock}, ยังพักอยู่{' '}
@@ -388,6 +442,8 @@ export default function ListingsPage({ me }: { me: Me }) {
         <DataTable aria-label="รายการขายจากช่องทาง">
           <DataTableHead>
             <tr>
+              {canControl ? <DataTableTh><Checkbox aria-label="เลือกทั้งหมดในหน้านี้" checked={items.length > 0 && selected.length === items.length} onCheckedChange={(checked) => setSelected(checked ? items.map(row => row.id) : [])} /></DataTableTh> : null}
+              <DataTableTh>{labelTh('STOCK_CONTROL')}</DataTableTh>
               <DataTableTh>รหัสสินค้าจากช่องทาง</DataTableTh>
               <DataTableTh>รหัสสินค้าผู้ขาย</DataTableTh>
               <DataTableTh>ชื่อ</DataTableTh>
@@ -400,6 +456,11 @@ export default function ListingsPage({ me }: { me: Me }) {
           <tbody>
             {items.map((row) => (
               <DataTableRow key={row.id}>
+                {canControl ? <DataTableCell><Checkbox aria-label={`เลือก ${row.external_sku_id}`} checked={selected.includes(row.id)} onCheckedChange={(checked) => setSelected(current => checked ? [...current, row.id] : current.filter(id => id !== row.id))} /></DataTableCell> : null}
+                <DataTableCell>
+                  {canControl ? <Button size="sm" aria-label={labelTh('STOCK_CONTROL')} aria-pressed={row.stock_control} disabled={busy || (!row.stock_control && (!row.sku_id || !!row.removed_at))} onClick={() => void changeControl(!row.stock_control, row.id)}>{labelTh(row.stock_control ? 'STOCK_CONTROL_ENABLED' : 'STOCK_CONTROL_DISABLED')}</Button>
+                    : <Badge title={mode !== 'CONTROL' ? `แก้ไขได้เฉพาะโหมด${labelTh('CONTROL')}` : 'สิทธิ์ของคุณอ่านได้อย่างเดียว'}>{labelTh(row.stock_control ? 'STOCK_CONTROL_ENABLED' : 'STOCK_CONTROL_DISABLED')}</Badge>}
+                </DataTableCell>
                 <DataTableCell>
                   {row.external_sku_id}
                   {row.removed_at ? (
@@ -504,6 +565,11 @@ export default function ListingsPage({ me }: { me: Me }) {
             </Button>
           </div>
         </div>
+      </Dialog>
+      <Dialog open={bulkEnabled !== null && canControl} onOpenChange={(open) => { if (!open && !busy) setBulkEnabled(null) }} title={labelTh(bulkEnabled ? 'STOCK_CONTROL_ON' : 'STOCK_CONTROL_OFF')}>
+        <p>ยืนยันการเปลี่ยนการคุมสต็อก {selected.length} รายการ</p>
+        <Button disabled={busy} onClick={() => { if (bulkEnabled !== null) void changeControl(bulkEnabled) }}>ยืนยัน</Button>
+        <Button disabled={busy} variant="secondary" onClick={() => setBulkEnabled(null)}>ยกเลิก</Button>
       </Dialog>
       <ConfirmationDialog open={unmapListing !== null} onOpenChange={(open) => { if (!open) setUnmapListing(null) }} danger
         title="ยกเลิกการจับคู่รหัสสินค้า" description={`ยกเลิกการจับคู่ ${unmapListing?.external_sku_id ?? ''}?`}
