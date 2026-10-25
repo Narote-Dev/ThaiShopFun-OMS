@@ -99,14 +99,17 @@ class StockControlApiTest extends OrderIntegrationTest {
 
   @Test
   void bulkIsAtomicAuditedAndIdempotent() throws Exception {
-    sql("UPDATE channel_listing SET sku_id = ? WHERE id = ?", skuId, listingId);
+    sql(
+        "UPDATE channel_listing SET sku_id = ?, mapping_source = 'MANUAL', mapped_at = now() WHERE id = ?",
+        skuId,
+        listingId);
     var ids = new java.util.ArrayList<String>();
     ids.add(listingId.toString());
     for (int i = 0; i < 3; i++) {
       UUID id = UuidV7.generate();
       ids.add(id.toString());
       sql(
-          "INSERT INTO channel_listing (id, tenant_id, channel_account_id, external_sku_id, sku_id, stock_control) VALUES (?, ?, ?, ?, ?, false)",
+          "INSERT INTO channel_listing (id, tenant_id, channel_account_id, external_sku_id, sku_id, mapping_source, mapped_at, stock_control) VALUES (?, ?, ?, ?, ?, 'MANUAL', now(), false)",
           id,
           shop.tenantId(),
           accountId,
@@ -151,10 +154,13 @@ class StockControlApiTest extends OrderIntegrationTest {
   @Test
   void controlPushesOnlyEnabledListingsAndDisableNeverZeroes() throws Exception {
     sql("UPDATE channel_account SET mode = 'CONTROL' WHERE id = ?", accountId);
-    sql("UPDATE channel_listing SET sku_id = ? WHERE id = ?", skuId, listingId);
+    sql(
+        "UPDATE channel_listing SET sku_id = ?, mapping_source = 'MANUAL', mapped_at = now() WHERE id = ?",
+        skuId,
+        listingId);
     UUID other = UuidV7.generate();
     sql(
-        "INSERT INTO channel_listing (id, tenant_id, channel_account_id, external_sku_id, sku_id, stock_control) VALUES (?, ?, ?, 'B', ?, false)",
+        "INSERT INTO channel_listing (id, tenant_id, channel_account_id, external_sku_id, sku_id, mapping_source, mapped_at, stock_control) VALUES (?, ?, ?, 'B', ?, 'MANUAL', now(), false)",
         other,
         shop.tenantId(),
         accountId,
@@ -214,7 +220,10 @@ class StockControlApiTest extends OrderIntegrationTest {
     var unmapped = http.catalog().put(path(), shop.owner(), enabled);
     assertThat(unmapped.status()).isEqualTo(422);
     assertThat(unmapped.error()).isEqualTo("LISTING_NOT_CONTROLLABLE");
-    sql("UPDATE channel_listing SET sku_id = ?, removed_at = now() WHERE id = ?", skuId, listingId);
+    sql(
+        "UPDATE channel_listing SET sku_id = ?, mapping_source = 'MANUAL', mapped_at = now(), removed_at = now() WHERE id = ?",
+        skuId,
+        listingId);
     assertThat(http.catalog().put(path(), shop.owner(), enabled).status()).isEqualTo(422);
     assertThat(
             http.catalog().put(path(), shop.owner(), java.util.Map.of("enabled", false)).status())
