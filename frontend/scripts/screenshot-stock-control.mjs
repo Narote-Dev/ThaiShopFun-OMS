@@ -12,9 +12,9 @@ export async function captureStockControl(base, outDir) {
     if (!response.ok()) throw new Error(`Demo mode fixture: ${response.status()}`)
     return (await response.json()).channel_account_id
   }
-  const capture = async name => {
+  const capture = async (name, fullPage = true) => {
     await page.evaluate(async () => { window.scrollTo(0, 0); await document.fonts.ready; await new Promise(requestAnimationFrame) })
-    await page.screenshot({ path: path.join(outDir, `${name}.png`), fullPage: true })
+    await page.screenshot({ path: path.join(outDir, `${name}.png`), fullPage })
   }
   try {
     await page.goto(base)
@@ -26,12 +26,15 @@ export async function captureStockControl(base, outDir) {
     const url = `${base}/#/channel/listings?channel_account_id=${account}&mapped=all`
     await page.goto(url)
     await page.getByRole('checkbox', { name: 'เลือก L-demo-ready', exact: true }).waitFor()
+    await expect(page.getByText('คุมเฉพาะที่เลือก', { exact: true })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'คุมสต็อกโดย OMS', exact: true }).first()).toHaveText('ไม่ได้คุม')
     await capture('listings-control')
     await page.getByRole('checkbox', { name: 'เลือก L-demo-ready', exact: true }).check()
     await page.getByRole('checkbox', { name: 'เลือก L-demo-cod', exact: true }).check()
-    await page.getByRole('button', { name: 'เปิดคุมสต็อก', exact: true }).last().click()
+    await page.getByRole('button', { name: 'เปิดคุมสต็อก', exact: true }).click()
     await expect(page.getByRole('dialog')).toContainText('2 รายการ')
-    await capture('listings-control-bulk-dialog')
+    // The fixed overlay and sticky sidebar cover the viewport; fullPage includes offscreen content.
+    await capture('listings-control-bulk-dialog', false)
     await page.getByRole('dialog').getByRole('button', { name: 'ยกเลิก', exact: true }).click()
     await mode('ACTIVE')
     await page.goto(`${base}/#/`)

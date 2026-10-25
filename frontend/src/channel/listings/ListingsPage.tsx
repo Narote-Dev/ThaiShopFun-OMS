@@ -458,8 +458,8 @@ export default function ListingsPage({ me }: { me: Me }) {
               <DataTableRow key={row.id}>
                 {canControl ? <DataTableCell><Checkbox aria-label={`เลือก ${row.external_sku_id}`} checked={selected.includes(row.id)} onCheckedChange={(checked) => setSelected(current => checked ? [...current, row.id] : current.filter(id => id !== row.id))} /></DataTableCell> : null}
                 <DataTableCell>
-                  {canControl ? <Button size="sm" aria-label={`${labelTh('STOCK_CONTROL')} ${row.external_sku_id}`} aria-pressed={row.stock_control} disabled={busy || (!row.stock_control && (!row.sku_id || !!row.removed_at))} onClick={() => void changeControl(!row.stock_control, row.id)}>{labelTh(row.stock_control ? 'STOCK_CONTROL_ON' : 'STOCK_CONTROL_OFF')}</Button>
-                    : <Badge title={mode !== 'CONTROL' ? 'แก้ไขได้เฉพาะโหมดควบคุมเฉพาะรายการ' : 'สิทธิ์ของคุณอ่านได้อย่างเดียว'}>{labelTh(row.stock_control ? 'STOCK_CONTROL_ON' : 'STOCK_CONTROL_OFF')}</Badge>}
+                  {canControl ? <Button size="sm" aria-label={labelTh('STOCK_CONTROL')} aria-pressed={row.stock_control} disabled={busy || (!row.stock_control && (!row.sku_id || !!row.removed_at))} onClick={() => void changeControl(!row.stock_control, row.id)}>{labelTh(row.stock_control ? 'STOCK_CONTROL_ENABLED' : 'STOCK_CONTROL_DISABLED')}</Button>
+                    : <Badge title={mode !== 'CONTROL' ? `แก้ไขได้เฉพาะโหมด${labelTh('CONTROL')}` : 'สิทธิ์ของคุณอ่านได้อย่างเดียว'}>{labelTh(row.stock_control ? 'STOCK_CONTROL_ENABLED' : 'STOCK_CONTROL_DISABLED')}</Badge>}
                 </DataTableCell>
                 <DataTableCell>
                   {row.external_sku_id}

@@ -14,15 +14,20 @@ test('OWNER bulk allowlist immediately controls checkout and can be disabled', a
   const { channel_account_id: account } = await fixture.json()
   try {
     await page.goto(`/#/channel/listings?channel_account_id=${account}&mapped=all`)
+    const toggle = page.getByRole('row').filter({ has: page.getByRole('checkbox', { name: 'เลือก L-demo-ready', exact: true }) }).getByRole('button', { name: 'คุมสต็อกโดย OMS', exact: true })
+    await expect(page.getByText('คุมเฉพาะที่เลือก', { exact: true })).toBeVisible()
+    await expect(toggle).toHaveText('ไม่ได้คุม')
+    await expect(toggle).toHaveAttribute('aria-pressed', 'false')
     await page.getByRole('checkbox', { name: 'เลือก L-demo-ready', exact: true }).check()
     await page.getByRole('checkbox', { name: 'เลือก L-demo-cod', exact: true }).check()
-    await page.getByRole('button', { name: 'เปิดคุมสต็อก', exact: true }).last().click()
+    await page.getByRole('button', { name: 'เปิดคุมสต็อก', exact: true }).click()
     const dialog = page.getByRole('dialog', { name: 'เปิดคุมสต็อก' })
     await expect(dialog).toContainText('2 รายการ')
-    await page.screenshot({ path: 'test-results/stock-control-bulk-dialog.png', fullPage: true })
+    await page.screenshot({ path: 'test-results/stock-control-bulk-dialog.png', fullPage: false })
     await dialog.getByRole('button', { name: 'ยืนยัน', exact: true }).click()
     await expect(dialog).not.toBeVisible()
-    await expect(page.getByRole('button', { name: 'คุมสต็อกโดย OMS L-demo-ready', exact: true })).toHaveAttribute('aria-pressed', 'true')
+    await expect(toggle).toHaveAttribute('aria-pressed', 'true')
+    await expect(toggle).toHaveText('คุมอยู่')
     await page.screenshot({ path: 'test-results/stock-control-control.png', fullPage: true })
     for (const [listing, enforced] of [['L-demo-ready', true], ['L-demo-cod', true], ['L-demo-oos', false]] as const) {
       const checkout = `t40a-${listing}-${Date.now()}`
@@ -34,8 +39,9 @@ test('OWNER bulk allowlist immediately controls checkout and can be disabled', a
       expect(body.enforced).toBe(enforced)
       if (body.reservation_id) await request.delete(`${mock}/control/checkout/reservations/${body.reservation_id}`)
     }
-    await page.getByRole('button', { name: 'คุมสต็อกโดย OMS L-demo-ready', exact: true }).click()
-    await expect(page.getByRole('button', { name: 'คุมสต็อกโดย OMS L-demo-ready', exact: true })).toHaveAttribute('aria-pressed', 'false')
+    await toggle.click()
+    await expect(toggle).toHaveAttribute('aria-pressed', 'false')
+    await expect(toggle).toHaveText('ไม่ได้คุม')
   } finally {
     expect((await request.post(`${oms}/control/demo/stock-control-mode`, { data: { mode: 'ACTIVE' } })).ok()).toBeTruthy()
   }
