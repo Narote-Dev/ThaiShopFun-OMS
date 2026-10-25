@@ -153,6 +153,25 @@ class StockControlApiTest extends OrderIntegrationTest {
 
   @Test
   void controlPushesOnlyEnabledListingsAndDisableNeverZeroes() throws Exception {
+    UUID warehouseId = UuidV7.generate();
+    sql(
+        "INSERT INTO warehouse (id, tenant_id, code, name, is_default) VALUES (?, ?, 'MAIN', 'Main', true)",
+        warehouseId,
+        shop.tenantId());
+    // Positive stock makes disabling exercise stopping a nonzero push. Keep the opening ledger
+    // and its sequence consistent with inventory, as StockFixture.stock does.
+    sql(
+        "INSERT INTO inventory (id, tenant_id, sku_id, warehouse_id, on_hand, reserved, ledger_seq) VALUES (?, ?, ?, ?, 10, 0, 1)",
+        UuidV7.generate(),
+        shop.tenantId(),
+        skuId,
+        warehouseId);
+    sql(
+        "INSERT INTO inventory_ledger (id, tenant_id, sku_id, warehouse_id, delta_on_hand, delta_reserved, reason, actor, ledger_seq) VALUES (?, ?, ?, ?, 10, 0, 'OPENING_BALANCE', 'test', 1)",
+        UuidV7.generate(),
+        shop.tenantId(),
+        skuId,
+        warehouseId);
     sql("UPDATE channel_account SET mode = 'CONTROL' WHERE id = ?", accountId);
     sql(
         "UPDATE channel_listing SET sku_id = ?, mapping_source = 'MANUAL', mapped_at = now() WHERE id = ?",
