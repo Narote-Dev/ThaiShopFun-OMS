@@ -338,6 +338,42 @@ export default function OrderDetailPage({ id, me }: { id: string; me: Me }) {
             </DataTable>
           </Card>
 
+          <Card>
+            <CardHeader title={labelTh('PAYMENT_REFUNDS')} />
+            <CardBody>
+              {order.payment_snapshot ? (
+                <>
+                  <p className="flex items-center gap-2 text-[13px]">
+                    {labelTh('PAYMENT_SNAPSHOT')}
+                    <StatusBadge value={order.payment_snapshot.status} kind="payment" />
+                  </p>
+                  <p className="mt-2 text-[12px] text-stone-500">
+                    {labelTh('PAYMENT_OBSERVED')} {formatBangkokDateTime(order.payment_snapshot.observed_at)}
+                  </p>
+                </>
+              ) : <p className="text-[13px] text-stone-500">{labelTh('PAYMENT_NO_SNAPSHOT')}</p>}
+            </CardBody>
+            <DataTable aria-label={labelTh('REFUND_LIST')}>
+              <DataTableHead>
+                <DataTableRow>
+                  <DataTableTh>{labelTh('REFUND_AMOUNT')}</DataTableTh>
+                  <DataTableTh>{labelTh('REFUND_STATUS')}</DataTableTh>
+                  <DataTableTh>{labelTh('PAYMENT_OBSERVED')}</DataTableTh>
+                </DataTableRow>
+              </DataTableHead>
+              <tbody>
+                {(order.refunds ?? []).map((refund) => (
+                  <DataTableRow key={refund.id}>
+                    <DataTableCell mono>{formatMoney(refund.amount)}</DataTableCell>
+                    <DataTableCell><StatusBadge value={refund.status} kind="generic" /></DataTableCell>
+                    <DataTableCell>{formatBangkokDateTime(refund.observed_at)}</DataTableCell>
+                  </DataTableRow>
+                ))}
+                {!order.refunds?.length ? <DataTableRow><DataTableCell>{labelTh('REFUND_NONE')}</DataTableCell></DataTableRow> : null}
+              </tbody>
+            </DataTable>
+          </Card>
+
           {order.reservations.length > 0 ? (
             <Card>
               <CardHeader title="การจองสต็อก" />

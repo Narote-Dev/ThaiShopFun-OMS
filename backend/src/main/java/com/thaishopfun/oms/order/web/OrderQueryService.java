@@ -193,7 +193,9 @@ public class OrderQueryService {
               reservations,
               shipments,
               recipient,
-              timeline);
+              timeline,
+              loadPaymentSnapshot(order.id()),
+              loadRefunds(order.id()));
         });
   }
 
@@ -498,6 +500,44 @@ public class OrderQueryService {
                 rs.getString("status"),
                 instant(rs.getTimestamp("expires_at"))),
         orderId.toString());
+  }
+
+  private OrderViews.PaymentSnapshotView loadPaymentSnapshot(UUID orderId) {
+    return jdbc.query(
+        """
+        SELECT status, amount, refunded_amount, currency, paid_at, observed_at
+        FROM payment_status_snapshot WHERE order_id = ?
+        ORDER BY observed_at DESC,
+          CASE status WHEN 'REFUNDED' THEN 3 WHEN 'PARTIALLY_REFUNDED' THEN 2 WHEN 'PAID' THEN 1 ELSE 0 END DESC,
+          source_event_id DESC LIMIT 1
+        """,
+        rs ->
+            rs.next()
+                ? new OrderViews.PaymentSnapshotView(
+                    rs.getString("status"),
+                    rs.getBigDecimal("amount"),
+                    rs.getBigDecimal("refunded_amount"),
+                    rs.getString("currency"),
+                    instant(rs.getTimestamp("paid_at")),
+                    instant(rs.getTimestamp("observed_at")))
+                : null,
+        orderId);
+  }
+
+  private List<OrderViews.RefundView> loadRefunds(UUID orderId) {
+    return jdbc.query(
+        """
+        SELECT id, status, amount, currency, observed_at FROM refund WHERE order_id = ?
+        ORDER BY observed_at DESC, id DESC
+        """,
+        (rs, n) ->
+            new OrderViews.RefundView(
+                rs.getObject("id", UUID.class),
+                rs.getString("status"),
+                rs.getBigDecimal("amount"),
+                rs.getString("currency"),
+                instant(rs.getTimestamp("observed_at"))),
+        orderId);
   }
 
   private List<OrderViews.ShipmentView> loadShipments(UUID orderId) {

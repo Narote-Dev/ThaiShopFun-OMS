@@ -1,5 +1,16 @@
 // UI labels only: keep API values and identifiers unchanged.
 const LABELS: Record<string, string> = {
+  PAYMENT_REFUNDS: 'การชำระเงินและคืนเงิน',
+  PAYMENT_SNAPSHOT: 'สถานะการชำระเงินล่าสุด',
+  PAYMENT_OBSERVED: 'ตรวจสอบเมื่อ',
+  PAYMENT_NO_SNAPSHOT: 'ยังไม่ได้รับข้อมูลการชำระเงิน',
+  REFUND_STATUS: 'สถานะการคืนเงิน',
+  REFUND_LIST: 'รายการคืนเงิน',
+  REFUND_NONE: 'ไม่มีรายการคืนเงิน',
+  REFUND_AMOUNT: 'ยอดคืนเงิน',
+  SUCCEEDED: 'สำเร็จ',
+  UNPAID: 'ยังไม่ชำระเงิน',
+  TSF_PAYMENT_SNAPSHOT: 'ปรับปรุงข้อมูลการชำระเงินจาก TSF',
   CONTROL: 'คุมเฉพาะที่เลือก',
   OBSERVE: 'สังเกตการณ์',
   SHADOW: 'ทดลองควบคุม',

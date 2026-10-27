@@ -165,6 +165,35 @@ public class TsfCatalog {
       return;
     }
     Order current = existing.get();
+    if ("payment.status_changed".equals(type) || "refund.status_changed".equals(type)) {
+      Map<String, Object> pay = new LinkedHashMap<>(current.payment());
+      if ("payment.status_changed".equals(type)) {
+        pay.put("status", data.path("status").asString());
+      } else {
+        List<Map<String, Object>> refunds = new ArrayList<>();
+        Object stored = pay.get("refunds");
+        if (stored instanceof List<?> values) {
+          for (Object value : values) {
+            Map<String, Object> row =
+                jsonToMap(new tools.jackson.databind.json.JsonMapper().valueToTree(value));
+            if (!data.path("refund_id").asString().equals(row.get("refund_id"))) refunds.add(row);
+          }
+        }
+        Map<String, Object> row = jsonToMap(data);
+        row.remove("order_id");
+        refunds.add(row);
+        pay.put("refunds", refunds);
+      }
+      replaceOrder(
+          new Order(
+              current.shopId(),
+              orderId,
+              current.updatedAt(),
+              current.aggregateVersion(),
+              current.detail(),
+              pay));
+      return;
+    }
     long version = event.path("aggregate_version").asLong(current.aggregateVersion());
     Instant updated = Instant.now();
     Map<String, Object> detail = new LinkedHashMap<>(current.detail());
@@ -419,7 +448,7 @@ public class TsfCatalog {
     Map<String, Object> payment = new LinkedHashMap<>();
     payment.put("order_id", orderId);
     payment.put("status", status);
-    if ("PAID".equals(status)) {
+    if ("PAID".equals(status) && "TSF-240929-000123".equals(orderId)) {
       Map<String, Object> refund = new LinkedHashMap<>();
       refund.put("refund_id", "xnd_rf_77");
       refund.put("return_id", "tsf_ret_311");

@@ -107,7 +107,24 @@ public final class OrderViews {
       List<ReservationView> reservations,
       List<ShipmentView> shipments,
       RecipientView recipient,
-      List<TimelineEntry> timeline) {}
+      List<TimelineEntry> timeline,
+      @JsonProperty("payment_snapshot") PaymentSnapshotView paymentSnapshot,
+      List<RefundView> refunds) {}
+
+  public record PaymentSnapshotView(
+      String status,
+      BigDecimal amount,
+      @JsonProperty("refunded_amount") BigDecimal refundedAmount,
+      String currency,
+      @JsonProperty("paid_at") Instant paidAt,
+      @JsonProperty("observed_at") Instant observedAt) {}
+
+  public record RefundView(
+      UUID id,
+      String status,
+      BigDecimal amount,
+      String currency,
+      @JsonProperty("observed_at") Instant observedAt) {}
 
   public record ChannelAccountHoldCount(
       @JsonProperty("channel_account_id") UUID channelAccountId, long count) {}

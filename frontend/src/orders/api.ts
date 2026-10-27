@@ -87,6 +87,15 @@ export type OrderDetail = {
     postcode: string | null
     pii_status: string
   }
+  payment_snapshot?: {
+    status: string
+    amount: string
+    refunded_amount: string
+    currency: string
+    paid_at: string | null
+    observed_at: string
+  } | null
+  refunds?: { id: string; status: string; amount: string; currency: string; observed_at: string }[]
   timeline: TimelineEntry[]
 }
 

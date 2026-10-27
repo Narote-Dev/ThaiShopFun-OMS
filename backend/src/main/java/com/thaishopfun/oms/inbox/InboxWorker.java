@@ -353,14 +353,21 @@ public class InboxWorker {
     Long lastForStale = lastProcessedVersionForStale(row);
     Long lastAggregate = lastProcessedVersionAggregate(row);
     boolean entVerOrdered = InboxEntitlementPolicy.ordersByEntVer(row.eventType());
+    // Payment mirrors apply their own observed-time ordering under the order lock.
+    // Their aggregate versions belong to payments/refunds, not the order REST version.
+    boolean paymentMirror =
+        "payment.status_changed".equals(row.eventType())
+            || "refund.status_changed".equals(row.eventType());
     boolean stale =
-        !entVerOrdered
+        !paymentMirror
+            && !entVerOrdered
             && row.aggregateVersion() > 0
             && lastForStale != null
             && row.aggregateVersion() <= lastForStale;
     // gap=true means aggregate_version skipped at least one version. REST refetch applies snapshot.
     boolean gap =
-        !stale
+        !paymentMirror
+            && !stale
             && row.aggregateVersion() > 0
             && lastAggregate != null
             && row.aggregateVersion() > lastAggregate + 1;
