@@ -6,7 +6,12 @@ import tools.jackson.databind.PropertyNamingStrategies;
 import tools.jackson.databind.annotation.JsonNaming;
 
 @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
-public record PaymentStatus(String orderId, String status, List<Refund> refunds) {
+public record PaymentStatus(
+    String orderId, String status, List<Refund> refunds, String provider, String providerRef) {
+
+  public PaymentStatus(String orderId, String status, List<Refund> refunds) {
+    this(orderId, status, refunds, null, null);
+  }
 
   @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
   public record Refund(

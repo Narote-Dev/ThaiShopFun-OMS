@@ -86,7 +86,7 @@ class PaymentSnapshotIntegrationTest {
             "pay-" + order.id(),
             1,
             "2026-09-29T08:15:02Z",
-            Map.of("status", "PAID"));
+            Map.of("status", "PAID", "provider", "XENDIT"));
     assertThat(receive(paid).httpStatus()).isEqualTo(202);
     assertThat(receive(paid).httpStatus()).isEqualTo(200);
     worker.processAvailable();
@@ -112,11 +112,20 @@ class PaymentSnapshotIntegrationTest {
             "pay-" + order.id(),
             2,
             "2026-09-29T08:14:02Z",
-            Map.of("status", "PENDING"));
+            Map.of("status", "PENDING", "provider_ref", "chrg_old"));
     receive(old);
     worker.processAvailable();
     assertThat(status()).isEqualTo("REFUNDED");
     assertThat(count("payment_status_snapshot")).isEqualTo(2);
+    assertThat(
+            fixture.inTenant(
+                shop.tenantId(),
+                () ->
+                    jdbc.queryForObject(
+                        "SELECT count(*) FROM payment_status_snapshot WHERE order_id = ? AND provider = 'OPN'",
+                        Integer.class,
+                        order.id())))
+        .isEqualTo(1);
     var detail = http.get(OrderHttp.ordersPath("/" + order.id()), httpShop.owner());
     assertThat(detail.status()).isEqualTo(200);
     assertThat(detail.body().path("payment_snapshot").path("status").asString()).isEqualTo("PAID");
@@ -156,7 +165,9 @@ class PaymentSnapshotIntegrationTest {
                 "PAID",
                 List.of(
                     new PaymentStatus.Refund(
-                        "r1", null, "SUCCEEDED", new BigDecimal("295"), "THB"))));
+                        "r1", null, "SUCCEEDED", new BigDecimal("295"), "THB")),
+                "XENDIT",
+                "xnd_payment"));
     TenantContext.set(shop.tenantId(), null);
     try {
       assertThat(payments.reconcile(ref, order.externalOrderId())).isTrue();
@@ -171,6 +182,104 @@ class PaymentSnapshotIntegrationTest {
   }
 
   @Test
+  void unknownProviderSkipsSnapshotButProjectsAndAudits() throws Exception {
+    fixture.inTenant(
+        shop.tenantId(),
+        () ->
+            jdbc.update(
+                "UPDATE sales_order SET payment_status = 'PENDING' WHERE id = ?", order.id()));
+    byte[] body =
+        event(
+            "payment.status_changed",
+            "pay-" + order.id(),
+            1,
+            "2026-09-29T08:15:02Z",
+            Map.of("status", "PAID"));
+    assertThat(receive(body).httpStatus()).isEqualTo(202);
+    assertThat(receive(body).httpStatus()).isEqualTo(200);
+    worker.processAvailable();
+    assertThat(status()).isEqualTo("PAID");
+    assertThat(count("payment_status_snapshot")).isZero();
+    assertThat(
+            fixture.inTenant(
+                shop.tenantId(),
+                () ->
+                    jdbc.queryForObject(
+                        "SELECT count(*) FROM audit_log WHERE entity_id = ? AND action = 'PAYMENT_SNAPSHOT_RECORDED'",
+                        Integer.class,
+                        order.id().toString())))
+        .isEqualTo(1);
+  }
+
+  @Test
+  void unknownProviderFallbackStillProjectsRefundsAndAuditsWithoutSnapshot() {
+    var adapter = mock(ChannelAdapter.class);
+    var ref = new ChannelAccountRef(shop.tenantId(), shop.channelAccountId(), shop.tsfShopId());
+    when(adapters.require(Channel.TSF)).thenReturn(adapter);
+    when(adapter.getPaymentStatus(ref, order.externalOrderId()))
+        .thenReturn(
+            new PaymentStatus(
+                order.externalOrderId(),
+                "PAID",
+                List.of(
+                    new PaymentStatus.Refund(
+                        "r1", null, "SUCCEEDED", new BigDecimal("295"), "THB"))));
+    TenantContext.set(shop.tenantId(), null);
+    try {
+      assertThat(payments.reconcile(ref, order.externalOrderId())).isTrue();
+    } finally {
+      TenantContext.clear();
+    }
+    assertThat(status()).isEqualTo("PARTIALLY_REFUNDED");
+    assertThat(count("payment_status_snapshot")).isZero();
+    assertThat(
+            fixture.inTenant(
+                shop.tenantId(),
+                () ->
+                    jdbc.queryForObject(
+                        "SELECT count(*) FROM audit_log WHERE entity_id = ? AND action = 'PAYMENT_SNAPSHOT_RECORDED'",
+                        Integer.class,
+                        order.id().toString())))
+        .isEqualTo(1);
+  }
+
+  @Test
+  void unknownProviderProjectionAndAuditRollBackTogether() {
+    fixture.inTenant(
+        shop.tenantId(),
+        () ->
+            jdbc.update(
+                "UPDATE sales_order SET payment_status = 'PENDING' WHERE id = ?", order.id()));
+    byte[] body =
+        event(
+            "payment.status_changed",
+            "pay-" + order.id(),
+            1,
+            "2026-09-29T08:15:02Z",
+            Map.of("status", "PAID"));
+    assertThatThrownBy(
+            () ->
+                fixture.inTenant(
+                    shop.tenantId(),
+                    () -> {
+                      payments.handle(message(body));
+                      throw new IllegalStateException("rollback");
+                    }))
+        .isInstanceOf(IllegalStateException.class);
+    assertThat(status()).isEqualTo("PENDING");
+    assertThat(count("payment_status_snapshot")).isZero();
+    assertThat(
+            fixture.inTenant(
+                shop.tenantId(),
+                () ->
+                    jdbc.queryForObject(
+                        "SELECT count(*) FROM audit_log WHERE entity_id = ? AND action = 'PAYMENT_SNAPSHOT_RECORDED'",
+                        Integer.class,
+                        order.id().toString())))
+        .isZero();
+  }
+
+  @Test
   void failedTransactionRollsBackSnapshotAndAudit() throws Exception {
     byte[] paid =
         event(
@@ -178,7 +287,7 @@ class PaymentSnapshotIntegrationTest {
             "pay-" + order.id(),
             1,
             "2026-09-29T08:15:02Z",
-            Map.of("status", "PAID"));
+            Map.of("status", "PAID", "provider", "XENDIT"));
     assertThatThrownBy(
             () ->
                 fixture.inTenant(

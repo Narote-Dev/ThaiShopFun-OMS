@@ -9,5 +9,7 @@
       "amount": 295.0,
       "currency": "THB"
     }
-  ]
+  ],
+  "provider": "XENDIT",
+  "provider_ref": "xnd_pay_77"
 }

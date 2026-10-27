@@ -8,6 +8,8 @@
   "aggregate_version": 2,
   "data": {
     "order_id": "TSF-240929-000123",
-    "status": "PAID"
+    "status": "PAID",
+    "provider": "XENDIT",
+    "provider_ref": "xnd_pay_77"
   }
 }

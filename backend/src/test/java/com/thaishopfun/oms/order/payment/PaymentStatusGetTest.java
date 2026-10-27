@@ -37,7 +37,7 @@ class PaymentStatusGetTest {
           hits.incrementAndGet();
           byte[] body =
               """
-          {"order_id":"TSF-1","status":"PAID","refunds":[
+          {"order_id":"TSF-1","status":"PAID","provider":"OPN","provider_ref":"chrg_1","refunds":[
           {"refund_id":"r1","status":"SUCCEEDED","amount":295,"currency":"THB"}]}
           """
                   .getBytes(StandardCharsets.UTF_8);
@@ -75,6 +75,8 @@ class PaymentStatusGetTest {
               new ChannelAccountRef(UUID.randomUUID(), UUID.randomUUID(), "shop"), "TSF-1");
       assertThat(hits).hasValue(1);
       assertThat(payment.status()).isEqualTo("PAID");
+      assertThat(payment.provider()).isEqualTo("OPN");
+      assertThat(payment.providerRef()).isEqualTo("chrg_1");
       assertThat(payment.refunds())
           .singleElement()
           .satisfies(

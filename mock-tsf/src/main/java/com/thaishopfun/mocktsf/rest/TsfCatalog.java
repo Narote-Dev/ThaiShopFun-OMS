@@ -169,6 +169,9 @@ public class TsfCatalog {
       Map<String, Object> pay = new LinkedHashMap<>(current.payment());
       if ("payment.status_changed".equals(type)) {
         pay.put("status", data.path("status").asString());
+        if (data.hasNonNull("provider")) pay.put("provider", data.path("provider").asString());
+        if (data.hasNonNull("provider_ref"))
+          pay.put("provider_ref", data.path("provider_ref").asString());
       } else {
         List<Map<String, Object>> refunds = new ArrayList<>();
         Object stored = pay.get("refunds");
@@ -208,6 +211,8 @@ public class TsfCatalog {
     Map<String, Object> pay = new LinkedHashMap<>(current.payment());
     if ("order.paid".equals(type)) {
       pay.put("status", "PAID");
+      pay.put("provider", "XENDIT");
+      pay.put("provider_ref", "xnd_pay_" + orderId);
     }
     replaceOrder(new Order(current.shopId(), orderId, updated, version, detail, pay));
   }
@@ -448,6 +453,10 @@ public class TsfCatalog {
     Map<String, Object> payment = new LinkedHashMap<>();
     payment.put("order_id", orderId);
     payment.put("status", status);
+    if (!"UNPAID".equals(status)) {
+      payment.put("provider", "XENDIT");
+      payment.put("provider_ref", "xnd_pay_" + orderId);
+    }
     if ("PAID".equals(status) && "TSF-240929-000123".equals(orderId)) {
       Map<String, Object> refund = new LinkedHashMap<>();
       refund.put("refund_id", "xnd_rf_77");

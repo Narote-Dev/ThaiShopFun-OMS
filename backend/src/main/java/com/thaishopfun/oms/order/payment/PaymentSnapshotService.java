@@ -60,26 +60,38 @@ public class PaymentSnapshotService {
             .orElseThrow(() -> new InboxDeferException(properties.getDeferDelay()));
     SalesOrder order = lock(account.id(), data.path("order_id").asString());
     Instant observed = Instant.parse(message.payload().path("occurred_at").asString());
-    boolean changed;
     if ("payment.status_changed".equals(message.eventType())) {
-      changed =
-          snapshot(
-              order, data.path("status").asString(), BigDecimal.ZERO, observed, message.eventId());
-    } else {
-      changed =
-          refund(
-              order,
-              data.path("refund_id").asString(),
-              data.path("return_id").asString(null),
-              data.path("status").asString(),
-              new BigDecimal(data.path("amount").asString()),
-              data.path("currency").asString(),
-              observed,
-              message.eventId(),
-              false);
-    }
-    if (changed) {
-      project(order);
+      String status = data.path("status").asString();
+      validateStatus(status);
+      String providerRef = data.path("provider_ref").asString(null);
+      String provider = PaymentProvider.resolve(data.path("provider").asString(null), providerRef);
+      if (provider == null) {
+        project(
+            order,
+            new Snapshot(
+                status,
+                order.grandTotal(),
+                BigDecimal.ZERO,
+                order.currency(),
+                order.paidAt(),
+                observed));
+        audit(order);
+      } else if (snapshot(
+          order, status, BigDecimal.ZERO, observed, message.eventId(), provider, providerRef)) {
+        project(order, null);
+        audit(order);
+      }
+    } else if (refund(
+        order,
+        data.path("refund_id").asString(),
+        data.path("return_id").asString(null),
+        data.path("status").asString(),
+        new BigDecimal(data.path("amount").asString()),
+        data.path("currency").asString(),
+        observed,
+        message.eventId(),
+        false)) {
+      project(order, null);
       audit(order);
     }
   }
@@ -97,6 +109,8 @@ public class PaymentSnapshotService {
         adapters.require(Channel.TSF).getPaymentStatus(account, externalOrderId);
     if (!externalOrderId.equals(payment.orderId()))
       throw new IllegalArgumentException("order mismatch");
+    validateStatus(payment.status());
+    String provider = PaymentProvider.resolve(payment.provider(), payment.providerRef());
     Instant observed = clock.instant();
     boolean changed = false;
     for (PaymentStatus.Refund refund :
@@ -115,14 +129,34 @@ public class PaymentSnapshotService {
     }
     BigDecimal refunded = succeeded(order.id());
     Snapshot latest = latest(order.id());
-    if (latest == null
-        || !latest.status().equals(payment.status())
-        || latest.refundedAmount().compareTo(refunded) != 0) {
+    if (provider != null
+        && (latest == null
+            || !latest.status().equals(payment.status())
+            || latest.refundedAmount().compareTo(refunded) != 0)) {
       changed |=
-          snapshot(order, payment.status(), refunded, observed, "reconcile:" + UuidV7.generate());
+          snapshot(
+              order,
+              payment.status(),
+              refunded,
+              observed,
+              "reconcile:" + UuidV7.generate(),
+              provider,
+              payment.providerRef());
     }
-    if (changed) {
-      project(order);
+    if (provider == null) {
+      changed |=
+          project(
+              order,
+              new Snapshot(
+                  payment.status(),
+                  order.grandTotal(),
+                  refunded,
+                  order.currency(),
+                  order.paidAt(),
+                  observed));
+      audit(order);
+    } else if (changed) {
+      project(order, null);
       audit(order);
     }
     return changed;
@@ -139,22 +173,34 @@ public class PaymentSnapshotService {
     return orders.findById(order.id()).orElseThrow();
   }
 
-  private boolean snapshot(
-      SalesOrder order, String status, BigDecimal refunded, Instant at, String source) {
-    if (!List.of("UNPAID", "PENDING", "PAID", "PARTIALLY_REFUNDED", "REFUNDED", "FAILED")
-        .contains(status)) {
+  private static void validateStatus(String status) {
+    if (status == null
+        || !List.of("UNPAID", "PENDING", "PAID", "PARTIALLY_REFUNDED", "REFUNDED", "FAILED")
+            .contains(status)) {
       throw new NonRetryableInboxException("invalid payment status");
     }
+  }
+
+  private boolean snapshot(
+      SalesOrder order,
+      String status,
+      BigDecimal refunded,
+      Instant at,
+      String source,
+      String provider,
+      String providerRef) {
     return jdbc.update(
             """
         INSERT INTO payment_status_snapshot
-          (id, tenant_id, order_id, provider, status, amount, refunded_amount, currency, paid_at, observed_at, source_event_id)
-        VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?)
+          (id, tenant_id, order_id, provider, provider_ref, status, amount, refunded_amount, currency, paid_at, observed_at, source_event_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT (tenant_id, source_event_id) DO NOTHING
         """,
             UuidV7.generate(),
             order.tenantId(),
             order.id(),
+            provider,
+            providerRef,
             status,
             order.grandTotal(),
             refunded,
@@ -272,8 +318,12 @@ public class PaymentSnapshotService {
         orderId);
   }
 
-  private void project(SalesOrder order) {
+  private boolean project(SalesOrder order, Snapshot observation) {
     Snapshot snapshot = latest(order.id());
+    if (observation != null
+        && (snapshot == null || !observation.observedAt().isBefore(snapshot.observedAt()))) {
+      snapshot = observation;
+    }
     String next =
         PaymentProjection.status(
             snapshot == null ? null : snapshot.status(),
@@ -288,7 +338,9 @@ public class PaymentSnapshotService {
           order.id());
       history.append(
           order.id(), "PAYMENT", order.paymentStatus(), next, "TSF_PAYMENT_SNAPSHOT", "SYSTEM");
+      return true;
     }
+    return false;
   }
 
   private void audit(SalesOrder order) {

@@ -13,6 +13,7 @@ class PaymentEventsTest {
     var catalog = new TsfCatalog();
     String id = catalog.createBulkOrders("shop_active", 1, "PREPAID", true).get(0);
     assertThat((List<?>) catalog.order(id).orElseThrow().payment().get("refunds")).isEmpty();
+    assertThat(catalog.order(id).orElseThrow().payment()).containsEntry("provider", "XENDIT");
   }
 
   @Test
@@ -30,9 +31,20 @@ class PaymentEventsTest {
                 "aggregate_version",
                 99,
                 "data",
-                Map.of("order_id", id, "status", "PAID")));
+                Map.of(
+                    "order_id",
+                    id,
+                    "status",
+                    "PAID",
+                    "provider",
+                    "OPN",
+                    "provider_ref",
+                    "chrg_1")));
     catalog.noteOrderEvent(paid);
     assertThat(catalog.order(id).orElseThrow().payment().get("status")).isEqualTo("PAID");
+    assertThat(catalog.order(id).orElseThrow().payment())
+        .containsEntry("provider", "OPN")
+        .containsEntry("provider_ref", "chrg_1");
     var refund =
         json.valueToTree(
             Map.of(
