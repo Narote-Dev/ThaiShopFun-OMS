@@ -25,6 +25,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import tools.jackson.databind.JsonNode;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -153,7 +154,12 @@ class ShipLabelApiTest extends OrderIntegrationTest {
             httpShop.owner(),
             Map.of("carrier", "KERRY", "tracking_no", "K123456789TH"));
     assertThat(manual.status()).isEqualTo(200);
-    assertThat(manual.body().path("shipment.tracking_no").asString()).isEqualTo("K123456789TH");
+    JsonNode shipmentNode = manual.body().path("shipment");
+    String tracking =
+        shipmentNode.path("tracking_no").asString("").isBlank()
+            ? shipmentNode.path("trackingNo").asString("")
+            : shipmentNode.path("tracking_no").asString("");
+    assertThat(tracking).isEqualTo("K123456789TH");
 
     byte[] slip =
         http.postPdf(

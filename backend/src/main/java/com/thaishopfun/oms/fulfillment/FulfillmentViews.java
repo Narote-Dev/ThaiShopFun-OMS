@@ -1,6 +1,6 @@
 package com.thaishopfun.oms.fulfillment;
 
-import tools.jackson.databind.annotation.JsonProperty;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
