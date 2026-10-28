@@ -76,11 +76,18 @@ public class StockDriftService {
             Set<String> cursors = new HashSet<>();
             String cursor = null;
             do {
+              String pageCursor = cursor;
+              // An adapter may use nested tenant scopes. Restore our tenant and actor before
+              // the next page and, critically, before the transaction manager binds the RLS GUC.
               ListingPage page =
-                  adapters
-                      .require(Channel.TSF)
-                      .listListings(
-                          new ChannelAccountRef(tenant, account.id(), account.shop()), cursor);
+                  inTenant(
+                      tenant,
+                      () ->
+                          adapters
+                              .require(Channel.TSF)
+                              .listListings(
+                                  new ChannelAccountRef(tenant, account.id(), account.shop()),
+                                  pageCursor));
               for (var listing : page.listings()) {
                 if (listing.available() < 0
                     || quantities.putIfAbsent(listing.listingSkuId(), listing.available()) != null)
