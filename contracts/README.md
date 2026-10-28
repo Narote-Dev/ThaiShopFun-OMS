@@ -32,8 +32,8 @@ Event schemas describe `data` only. The envelope schema describes the wrapper. A
 `payment.status_changed.data` and GET `/orders/{orderId}/payment-status` may include
 `provider` (`XENDIT` or `OPN`) and `provider_ref` (an opaque payment reference).
 Both fields are optional for compatibility; no card or account data is included.
-OMS uses an explicit provider first, otherwise infers `XENDIT` from `xnd_` or
-`OPN` from `chrg_`/`opn` reference prefixes. If neither resolves the provider
+OMS takes the provider only from the explicit `provider` field; `provider_ref`
+is opaque and never used to infer it. If `provider` is absent
 (for example COD `UNPAID`), OMS skips the snapshot insert while still projecting
 payment/refund status and auditing the observation in the same transaction.
 The database provider NOT NULL and XENDIT/OPN constraints remain unchanged.

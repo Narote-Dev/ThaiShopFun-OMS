@@ -112,7 +112,7 @@ class PaymentSnapshotIntegrationTest {
             "pay-" + order.id(),
             2,
             "2026-09-29T08:14:02Z",
-            Map.of("status", "PENDING", "provider_ref", "chrg_old"));
+            Map.of("status", "PENDING", "provider", "OPN", "provider_ref", "chrg_old"));
     receive(old);
     worker.processAvailable();
     assertThat(status()).isEqualTo("REFUNDED");

@@ -16,11 +16,10 @@ class PaymentProviderTest {
   }
 
   @Test
-  void infersSupportedReferencePrefixes() {
-    assertThat(PaymentProvider.resolve(null, "xnd_123")).isEqualTo("XENDIT");
-    assertThat(PaymentProvider.resolve(null, "chrg_123")).isEqualTo("OPN");
-    assertThat(PaymentProvider.resolve(null, "opn_123")).isEqualTo("OPN");
-    assertThat(PaymentProvider.resolve(null, "opn123")).isEqualTo("OPN");
+  void referencePrefixesAreNeverUsedToInferProvider() {
+    assertThat(PaymentProvider.resolve(null, "xnd_123")).isNull();
+    assertThat(PaymentProvider.resolve(null, "chrg_123")).isNull();
+    assertThat(PaymentProvider.resolve(null, "opn_123")).isNull();
   }
 
   @Test
