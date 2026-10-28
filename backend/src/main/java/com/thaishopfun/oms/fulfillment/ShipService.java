@@ -124,12 +124,29 @@ public class ShipService {
       throw OrderApiException.fieldValidationFailed(
           "order_ids", "At most " + MAX_BATCH + " orders per batch");
     }
-    Set<UUID> unique = new LinkedHashSet<>(body.orderIds());
+    Set<UUID> unique = parseOrderIds(body.orderIds());
     List<byte[]> pages = new ArrayList<>();
     for (UUID orderId : unique) {
       pages.add(issueLabelPdf(orderId));
     }
     return labelBatchPdf.merge(pages);
+  }
+
+  private static Set<UUID> parseOrderIds(List<String> raw) {
+    Set<UUID> unique = new LinkedHashSet<>();
+    for (String id : raw) {
+      if (id == null || id.isBlank()) {
+        throw OrderApiException.fieldValidationFailed(
+            "order_ids", "order_ids must not contain blanks");
+      }
+      try {
+        unique.add(UUID.fromString(id.trim()));
+      } catch (IllegalArgumentException ex) {
+        throw OrderApiException.fieldValidationFailed(
+            "order_ids", "order_ids contains an invalid uuid");
+      }
+    }
+    return unique;
   }
 
   public FulfillmentViews.ManualTrackingResponse registerManualTracking(

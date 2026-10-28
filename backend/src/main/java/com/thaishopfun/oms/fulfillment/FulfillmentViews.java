@@ -94,7 +94,7 @@ public final class FulfillmentViews {
 
   public record ShipCandidatesView(List<ShipCandidateItem> items) {}
 
-  public record LabelBatchBody(@JsonProperty("order_ids") List<UUID> orderIds) {}
+  public record LabelBatchBody(@JsonProperty("order_ids") List<String> orderIds) {}
 
   public record ManualTrackingBody(
       String carrier, @JsonProperty("tracking_no") String trackingNo) {}
