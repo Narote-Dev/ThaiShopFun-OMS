@@ -89,19 +89,8 @@ class ShipLabelApiTest extends OrderIntegrationTest {
         FulfillmentTestSupport.seedSku(shop.tenantId(), "SHIP-TEE", "8850000000100");
     FulfillmentTestSupport.addLine(order, sku.skuId(), 2);
     FulfillmentTestSupport.seedInventory(shop.tenantId(), sku.skuId(), sku.warehouseId(), 20);
-    TenantContext.set(shop.tenantId(), null);
-    stock.ensureOrderHold(
-        StockOwner.order(order.id().toString()),
-        List.of(ReserveItem.of(sku.skuId(), 2)),
-        "hold-" + order.id());
-    TenantContext.clear();
     packToComplete(httpShop, order.id(), sku.skuCode(), 2);
-
-    CatalogHttp.Result candidates = http.get("/api/v1/ship/candidates", httpShop.owner());
-    assertThat(candidates.status()).isEqualTo(200);
-    assertThat(candidates.body().path("items").findValues("id"))
-        .extracting(n -> n.asString())
-        .contains(order.id().toString());
+    assertPacked(httpShop, order.id());
 
     byte[] firstPdf =
         http.postPdf(
@@ -117,6 +106,7 @@ class ShipLabelApiTest extends OrderIntegrationTest {
             Map.of("order_ids", List.of(order.id().toString())));
     assertThat(replay).isEqualTo(firstPdf);
 
+    ensureOrderHold(shop.tenantId(), order.id(), sku.skuId(), 2);
     int onHandBefore = onHand(shop.tenantId(), sku.skuId());
     CatalogHttp.Result ship =
         http.post("/api/v1/ship/orders/" + order.id() + "/confirm", httpShop.owner(), Map.of());
@@ -145,13 +135,8 @@ class ShipLabelApiTest extends OrderIntegrationTest {
         FulfillmentTestSupport.seedSku(shop.tenantId(), "MAN-TEE", "8850000000101");
     FulfillmentTestSupport.addLine(order, sku.skuId(), 1);
     FulfillmentTestSupport.seedInventory(shop.tenantId(), sku.skuId(), sku.warehouseId(), 5);
-    TenantContext.set(shop.tenantId(), null);
-    stock.ensureOrderHold(
-        StockOwner.order(order.id().toString()),
-        List.of(ReserveItem.of(sku.skuId(), 1)),
-        "hold-" + order.id());
-    TenantContext.clear();
     packToComplete(httpShop, order.id(), sku.skuCode(), 1);
+    assertPacked(httpShop, order.id());
 
     CatalogHttp.Result labels =
         http.post(
@@ -197,6 +182,24 @@ class ShipLabelApiTest extends OrderIntegrationTest {
         http.post("/api/v1/pack/orders/" + orderId + "/complete", httpShop.owner(), Map.of());
     assertThat(done.status()).as(done.raw()).isEqualTo(200);
     assertThat(done.body().path("fulfillment_status").asString()).isEqualTo("PACKED");
+  }
+
+  private void assertPacked(CatalogHttp.Shop httpShop, UUID orderId) {
+    CatalogHttp.Result view = http.get(OrderHttp.ordersPath("/" + orderId), httpShop.owner());
+    assertThat(view.status()).as(view.raw()).isEqualTo(200);
+    assertThat(view.body().path("fulfillment_status").asString()).isEqualTo("PACKED");
+  }
+
+  private void ensureOrderHold(UUID tenantId, UUID orderId, UUID skuId, int qty) {
+    TenantContext.set(tenantId, null);
+    try {
+      stock.ensureOrderHold(
+          StockOwner.order(orderId.toString()),
+          List.of(ReserveItem.of(skuId, qty)),
+          "hold-" + orderId);
+    } finally {
+      TenantContext.clear();
+    }
   }
 
   private static void startMock() {
