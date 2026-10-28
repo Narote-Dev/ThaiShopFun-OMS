@@ -358,7 +358,7 @@ public class TsfCatalog {
         "carrier",
         manualOnly ? "MANUAL" : (carrier == null || carrier.isBlank() ? "FLASH" : carrier));
     if (manualOnly) {
-      body.put("tracking_no", null);
+      body.put("tracking_no", "MANUAL-TBD");
       body.put("status", "PENDING");
     } else {
       body.put("tracking_no", "TH" + id);

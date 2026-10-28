@@ -20,6 +20,9 @@ public class LabelBatchPdfRenderer {
     if (labelPdfs.size() > MAX_LABELS) {
       throw new IllegalArgumentException("At most " + MAX_LABELS + " labels per batch");
     }
+    if (labelPdfs.size() == 1) {
+      return labelPdfs.get(0);
+    }
     PDFMergerUtility merger = new PDFMergerUtility();
     ByteArrayOutputStream out = new ByteArrayOutputStream();
     merger.setDestinationStream(out);
