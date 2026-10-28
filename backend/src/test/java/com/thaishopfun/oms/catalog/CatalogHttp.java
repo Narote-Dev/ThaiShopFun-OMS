@@ -228,6 +228,21 @@ public final class CatalogHttp {
     }
   }
 
+  public static long textLong(String sql, Object... params) {
+    try (Connection admin = AuthTestSupport.admin();
+        PreparedStatement statement = admin.prepareStatement(sql)) {
+      for (int i = 0; i < params.length; i++) {
+        statement.setObject(i + 1, params[i]);
+      }
+      try (ResultSet rows = statement.executeQuery()) {
+        assertThat(rows.next()).isTrue();
+        return rows.getLong(1);
+      }
+    } catch (SQLException ex) {
+      throw new IllegalStateException(ex);
+    }
+  }
+
   public static void execute(String sql, Object... params) {
     try (Connection admin = AuthTestSupport.admin();
         PreparedStatement statement = admin.prepareStatement(sql)) {

@@ -74,7 +74,7 @@ class ShipLabelApiTest extends OrderIntegrationTest {
 
   @BeforeEach
   void setup() {
-    mock.getBean(OmsEndpoint.class).setBaseUrl("http://127.0.0.1:" + mockPort());
+    mock.getBean(OmsEndpoint.class).setBaseUrl("http://127.0.0.1:" + port);
     fixture = new OrderFixture(orders, recipients, history, transactions);
   }
 
@@ -97,14 +97,24 @@ class ShipLabelApiTest extends OrderIntegrationTest {
     TenantContext.clear();
     packToComplete(httpShop, order.id(), sku.skuCode(), 2);
 
+    CatalogHttp.Result candidates = http.get("/api/v1/ship/candidates", httpShop.owner());
+    assertThat(candidates.status()).isEqualTo(200);
+    assertThat(candidates.body().path("items").findValues("id"))
+        .extracting(n -> n.asString())
+        .contains(order.id().toString());
+
     byte[] firstPdf =
         http.postPdf(
-            "/api/v1/ship/labels", httpShop.owner(), Map.of("order_ids", List.of(order.id())));
+            "/api/v1/ship/labels",
+            httpShop.owner(),
+            Map.of("order_ids", List.of(order.id().toString())));
     assertThat(new String(firstPdf, 0, 4, StandardCharsets.US_ASCII)).isEqualTo("%PDF");
 
     byte[] replay =
         http.postPdf(
-            "/api/v1/ship/labels", httpShop.owner(), Map.of("order_ids", List.of(order.id())));
+            "/api/v1/ship/labels",
+            httpShop.owner(),
+            Map.of("order_ids", List.of(order.id().toString())));
     assertThat(replay).isEqualTo(firstPdf);
 
     int onHandBefore = onHand(shop.tenantId(), sku.skuId());
@@ -128,7 +138,7 @@ class ShipLabelApiTest extends OrderIntegrationTest {
   void manualTrackingWhenLabelUnavailable() throws Exception {
     CatalogHttp.Shop httpShop = http.catalog().shop();
     OrderFixture.Shop shop = OrderFixture.shopFor(httpShop);
-    String externalId = "NO-LBL-MANUAL";
+    String externalId = "NO-LBL-" + UUID.randomUUID().toString().substring(0, 8);
     registerMockOrder(externalId);
     SalesOrder order = fixture.insert(shop, externalId, "READY_TO_PICK", "NONE");
     FulfillmentTestSupport.SkuSeed sku =
@@ -145,7 +155,9 @@ class ShipLabelApiTest extends OrderIntegrationTest {
 
     CatalogHttp.Result labels =
         http.post(
-            "/api/v1/ship/labels", httpShop.owner(), Map.of("order_ids", List.of(order.id())));
+            "/api/v1/ship/labels",
+            httpShop.owner(),
+            Map.of("order_ids", List.of(order.id().toString())));
     assertThat(labels.status()).isEqualTo(422);
     assertThat(labels.body().path("error").asString()).isEqualTo("LABEL_NOT_AVAILABLE");
 
@@ -159,18 +171,32 @@ class ShipLabelApiTest extends OrderIntegrationTest {
 
     byte[] slip =
         http.postPdf(
-            "/api/v1/ship/labels", httpShop.owner(), Map.of("order_ids", List.of(order.id())));
+            "/api/v1/ship/labels",
+            httpShop.owner(),
+            Map.of("order_ids", List.of(order.id().toString())));
     assertThat(new String(slip, 0, 4, StandardCharsets.US_ASCII)).isEqualTo("%PDF");
   }
 
   private void packToComplete(CatalogHttp.Shop httpShop, UUID orderId, String skuCode, int qty)
       throws Exception {
-    http.post("/api/v1/pick-lists", httpShop.owner(), Map.of("order_ids", List.of(orderId)));
+    CatalogHttp.Result pick =
+        http.post(
+            "/api/v1/pick-lists",
+            httpShop.owner(),
+            Map.of("order_ids", List.of(orderId.toString())));
+    assertThat(pick.status()).as(pick.raw()).isEqualTo(200);
     for (int i = 0; i < qty; i++) {
-      http.post(
-          "/api/v1/pack/orders/" + orderId + "/scans", httpShop.owner(), Map.of("scan", skuCode));
+      CatalogHttp.Result scan =
+          http.post(
+              "/api/v1/pack/orders/" + orderId + "/scans",
+              httpShop.owner(),
+              Map.of("scan", skuCode));
+      assertThat(scan.status()).as(scan.raw()).isEqualTo(200);
     }
-    http.post("/api/v1/pack/orders/" + orderId + "/complete", httpShop.owner(), Map.of());
+    CatalogHttp.Result done =
+        http.post("/api/v1/pack/orders/" + orderId + "/complete", httpShop.owner(), Map.of());
+    assertThat(done.status()).as(done.raw()).isEqualTo(200);
+    assertThat(done.body().path("fulfillment_status").asString()).isEqualTo("PACKED");
   }
 
   private static void startMock() {

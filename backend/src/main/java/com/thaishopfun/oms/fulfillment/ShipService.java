@@ -538,16 +538,18 @@ public class ShipService {
         .query(
             """
             SELECT ca.id, ca.channel, ca.external_shop_id
-            FROM channel_account ca
-            WHERE ca.id = ? AND ca.tenant_id = ?
+            FROM sales_order o
+            JOIN channel_account ca
+              ON ca.tenant_id = o.tenant_id AND ca.id = o.channel_account_id
+            WHERE o.id = ? AND o.tenant_id = ?
             """,
             (rs, rowNum) ->
                 new AccountRow(
                     rs.getObject("id", UUID.class),
                     rs.getString("channel"),
                     rs.getString("external_shop_id")),
-            order.channelAccountId(),
-            order.tenantId())
+            order.id(),
+            TenantContext.requireTenantId())
         .stream()
         .findFirst();
   }

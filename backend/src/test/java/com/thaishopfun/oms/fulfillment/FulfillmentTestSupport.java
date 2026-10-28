@@ -93,8 +93,8 @@ public final class FulfillmentTestSupport {
     UUID inventoryId = UuidV7.generate();
     CatalogHttp.execute(
         """
-        INSERT INTO inventory (id, tenant_id, sku_id, warehouse_id, on_hand, reserved)
-        VALUES (?, ?, ?, ?, ?, 0)
+        INSERT INTO inventory (id, tenant_id, sku_id, warehouse_id, on_hand, reserved, ledger_seq)
+        VALUES (?, ?, ?, ?, ?, 0, 0)
         ON CONFLICT (tenant_id, sku_id, warehouse_id) DO UPDATE
           SET on_hand = EXCLUDED.on_hand
         """,
@@ -103,5 +103,27 @@ public final class FulfillmentTestSupport {
         skuId,
         warehouseId,
         onHand);
+    long seq =
+        CatalogHttp.textLong(
+            """
+            UPDATE inventory SET ledger_seq = ledger_seq + 1
+            WHERE tenant_id = ? AND sku_id = ? AND warehouse_id = ?
+            RETURNING ledger_seq
+            """,
+            tenantId,
+            skuId,
+            warehouseId);
+    CatalogHttp.execute(
+        """
+        INSERT INTO inventory_ledger (
+          id, tenant_id, sku_id, warehouse_id, delta_on_hand, delta_reserved, reason, actor, ledger_seq
+        ) VALUES (?, ?, ?, ?, ?, 0, 'OPENING_BALANCE', 'test', ?)
+        """,
+        UuidV7.generate(),
+        tenantId,
+        skuId,
+        warehouseId,
+        onHand,
+        seq);
   }
 }

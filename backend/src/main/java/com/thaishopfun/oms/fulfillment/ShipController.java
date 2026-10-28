@@ -26,7 +26,10 @@ class ShipController {
     return ship.candidates();
   }
 
-  @PostMapping(value = "/labels", produces = MediaType.APPLICATION_PDF_VALUE)
+  @PostMapping(
+      value = "/labels",
+      consumes = MediaType.APPLICATION_JSON_VALUE,
+      produces = {MediaType.APPLICATION_PDF_VALUE, MediaType.APPLICATION_JSON_VALUE})
   ResponseEntity<byte[]> labelBatch(@RequestBody FulfillmentViews.LabelBatchBody body) {
     byte[] pdf = ship.labelBatchPdf(body);
     return ResponseEntity.ok()
