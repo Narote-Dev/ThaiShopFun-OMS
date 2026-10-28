@@ -545,15 +545,12 @@ public class ShipService {
   }
 
   private static void validateShipmentReadyForConfirm(ShipmentRow shipment) {
-    if (!"LABEL_READY".equals(shipment.status())) {
-      throw OrderApiException.conflict(
-          "SHIPMENT_STATE",
-          "Shipment is not ready to confirm"
-              + (shipment.status() == null ? "" : ": " + shipment.status()));
-    }
     if (isPlaceholderTracking(shipment.trackingNo())) {
       throw OrderApiException.conflict(
           "SHIPMENT_INCOMPLETE", "Enter carrier and tracking before confirming ship");
+    }
+    if (!"LABEL_READY".equals(shipment.status())) {
+      throw OrderApiException.conflict("SHIPMENT_STATE", "Shipment is not ready to confirm");
     }
   }
 

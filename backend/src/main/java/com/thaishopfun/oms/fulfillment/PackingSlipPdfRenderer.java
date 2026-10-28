@@ -50,16 +50,6 @@ public class PackingSlipPdfRenderer {
         y = writeFitted(stream, font, 9, margin, y, maxWidth, "ถึง " + data.recipientName());
         y -= 2 * MM;
         y = writeFitted(stream, font, 8, margin, y, maxWidth, data.recipientAddress());
-        y -= 2 * MM;
-        y =
-            writeFitted(
-                stream,
-                font,
-                8,
-                margin,
-                y,
-                maxWidth,
-                "จังหวัด " + data.province() + " · รหัสไปรษณีย์ " + data.postcode());
         y -= 4 * MM;
         y = writeFitted(stream, font, 10, margin, y, maxWidth, "รายการ");
         y -= 2 * MM;

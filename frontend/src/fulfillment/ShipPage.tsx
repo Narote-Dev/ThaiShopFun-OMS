@@ -9,11 +9,23 @@ import { Input } from '../ui/Input'
 import { Label } from '../ui/Label'
 import { PageContent } from '../ui/PageContent'
 import { PageHeader } from '../ui/PageHeader'
-import { labelTh, shipManualSavedToast } from '../ui/labels'
+import { labelTh, messageTh, shipManualSavedToast } from '../ui/labels'
 import { formatBangkokDateTime } from '../ui/format'
 import { StatusBadge } from '../ui/StatusBadge'
 import { useToast } from '../ui/useToast'
 import { fulfillmentMessage, shipApi, type ShipCandidate } from './api'
+
+function hasTsfLabelTracking(row: ShipCandidate): boolean {
+  const tracking = row.tracking_no?.trim() ?? ''
+  if (
+    !tracking ||
+    tracking.toUpperCase() === 'MANUAL-TBD' ||
+    tracking.toUpperCase() === 'PENDING'
+  ) {
+    return false
+  }
+  return row.shipment_status === 'LABEL_READY'
+}
 
 export default function ShipPage() {
   const toast = useToast()
@@ -85,7 +97,8 @@ export default function ShipPage() {
         (r) => !r.ok && r.error !== 'LABEL_NOT_AVAILABLE',
       )
       if (otherFailures.length > 0 && !labelUnavailable) {
-        setError(fulfillmentMessage(otherFailures[0].message, labelTh('SHIP_LABELS_ERROR')))
+        const code = otherFailures[0].error ?? ''
+        setError(messageTh(code, labelTh('SHIP_LABELS_ERROR')))
       }
       if (batch.pdf_base64) {
         toast.push(labelTh('SHIP_LABELS_OPENED'), 'success')
@@ -222,6 +235,7 @@ export default function ShipPage() {
                       size="sm"
                       variant="secondary"
                       disabled={busy}
+                      hidden={hasTsfLabelTracking(row)}
                       onClick={() => setManualOrderId(row.id)}
                     >
                       {labelTh('SHIP_MANUAL_BUTTON')}

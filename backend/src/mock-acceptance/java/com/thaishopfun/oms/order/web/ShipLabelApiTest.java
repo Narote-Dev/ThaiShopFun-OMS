@@ -148,7 +148,8 @@ class ShipLabelApiTest extends OrderIntegrationTest {
     CatalogHttp.Result confirmBeforeManual =
         http.post("/api/v1/ship/orders/" + order.id() + "/confirm", httpShop.owner(), Map.of());
     assertThat(confirmBeforeManual.status()).isEqualTo(409);
-    assertThat(confirmBeforeManual.body().path("error").asString()).isEqualTo("SHIPMENT_STATE");
+    assertThat(confirmBeforeManual.body().path("error").asString())
+        .isEqualTo("SHIPMENT_INCOMPLETE");
 
     CatalogHttp.Result manual =
         http.post(

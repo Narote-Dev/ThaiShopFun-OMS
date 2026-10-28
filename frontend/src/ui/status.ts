@@ -126,6 +126,9 @@ export function resolveStatus(value: string, kind: StatusKind = 'generic'): Stat
   }
   const map = maps[kind]
   if (map && map[key]) return map[key]
+  if (kind === 'carrier') {
+    return { variant: 'info', label: key }
+  }
   if ((kind === 'hold' || kind === 'hold_reason') && key !== 'NONE') {
     return { variant: 'danger', label: labelTh(key) }
   }

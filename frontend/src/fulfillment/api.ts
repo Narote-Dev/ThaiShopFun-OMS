@@ -53,7 +53,7 @@ export type PackSession = {
 }
 
 export function fulfillmentMessage(err: unknown, fallback: string): string {
-  if (err instanceof ApiError) return messageTh(err.code, err.message)
+  if (err instanceof ApiError) return messageTh(err.code, fallback)
   if (err instanceof Error && err.message && /[ก-๙]/.test(err.message)) return err.message
   return fallback
 }
