@@ -88,4 +88,20 @@ public final class FulfillmentTestSupport {
         qty,
         BigDecimal.valueOf(100L * qty));
   }
+
+  public static void seedInventory(UUID tenantId, UUID skuId, UUID warehouseId, int onHand) {
+    UUID inventoryId = UuidV7.generate();
+    CatalogHttp.execute(
+        """
+        INSERT INTO inventory (id, tenant_id, sku_id, warehouse_id, on_hand, reserved)
+        VALUES (?, ?, ?, ?, ?, 0)
+        ON CONFLICT (tenant_id, sku_id, warehouse_id) DO UPDATE
+          SET on_hand = EXCLUDED.on_hand
+        """,
+        inventoryId,
+        tenantId,
+        skuId,
+        warehouseId,
+        onHand);
+  }
 }

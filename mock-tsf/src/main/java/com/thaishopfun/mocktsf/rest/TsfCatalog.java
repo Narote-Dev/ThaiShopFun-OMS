@@ -351,9 +351,19 @@ public class TsfCatalog {
     Map<String, Object> body = new LinkedHashMap<>();
     body.put("shipment_id", id);
     body.put("order_id", orderId);
-    body.put("carrier", carrier);
-    body.put("tracking_no", "TH" + id);
-    body.put("status", "LABEL_READY");
+    boolean manualOnly =
+        orderId.startsWith("NO-LBL-")
+            || (carrier != null && "NO_LABEL".equalsIgnoreCase(carrier.trim()));
+    body.put(
+        "carrier",
+        manualOnly ? "MANUAL" : (carrier == null || carrier.isBlank() ? "FLASH" : carrier));
+    if (manualOnly) {
+      body.put("tracking_no", null);
+      body.put("status", "PENDING");
+    } else {
+      body.put("tracking_no", "TH" + id);
+      body.put("status", "LABEL_READY");
+    }
     shipments.put(id, body);
     return body;
   }

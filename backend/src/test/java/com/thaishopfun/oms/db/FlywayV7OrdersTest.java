@@ -125,7 +125,7 @@ class FlywayV7OrdersTest {
       assertThat(versions(admin))
           .containsExactly(
               "1", "2", "3", "4", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16",
-              "17");
+              "17", "18");
       // Step 2: Every V7 table exists, with the indexes 03-data-model.md requires.
       Set<String> tables = new HashSet<>();
       try (Statement statement = admin.createStatement();
@@ -222,7 +222,7 @@ class FlywayV7OrdersTest {
         assertThat(versions(upgrade))
             .containsExactly(
                 "1", "2", "3", "4", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16",
-                "17");
+                "17", "18");
         for (String table :
             List.of("tenant", "product", "sku", "warehouse", "inventory", "stock_reservation")) {
           assertThat(count(upgrade, table)).as(table).isEqualTo(1);

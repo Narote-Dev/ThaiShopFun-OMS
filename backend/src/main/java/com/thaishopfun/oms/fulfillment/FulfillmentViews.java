@@ -82,4 +82,47 @@ public final class FulfillmentViews {
 
   public record CompletePackResponse(
       @JsonProperty("fulfillment_status") String fulfillmentStatus, long version) {}
+
+  public record ShipCandidateItem(
+      UUID id,
+      @JsonProperty("external_order_id") String externalOrderId,
+      @JsonProperty("ordered_at") Instant orderedAt,
+      @JsonProperty("ship_by") Instant shipBy,
+      @JsonProperty("has_shipment") boolean hasShipment,
+      @JsonProperty("tracking_no") String trackingNo,
+      String carrier) {}
+
+  public record ShipCandidatesView(List<ShipCandidateItem> items) {}
+
+  public record LabelBatchBody(@JsonProperty("order_ids") List<UUID> orderIds) {}
+
+  public record ManualTrackingBody(
+      String carrier, @JsonProperty("tracking_no") String trackingNo) {}
+
+  public record ShipmentSummary(
+      UUID id,
+      String carrier,
+      @JsonProperty("tracking_no") String trackingNo,
+      String status,
+      @JsonProperty("external_shipment_id") String externalShipmentId,
+      @JsonProperty("manual") boolean manual) {}
+
+  public record ManualTrackingResponse(
+      @JsonProperty("fulfillment_status") String fulfillmentStatus, ShipmentSummary shipment) {}
+
+  public record ShipConfirmResponse(
+      @JsonProperty("fulfillment_status") String fulfillmentStatus,
+      long version,
+      ShipmentSummary shipment) {}
+
+  public record PackingSlipLine(String skuCode, String name, int qty) {}
+
+  public record PackingSlipData(
+      String externalOrderId,
+      String carrier,
+      String trackingNo,
+      String province,
+      String postcode,
+      Instant generatedAt,
+      List<PackingSlipLine> lines) {}
 }

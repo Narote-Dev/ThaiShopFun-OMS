@@ -24,6 +24,10 @@ public final class OrderHttp {
     return catalog.getPdf(path, token);
   }
 
+  public byte[] postPdf(String path, String token, Object body) {
+    return catalog.postPdf(path, token, body);
+  }
+
   public CatalogHttp.Result post(String path, String token, Object body) {
     return catalog.post(path, token, body);
   }

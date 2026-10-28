@@ -143,9 +143,14 @@ public class TsfApiController {
 
   @GetMapping("/shipments/{shipmentId}/label")
   public ResponseEntity<byte[]> label(@PathVariable String shipmentId) {
-    catalog
-        .shipment(shipmentId)
-        .orElseThrow(() -> new ApiException(404, "SHIPMENT_NOT_FOUND", "shipment is unknown"));
+    Map<String, Object> shipment =
+        catalog
+            .shipment(shipmentId)
+            .orElseThrow(() -> new ApiException(404, "SHIPMENT_NOT_FOUND", "shipment is unknown"));
+    if ("PENDING".equals(String.valueOf(shipment.get("status")))) {
+      throw new ApiException(
+          404, "LABEL_NOT_AVAILABLE", "TSF did not issue a label for this shipment");
+    }
     return ResponseEntity.ok().contentType(MediaType.APPLICATION_PDF).body(LABEL_PDF);
   }
 

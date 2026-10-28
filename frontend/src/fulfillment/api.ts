@@ -114,3 +114,58 @@ export const packApi = {
     )
   },
 }
+
+export type ShipCandidate = {
+  id: string
+  external_order_id: string
+  ordered_at: string
+  ship_by: string | null
+  has_shipment: boolean
+  tracking_no: string | null
+  carrier: string | null
+}
+
+export const shipApi = {
+  async candidates(): Promise<{ items: ShipCandidate[] }> {
+    return apiRequest('/api/v1/ship/candidates')
+  },
+  async openLabelBatch(orderIds: string[]): Promise<void> {
+    const token = await import('../auth/session').then((m) => m.getAccessToken())
+    const response = await fetch('/api/v1/ship/labels', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/pdf',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({ order_ids: orderIds }),
+    })
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}))
+      throw new ApiError(
+        response.status,
+        body.error ?? 'ERROR',
+        body.message ?? labelTh('SHIP_LABELS_ERROR'),
+        body.trace_id ?? null,
+      )
+    }
+    const blob = await response.blob()
+    const url = URL.createObjectURL(blob)
+    window.open(url, '_blank', 'noopener,noreferrer')
+    window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
+  },
+  async manualTracking(orderId: string, body: { carrier: string; tracking_no: string }) {
+    return apiRequest(`/api/v1/ship/orders/${orderId}/manual-tracking`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+  },
+  async confirm(orderId: string) {
+    return apiRequest(`/api/v1/ship/orders/${orderId}/confirm`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}',
+    })
+  },
+}

@@ -98,6 +98,29 @@ public final class CatalogHttp {
     }
   }
 
+  public byte[] postPdf(String path, String token, Object body) {
+    try {
+      String text = body == null ? "" : JSON.writeValueAsString(body);
+      HttpResponse<byte[]> response =
+          http.send(
+              builder(path, token)
+                  .header("Accept", "application/pdf")
+                  .header("Content-Type", "application/json")
+                  .POST(HttpRequest.BodyPublishers.ofString(text))
+                  .build(),
+              HttpResponse.BodyHandlers.ofByteArray());
+      assertThat(response.statusCode())
+          .as(new String(response.body(), StandardCharsets.UTF_8))
+          .isEqualTo(200);
+      return response.body();
+    } catch (IOException ex) {
+      throw new IllegalStateException(ex);
+    } catch (InterruptedException ex) {
+      Thread.currentThread().interrupt();
+      throw new IllegalStateException(ex);
+    }
+  }
+
   public Result post(String path, String token, Object body) {
     return send(json(builder(path, token), "POST", body));
   }

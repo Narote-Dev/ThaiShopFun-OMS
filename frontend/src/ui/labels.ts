@@ -77,6 +77,32 @@ const LABELS: Record<string, string> = {
   PACK_DONE: 'แพ็กเสร็จแล้ว',
   PACK_PACKED_SUMMARY: 'แพ็กออเดอร์นี้เสร็จแล้ว ไม่ต้องสแกนเพิ่ม',
   PACK_BACK_TO_PICK_LISTS: 'กลับไปหน้าใบหยิบ',
+  SHIP_TITLE: 'ยืนยันจัดส่ง',
+  SHIP_SUBTITLE: 'พิมพ์ใบปะหน้า A6 จาก TSF หรือกรอกเลขพัสดุเอง แล้วยืนยันส่ง',
+  SHIP_PRINT_LABELS: 'พิมพ์ใบปะหน้า (A6)',
+  SHIP_LOADING: 'กำลังโหลดรายการแพ็กแล้ว…',
+  SHIP_EMPTY: 'ไม่มีออเดอร์ที่แพ็กแล้วรอส่ง',
+  SHIP_LOAD_ERROR: 'โหลดรายการจัดส่งไม่สำเร็จ',
+  SHIP_LABELS_ERROR: 'พิมพ์ใบปะหน้าไม่สำเร็จ',
+  SHIP_LABELS_OPENED: 'เปิดไฟล์ PDF ใบปะหน้าแล้ว',
+  SHIP_CONFIRM: 'ยืนยันส่ง',
+  SHIP_CONFIRMED: 'บันทึกการจัดส่งแล้ว',
+  SHIP_CONFIRM_ERROR: 'ยืนยันจัดส่งไม่สำเร็จ',
+  SHIP_SELECT_ALL: 'เลือกออเดอร์ทั้งหมด',
+  SHIP_SELECT_ORDER: 'เลือกออเดอร์',
+  SHIP_TRACKING: 'เลขพัสดุ',
+  SHIP_CARRIER: 'ขนส่ง',
+  SHIP_ACTIONS: 'การดำเนินการ',
+  SHIP_MANUAL_BUTTON: 'กรอกเลขพัสดุเอง',
+  SHIP_MANUAL_TITLE: 'กรอกขนส่งและเลขพัสดุ (ไม่มีใบปะหน้า TSF)',
+  SHIP_MANUAL_HINT: 'ระบบจะพิมพ์ใบแพ็กแทนใบปะหน้า และใช้เลขนี้ตอนยืนยันส่ง',
+  SHIP_MANUAL_SAVE: 'บันทึกเลขพัสดุ',
+  SHIP_MANUAL_CANCEL: 'ยกเลิก',
+  SHIP_MANUAL_ERROR: 'บันทึกเลขพัสดุไม่สำเร็จ',
+  LABEL_NOT_AVAILABLE: 'TSF ไม่มีใบปะหน้า กรุณากรอกขนส่งและเลขพัสดุเอง',
+  ORDER_NOT_PACKED: 'ออเดอร์ยังไม่แพ็กเสร็จ',
+  SHIPMENT_REQUIRED: 'ต้องมีเลขพัสดุหรือใบปะหน้าก่อนยืนยันส่ง',
+  SHIPMENT_INCOMPLETE: 'ยังไม่มีเลขพัสดุ',
   ORDER_NOT_PACKING: 'ออเดอร์นี้ไม่อยู่ในขั้นตอนแพ็ก',
   FULFILLMENT_UNEXPECTED_ERROR: 'เกิดข้อผิดพลาดไม่คาดคิด',
   SKU_CODE: 'รหัสสินค้า',
@@ -248,6 +274,10 @@ export function importErrorTh(value: string): string {
 export function holdDetailTh(value: string | null | undefined): string {
   if (!value) return '—'
   return LABELS[value] ?? value
+}
+
+export function shipManualSavedToast(): string {
+  return 'บันทึกเลขพัสดุแล้ว สามารถพิมพ์ใบแพ็กและยืนยันส่งได้'
 }
 
 export function pickCreatedToast(orderCount: number): string {
