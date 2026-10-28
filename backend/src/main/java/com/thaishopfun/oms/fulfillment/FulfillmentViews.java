@@ -21,9 +21,7 @@ public final class FulfillmentViews {
   public record CreatePickListBody(@JsonProperty("order_ids") List<UUID> orderIds) {}
 
   public record PickListOrderRef(
-      UUID id,
-      @JsonProperty("external_order_id") String externalOrderId,
-      int sequence) {}
+      UUID id, @JsonProperty("external_order_id") String externalOrderId, int sequence) {}
 
   public record PickLine(
       @JsonProperty("sku_id") UUID skuId,

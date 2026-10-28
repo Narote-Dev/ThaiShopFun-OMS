@@ -74,18 +74,19 @@ class PickListPackApiTest extends OrderIntegrationTest {
 
     http.post("/api/v1/pick-lists", httpShop.owner(), Map.of("order_ids", List.of(order.id())));
 
-    CatalogHttp.Result session =
-        http.get("/api/v1/pack/orders/" + order.id(), httpShop.owner());
+    CatalogHttp.Result session = http.get("/api/v1/pack/orders/" + order.id(), httpShop.owner());
     assertThat(session.status()).isEqualTo(200);
     assertThat(session.body().path("recipient").path("phone").asString())
         .isEqualTo(OrderFixture.PHONE);
-    assertThat(CatalogHttp.auditsFor(shop.tenantId(), "ORDER_PACK_PII_VIEWED", order.id().toString()))
+    assertThat(
+            CatalogHttp.auditsFor(shop.tenantId(), "ORDER_PACK_PII_VIEWED", order.id().toString()))
         .isEqualTo(1);
 
     CatalogHttp.Result sessionAgain =
         http.get("/api/v1/pack/orders/" + order.id(), httpShop.owner());
     assertThat(sessionAgain.status()).isEqualTo(200);
-    assertThat(CatalogHttp.auditsFor(shop.tenantId(), "ORDER_PACK_PII_VIEWED", order.id().toString()))
+    assertThat(
+            CatalogHttp.auditsFor(shop.tenantId(), "ORDER_PACK_PII_VIEWED", order.id().toString()))
         .isEqualTo(1);
 
     CatalogHttp.Result detailBefore =
@@ -165,8 +166,7 @@ class PickListPackApiTest extends OrderIntegrationTest {
   private void assertScan(
       String token, UUID orderId, String scan, int packed, int required, boolean complete) {
     CatalogHttp.Result response =
-        http.post(
-            "/api/v1/pack/orders/" + orderId + "/scans", token, Map.of("scan", scan));
+        http.post("/api/v1/pack/orders/" + orderId + "/scans", token, Map.of("scan", scan));
     assertThat(response.status()).isEqualTo(200);
     assertThat(response.body().path("packed_qty").asInt()).isEqualTo(packed);
     assertThat(response.body().path("required_qty").asInt()).isEqualTo(required);

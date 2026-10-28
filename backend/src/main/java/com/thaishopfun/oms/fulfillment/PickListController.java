@@ -29,9 +29,7 @@ class PickListController {
   @PostMapping
   ResponseEntity<FulfillmentViews.CreatePickListResponse> create(
       @RequestBody FulfillmentViews.CreatePickListBody body) {
-    return ResponseEntity.ok()
-        .cacheControl(CacheControl.noStore())
-        .body(pickLists.create(body));
+    return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(pickLists.create(body));
   }
 
   @GetMapping("/{id}")

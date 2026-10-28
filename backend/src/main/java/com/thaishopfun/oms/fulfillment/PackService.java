@@ -12,8 +12,8 @@ import com.thaishopfun.oms.order.OrderOptimisticLockException;
 import com.thaishopfun.oms.order.OrderRecipientRepository;
 import com.thaishopfun.oms.order.OrderStateException;
 import com.thaishopfun.oms.order.OrderStateMachine;
-import com.thaishopfun.oms.order.SalesOrder;
 import com.thaishopfun.oms.order.OrderStatusHistoryRepository;
+import com.thaishopfun.oms.order.SalesOrder;
 import com.thaishopfun.oms.order.SalesOrderRepository;
 import com.thaishopfun.oms.order.StoredRecipient;
 import com.thaishopfun.oms.order.web.OrderApiException;
@@ -179,8 +179,7 @@ public class PackService {
   }
 
   private PackSession buildSession(SalesOrder order, List<PackLine> packLines) {
-    StoredRecipient stored =
-        recipients.find(order.id()).orElseThrow(OrderApiException::notFound);
+    StoredRecipient stored = recipients.find(order.id()).orElseThrow(OrderApiException::notFound);
     if (stored.redacted()) {
       throw OrderApiException.conflict("PII_REDACTED", "Recipient PII is no longer available");
     }
@@ -211,7 +210,8 @@ public class PackService {
       String barcode = null;
       if (line.skuId() != null) {
         SkuMatch sku =
-            jdbc.query(
+            jdbc
+                .query(
                     """
                     SELECT id, sku_code, barcode FROM sku WHERE id = ?
                     """,

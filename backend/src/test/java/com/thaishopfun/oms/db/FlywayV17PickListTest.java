@@ -21,8 +21,12 @@ class FlywayV17PickListTest {
   @Test
   void pickListTablesHaveForcedRlsAndGrants() throws Exception {
     String url = postgres.getJdbcUrl();
-    Flyway.configure().dataSource(url, postgres.getUsername(), postgres.getPassword()).load().migrate();
-    try (Connection admin = DriverManager.getConnection(url, postgres.getUsername(), postgres.getPassword());
+    Flyway.configure()
+        .dataSource(url, postgres.getUsername(), postgres.getPassword())
+        .load()
+        .migrate();
+    try (Connection admin =
+            DriverManager.getConnection(url, postgres.getUsername(), postgres.getPassword());
         var statement = admin.createStatement()) {
       try (var rows =
           statement.executeQuery(
@@ -50,16 +54,21 @@ class FlywayV17PickListTest {
   @Test
   void pickListRowsAreTenantIsolated() throws Exception {
     String url = postgres.getJdbcUrl();
-    Flyway.configure().dataSource(url, postgres.getUsername(), postgres.getPassword()).load().migrate();
+    Flyway.configure()
+        .dataSource(url, postgres.getUsername(), postgres.getPassword())
+        .load()
+        .migrate();
     UUID tenantA = UUID.randomUUID();
     UUID tenantB = UUID.randomUUID();
     UUID warehouseA = UUID.randomUUID();
     UUID pickListA = UUID.randomUUID();
-    try (Connection admin = DriverManager.getConnection(url, postgres.getUsername(), postgres.getPassword())) {
+    try (Connection admin =
+        DriverManager.getConnection(url, postgres.getUsername(), postgres.getPassword())) {
       insertTenant(admin, tenantA);
       insertTenant(admin, tenantB);
-      try (var statement = admin.prepareStatement(
-          """
+      try (var statement =
+          admin.prepareStatement(
+              """
           INSERT INTO warehouse (id, tenant_id, code, name, is_default)
           VALUES (?, ?, 'WH-A', 'A', true)
           """)) {
@@ -67,8 +76,9 @@ class FlywayV17PickListTest {
         statement.setObject(2, tenantA);
         statement.executeUpdate();
       }
-      try (var statement = admin.prepareStatement(
-          """
+      try (var statement =
+          admin.prepareStatement(
+              """
           INSERT INTO pick_list (id, tenant_id, warehouse_id) VALUES (?, ?, ?)
           """)) {
         statement.setObject(1, pickListA);

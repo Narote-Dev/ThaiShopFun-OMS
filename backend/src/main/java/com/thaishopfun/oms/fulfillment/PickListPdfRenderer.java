@@ -5,7 +5,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
-import java.util.List;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.PDPageContentStream;
@@ -60,9 +59,7 @@ public class PickListPdfRenderer {
         y -= 2 * MM;
         for (FulfillmentViews.PickLine line : detail.pickLines()) {
           String barcode =
-              line.barcode() == null || line.barcode().isBlank()
-                  ? ""
-                  : " · EAN " + line.barcode();
+              line.barcode() == null || line.barcode().isBlank() ? "" : " · EAN " + line.barcode();
           y =
               writeFitted(
                   stream,
@@ -75,9 +72,7 @@ public class PickListPdfRenderer {
           y -= 1 * MM;
           y = writeFitted(stream, font, 8, margin, y, maxWidth, line.name());
           y -= 1 * MM;
-          y =
-              writeFitted(
-                  stream, font, 7, margin, y, maxWidth, "คลัง " + line.warehouseCode());
+          y = writeFitted(stream, font, 7, margin, y, maxWidth, "คลัง " + line.warehouseCode());
           y -= 3 * MM;
           if (y < margin + 10 * MM) {
             break;

@@ -67,9 +67,7 @@ public class SalesOrderRepository {
   public Optional<SalesOrder> findByIdForUpdate(UUID id) {
     return first(
         jdbc.query(
-            "SELECT " + COLUMNS + " FROM sales_order WHERE id = ? FOR UPDATE",
-            this::map,
-            id));
+            "SELECT " + COLUMNS + " FROM sales_order WHERE id = ? FOR UPDATE", this::map, id));
   }
 
   public Optional<SalesOrder> findByExternalId(UUID channelAccountId, String externalOrderId) {

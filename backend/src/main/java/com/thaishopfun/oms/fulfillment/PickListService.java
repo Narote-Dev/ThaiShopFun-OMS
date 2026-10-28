@@ -106,9 +106,7 @@ public class PickListService {
           List<SalesOrder> locked = new ArrayList<>();
           for (UUID orderId : requested) {
             SalesOrder order =
-                orders
-                    .findByIdForUpdate(orderId)
-                    .orElseThrow(() -> OrderApiException.notFound());
+                orders.findByIdForUpdate(orderId).orElseThrow(() -> OrderApiException.notFound());
             validatePickCandidate(order);
             locked.add(order);
           }
@@ -156,9 +154,7 @@ public class PickListService {
               Map.of("order_count", locked.size(), "warehouse_id", warehouseId.toString()));
 
           return new CreatePickListResponse(
-              pickListId,
-              locked.size(),
-              "/api/v1/pick-lists/" + pickListId + "/pdf");
+              pickListId, locked.size(), "/api/v1/pick-lists/" + pickListId + "/pdf");
         });
   }
 
