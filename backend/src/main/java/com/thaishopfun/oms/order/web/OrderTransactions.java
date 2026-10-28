@@ -9,7 +9,7 @@ import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 
 @Component
-class OrderTransactions {
+public class OrderTransactions {
 
   private final TransactionTemplate read;
   private final TransactionTemplate write;
@@ -22,11 +22,11 @@ class OrderTransactions {
     write.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
   }
 
-  <T> T read(Supplier<T> work) {
+  public <T> T read(Supplier<T> work) {
     return read.execute(status -> work.get());
   }
 
-  <T> T write(Supplier<T> work) {
+  public <T> T write(Supplier<T> work) {
     try {
       return write.execute(status -> work.get());
     } catch (CatalogApiException | OrderApiException ex) {

@@ -1,0 +1,133 @@
+package com.thaishopfun.oms.fulfillment;
+
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
+import java.util.List;
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.pdmodel.PDPage;
+import org.apache.pdfbox.pdmodel.PDPageContentStream;
+import org.apache.pdfbox.pdmodel.common.PDRectangle;
+import org.apache.pdfbox.pdmodel.font.PDFont;
+import org.apache.pdfbox.pdmodel.font.PDType0Font;
+import org.springframework.core.io.ClassPathResource;
+import org.springframework.stereotype.Component;
+
+/** Renders pick lists for A6 thermal paper (105 × 148 mm). */
+@Component
+public class PickListPdfRenderer {
+
+  private static final float MM = 72f / 25.4f;
+  private static final PDRectangle A6 = new PDRectangle(105 * MM, 148 * MM);
+  private static final ZoneId BANGKOK = ZoneId.of("Asia/Bangkok");
+  private static final DateTimeFormatter WHEN =
+      DateTimeFormatter.ofPattern("d MMM yyyy HH:mm").withZone(BANGKOK);
+
+  public byte[] renderA6(FulfillmentViews.PickListDetail detail) {
+    try (PDDocument document = new PDDocument()) {
+      PDFont font = loadFont(document);
+      PDPage page = new PDPage(A6);
+      document.addPage(page);
+      float margin = 8 * MM;
+      float y = A6.getHeight() - margin;
+      try (PDPageContentStream stream = new PDPageContentStream(document, page)) {
+        y = writeLine(stream, font, 14, margin, y, "ใบหยิบสินค้า");
+        y -= 4 * MM;
+        y =
+            writeLine(
+                stream,
+                font,
+                9,
+                margin,
+                y,
+                "รหัส: "
+                    + detail.id()
+                    + " · คลัง "
+                    + detail.warehouseCode()
+                    + " · "
+                    + WHEN.format(detail.createdAt()));
+        y -= 3 * MM;
+        y = writeLine(stream, font, 9, margin, y, "จำนวนออเดอร์: " + detail.orders().size());
+        y -= 5 * MM;
+        y = writeLine(stream, font, 10, margin, y, "รายการหยิบ (SKU)");
+        y -= 3 * MM;
+        for (FulfillmentViews.PickLine line : detail.pickLines()) {
+          String barcode =
+              line.barcode() == null || line.barcode().isBlank()
+                  ? ""
+                  : " · EAN " + line.barcode();
+          y =
+              writeLine(
+                  stream,
+                  font,
+                  9,
+                  margin,
+                  y,
+                  line.skuCode() + barcode + " × " + line.qty());
+          y =
+              writeLine(
+                  stream,
+                  font,
+                  8,
+                  margin,
+                  y - 2 * MM,
+                  truncate(line.name(), 48) + " @ " + line.warehouseCode());
+          y -= 5 * MM;
+          if (y < margin + 10 * MM) {
+            break;
+          }
+        }
+        if (detail.orders().size() <= 12) {
+          y -= 2 * MM;
+          y = writeLine(stream, font, 8, margin, y, "ออเดอร์:");
+          for (FulfillmentViews.PickListOrderRef order : detail.orders()) {
+            y =
+                writeLine(
+                    stream,
+                    font,
+                    8,
+                    margin,
+                    y,
+                    order.sequence() + 1 + ". " + order.externalOrderId());
+            y -= 1.5f * MM;
+          }
+        }
+      }
+      ByteArrayOutputStream out = new ByteArrayOutputStream();
+      document.save(out);
+      return out.toByteArray();
+    } catch (IOException ex) {
+      throw new IllegalStateException("pick list PDF failed", ex);
+    }
+  }
+
+  private static PDFont loadFont(PDDocument document) throws IOException {
+    ClassPathResource resource = new ClassPathResource("fonts/IBMPlexSansThai-Regular.ttf");
+    try (InputStream input = resource.getInputStream()) {
+      return PDType0Font.load(document, input);
+    }
+  }
+
+  private static float writeLine(
+      PDPageContentStream stream, PDFont font, float size, float x, float y, String text)
+      throws IOException {
+    stream.beginText();
+    stream.setFont(font, size);
+    stream.newLineAtOffset(x, y);
+    stream.showText(text == null ? "" : text);
+    stream.endText();
+    return y - size * 1.4f;
+  }
+
+  private static String truncate(String value, int max) {
+    if (value == null) {
+      return "";
+    }
+    if (value.length() <= max) {
+      return value;
+    }
+    return value.substring(0, max - 1) + "…";
+  }
+}

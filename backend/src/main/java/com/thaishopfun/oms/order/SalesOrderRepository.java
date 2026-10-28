@@ -63,6 +63,15 @@ public class SalesOrderRepository {
     return first(jdbc.query("SELECT " + COLUMNS + " FROM sales_order WHERE id = ?", this::map, id));
   }
 
+  /** Locks the order row for fulfillment transitions in the caller transaction. */
+  public Optional<SalesOrder> findByIdForUpdate(UUID id) {
+    return first(
+        jdbc.query(
+            "SELECT " + COLUMNS + " FROM sales_order WHERE id = ? FOR UPDATE",
+            this::map,
+            id));
+  }
+
   public Optional<SalesOrder> findByExternalId(UUID channelAccountId, String externalOrderId) {
     return first(
         jdbc.query(
@@ -176,7 +185,7 @@ public class SalesOrderRepository {
     return instant == null ? null : Timestamp.from(instant);
   }
 
-  static Instant instant(Timestamp timestamp) {
+  public static Instant instant(Timestamp timestamp) {
     return timestamp == null ? null : timestamp.toInstant();
   }
 }

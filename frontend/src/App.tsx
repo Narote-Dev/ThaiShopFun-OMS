@@ -25,6 +25,8 @@ import OrderDetailPage from './orders/OrderDetailPage'
 import OrdersListPage from './orders/OrdersListPage'
 import StockDriftPage from './stockdrift/StockDriftPage'
 import ListingsPage from './channel/listings/ListingsPage'
+import PickListsPage from './fulfillment/PickListsPage'
+import PackPage from './fulfillment/PackPage'
 import { Button } from './ui/Button'
 import { PageContent } from './ui/PageContent'
 import { PageHeader } from './ui/PageHeader'
@@ -34,6 +36,7 @@ const SKU_ROUTE = /^#\/catalog\/skus\/([0-9a-f-]{36}|new)$/
 const SKU_HISTORY_ROUTE = /^#\/catalog\/skus\/([0-9a-f-]{36})\/history$/
 const DOCUMENT_ROUTE = /^#\/stock\/documents\/([0-9a-f-]{36})$/
 const ORDER_ROUTE = /^#\/orders\/([0-9a-f-]{36})$/
+const PACK_ROUTE = /^#\/fulfillment\/pack\/([0-9a-f-]{36})$/
 const ORDERS_ROUTE = /^#\/orders(\?.*)?$/
 const LISTINGS_ROUTE = /^#\/channel\/listings(\?.*)?$/
 
@@ -42,6 +45,9 @@ const LISTINGS_ROUTE = /^#\/channel\/listings(\?.*)?$/
 function page(route: string, me: Me): ReactNode {
   const canWrite = canWriteCatalog(me)
   const readOnly = me.entitlement.status === 'GRACE'
+  if (route === '#/fulfillment/pick-lists') return <PickListsPage />
+  const pack = PACK_ROUTE.exec(route.split('?')[0])
+  if (pack) return <PackPage key={pack[1]} orderId={pack[1]} />
   if (route === '#/channel/stock-drift') return <StockDriftPage canRun={canWrite} />
   if (route === '#/admin/outbox') return <OutboxAdminPage readOnly={readOnly} />
   if (route === '#/') return <DashboardPage name={me.tenant.name} />

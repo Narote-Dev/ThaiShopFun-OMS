@@ -1,0 +1,148 @@
+package com.thaishopfun.oms.order.web;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+import com.thaishopfun.oms.catalog.CatalogHttp;
+import com.thaishopfun.oms.fulfillment.FulfillmentTestSupport;
+import com.thaishopfun.oms.order.OrderRecipientRepository;
+import com.thaishopfun.oms.order.OrderStatusHistoryRepository;
+import com.thaishopfun.oms.order.SalesOrder;
+import com.thaishopfun.oms.order.SalesOrderRepository;
+import java.nio.charset.StandardCharsets;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.transaction.PlatformTransactionManager;
+import tools.jackson.databind.JsonNode;
+
+class PickListPackApiTest extends OrderIntegrationTest {
+
+  @Autowired SalesOrderRepository orders;
+  @Autowired OrderRecipientRepository recipients;
+  @Autowired OrderStatusHistoryRepository history;
+  @Autowired PlatformTransactionManager transactions;
+
+  private OrderFixture fixture;
+
+  @BeforeEach
+  void setup() {
+    fixture = new OrderFixture(orders, recipients, history, transactions);
+  }
+
+  @Test
+  void pickListExcludesHeldOrdersAndMovesReadyOnesToPicking() throws Exception {
+    CatalogHttp.Shop httpShop = http.catalog().shop();
+    OrderFixture.Shop shop = OrderFixture.shopFor(httpShop);
+    SalesOrder ready = fixture.insert(shop, "ORD-PICK-1", "READY_TO_PICK", "NONE");
+    fixture.insert(shop, "ORD-HOLD", "READY_TO_PICK", "OUT_OF_STOCK");
+    FulfillmentTestSupport.SkuSeed sku =
+        FulfillmentTestSupport.seedSku(shop.tenantId(), "TEE-BLK-M", "8850000000010");
+    FulfillmentTestSupport.addLine(ready, sku.skuId(), 2);
+
+    CatalogHttp.Result candidates = http.get("/api/v1/pick-lists/candidates", httpShop.owner());
+    assertThat(candidates.status()).isEqualTo(200);
+    assertThat(candidates.body().path("items")).hasSize(1);
+
+    CatalogHttp.Result created =
+        http.post(
+            "/api/v1/pick-lists",
+            httpShop.owner(),
+            Map.of("order_ids", List.of(ready.id().toString())));
+    assertThat(created.status()).isEqualTo(200);
+    String pickListId = created.body().path("id").asString();
+    assertThat(CatalogHttp.auditsFor(shop.tenantId(), "PICK_LIST_CREATED", pickListId))
+        .isEqualTo(1);
+
+    CatalogHttp.Result orderAfter =
+        http.get(OrderHttp.ordersPath("/" + ready.id()), httpShop.owner());
+    assertThat(orderAfter.body().path("fulfillment_status").asString()).isEqualTo("PICKING");
+
+    CatalogHttp.Result pdf = http.get("/api/v1/pick-lists/" + pickListId + "/pdf", httpShop.owner());
+    assertThat(pdf.status()).isEqualTo(200);
+    assertThat(pdf.raw().getBytes(StandardCharsets.US_ASCII)[0]).isEqualTo('%');
+  }
+
+  @Test
+  void packScanAcceptsSkuOrEanAndBlocksOverflow() throws Exception {
+    CatalogHttp.Shop httpShop = http.catalog().shop();
+    OrderFixture.Shop shop = OrderFixture.shopFor(httpShop);
+    SalesOrder order = fixture.insert(shop, "ORD-PACK", "READY_TO_PICK", "NONE");
+    FulfillmentTestSupport.SkuSeed sku =
+        FulfillmentTestSupport.seedSku(shop.tenantId(), "TEE-RED-L", "8850000000028");
+    FulfillmentTestSupport.addLine(order, sku.skuId(), 2);
+
+    http.post("/api/v1/pick-lists", httpShop.owner(), Map.of("order_ids", List.of(order.id())));
+
+    CatalogHttp.Result session =
+        http.get("/api/v1/pack/orders/" + order.id(), httpShop.owner());
+    assertThat(session.status()).isEqualTo(200);
+    assertThat(session.body().path("recipient").path("phone").asString())
+        .isEqualTo(OrderFixture.PHONE);
+    assertThat(CatalogHttp.auditsFor(shop.tenantId(), "ORDER_PACK_PII_VIEWED", order.id().toString()))
+        .isEqualTo(1);
+
+    CatalogHttp.Result detailBefore =
+        http.get(OrderHttp.ordersPath("/" + order.id()), httpShop.owner());
+    assertThat(detailBefore.body().path("recipient").path("phone_masked").asString())
+        .isEqualTo("***-***-5678");
+
+    assertScan(httpShop.owner(), order.id(), sku.skuCode(), 1, 2, false);
+    assertScan(httpShop.owner(), order.id(), sku.barcode(), 2, 2, true);
+
+    CatalogHttp.Result overflow =
+        http.post(
+            "/api/v1/pack/orders/" + order.id() + "/scans",
+            httpShop.owner(),
+            Map.of("scan", sku.barcode()));
+    assertThat(overflow.status()).isEqualTo(409);
+    assertThat(overflow.error()).isEqualTo("PACK_SCAN_OVERFLOW");
+
+    CatalogHttp.Result wrong =
+        http.post(
+            "/api/v1/pack/orders/" + order.id() + "/scans",
+            httpShop.owner(),
+            Map.of("scan", "UNKNOWN-CODE"));
+    assertThat(wrong.status()).isEqualTo(422);
+    assertThat(wrong.error()).isEqualTo("PACK_SCAN_UNKNOWN");
+
+    CatalogHttp.Result complete =
+        http.post("/api/v1/pack/orders/" + order.id() + "/complete", httpShop.owner(), Map.of());
+    assertThat(complete.status()).isEqualTo(200);
+    assertThat(complete.body().path("fulfillment_status").asString()).isEqualTo("PACKED");
+  }
+
+  @Test
+  void packScanMismatchWhenSkuNotOnOrder() throws Exception {
+    CatalogHttp.Shop httpShop = http.catalog().shop();
+    OrderFixture.Shop shop = OrderFixture.shopFor(httpShop);
+    SalesOrder order = fixture.insert(shop, "ORD-MISMATCH", "READY_TO_PICK", "NONE");
+    FulfillmentTestSupport.SkuSeed onOrder =
+        FulfillmentTestSupport.seedSku(shop.tenantId(), "ON-ORDER", "111");
+    FulfillmentTestSupport.SkuSeed other =
+        FulfillmentTestSupport.seedSku(shop.tenantId(), "OTHER-SKU", "222");
+    FulfillmentTestSupport.addLine(order, onOrder.skuId(), 1);
+    http.post("/api/v1/pick-lists", httpShop.owner(), Map.of("order_ids", List.of(order.id())));
+
+    CatalogHttp.Result mismatch =
+        http.post(
+            "/api/v1/pack/orders/" + order.id() + "/scans",
+            httpShop.owner(),
+            Map.of("scan", other.skuCode()));
+    assertThat(mismatch.status()).isEqualTo(422);
+    assertThat(mismatch.error()).isEqualTo("PACK_SCAN_MISMATCH");
+  }
+
+  private void assertScan(
+      String token, UUID orderId, String scan, int packed, int required, boolean complete) {
+    CatalogHttp.Result response =
+        http.post(
+            "/api/v1/pack/orders/" + orderId + "/scans", token, Map.of("scan", scan));
+    assertThat(response.status()).isEqualTo(200);
+    assertThat(response.body().path("packed_qty").asInt()).isEqualTo(packed);
+    assertThat(response.body().path("required_qty").asInt()).isEqualTo(required);
+    assertThat(response.body().path("complete").asBoolean()).isEqualTo(complete);
+  }
+}
