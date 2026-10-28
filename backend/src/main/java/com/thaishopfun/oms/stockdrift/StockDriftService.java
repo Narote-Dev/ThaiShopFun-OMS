@@ -266,7 +266,7 @@ public class StockDriftService {
           Map<String, String> codes = new HashMap<>();
           if (!ids.isEmpty())
             jdbc.query(
-                "SELECT id::text, code FROM sku WHERE id::text IN ("
+                "SELECT id::text, sku_code FROM sku WHERE id::text IN ("
                     + String.join(",", Collections.nCopies(ids.size(), "?"))
                     + ")",
                 (rs, n) -> codes.put(rs.getString(1), rs.getString(2)),
