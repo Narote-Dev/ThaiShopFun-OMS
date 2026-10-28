@@ -281,7 +281,7 @@ public class ShipService {
             () -> {
               UUID warehouseId = resolveWarehouseId(orderId);
               ensureShipmentRow(order, warehouseId);
-              return loadShipment(orderId).orElseThrow(OrderApiException::notFound);
+              return loadShipment(orderId).orElseThrow(ShipService::shipmentNotFound);
             });
     Optional<byte[]> cached = labelCache.findPdf(shipment.id());
     if (cached.isPresent() && !cacheExpired(shipment)) {
@@ -294,7 +294,7 @@ public class ShipService {
     if (!plan.adapter().capabilities().supportsLabel()) {
       throw new OrderApiException(422, "CAPABILITY_UNSUPPORTED", "Labels are not supported");
     }
-    ShipmentRow shipment = loadShipment(order.id()).orElseThrow(OrderApiException::notFound);
+    ShipmentRow shipment = loadShipment(order.id()).orElseThrow(ShipService::shipmentNotFound);
     Shipment channelShipment;
     if (shipment.externalShipmentId() != null) {
       channelShipment = shipment.asApi();
@@ -350,7 +350,7 @@ public class ShipService {
   }
 
   private ChannelPlan channelPlan(SalesOrder order) {
-    AccountRow accountRow = loadAccount(order).orElseThrow(OrderApiException::notFound);
+    AccountRow accountRow = loadAccount(order).orElseThrow(ShipService::channelAccountNotFound);
     ChannelAdapter adapter = adapters.optional(Channel.valueOf(accountRow.channel()));
     if (adapter == null) {
       throw OrderApiException.conflict("CHANNEL_MISSING", "Channel adapter is not configured");
@@ -494,6 +494,15 @@ public class ShipService {
         422, "SHIPMENT_REQUIRED", "Request a label or enter tracking before confirming ship");
   }
 
+  private static OrderApiException shipmentNotFound() {
+    return new OrderApiException(404, "SHIPMENT_NOT_FOUND", "Shipment not found");
+  }
+
+  private static OrderApiException channelAccountNotFound() {
+    return new OrderApiException(
+        422, "CHANNEL_ACCOUNT_NOT_FOUND", "Channel account is not linked to this order");
+  }
+
   private static String requireCarrier(FulfillmentViews.ManualTrackingBody body) {
     String carrier = body == null || body.carrier() == null ? "" : body.carrier().trim();
     if (carrier.isEmpty()) {
@@ -555,18 +564,16 @@ public class ShipService {
         .query(
             """
             SELECT ca.id, ca.channel, ca.external_shop_id
-            FROM sales_order o
-            JOIN channel_account ca
-              ON ca.tenant_id = o.tenant_id AND ca.id = o.channel_account_id
-            WHERE o.id = ? AND o.tenant_id = ?
+            FROM channel_account ca
+            WHERE ca.id = ? AND ca.tenant_id = ?
             """,
             (rs, rowNum) ->
                 new AccountRow(
                     rs.getObject("id", UUID.class),
                     rs.getString("channel"),
                     rs.getString("external_shop_id")),
-            order.id(),
-            TenantContext.requireTenantId())
+            order.channelAccountId(),
+            order.tenantId())
         .stream()
         .findFirst();
   }
