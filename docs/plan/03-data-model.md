@@ -137,3 +137,5 @@ Inbox entitlement (T11), applied by the worker after `claim_inbox_batch`. The cl
 - `sku_bundle_component (component_sku_id)` สำหรับหา bundle ที่ต้องคำนวณใหม่
 - `outbox_event (status, next_attempt_at)`, `inbox_event (status, next_attempt_at)`
 - `order_recipient (tenant_id, phone_hash)`, `(pii_status, redact_after)`
+
+T23 keeps one unresolved `STOCK_DRIFT` issue per tenant (`order_id = NULL`); `details.listings[]` aggregates per-listing drift. V7 uses `NULLS NOT DISTINCT` for the unresolved unique index. See [stock-drift.md](../stock-drift.md) for the no-migration design and future per-listing option.

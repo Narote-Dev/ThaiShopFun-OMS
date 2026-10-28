@@ -102,10 +102,29 @@ public class StockPushService {
 
   /** One account transaction; account lock serializes builders across JVMs and full scans. */
   public int flush(UUID tenant, UUID accountId, boolean full) {
-    return inTenant(tenant, () -> build(accountId, full));
+    return inTenant(tenant, () -> build(accountId, full, false));
   }
 
-  private int build(UUID accountId, boolean full) {
+  /** Repair channel drift using the normal versioning, availability and outbox builder. */
+  @Transactional(propagation = Propagation.MANDATORY)
+  public int repush(UUID accountId, List<UUID> listingIds) {
+    for (UUID id : listingIds.stream().distinct().toList()) {
+      jdbc.update(
+          """
+          INSERT INTO stock_push_pending
+            (tenant_id, channel_account_id, listing_id, dirty_since, changed_at)
+          VALUES (?, ?, ?, clock_timestamp(), clock_timestamp())
+          ON CONFLICT (tenant_id, listing_id) DO UPDATE
+            SET source_key = NULL, dirty_since = clock_timestamp(), changed_at = clock_timestamp()
+          """,
+          TenantContext.requireTenantId(),
+          accountId,
+          id);
+    }
+    return listingIds.isEmpty() ? 0 : build(accountId, false, true);
+  }
+
+  private int build(UUID accountId, boolean full, boolean immediate) {
     List<Account> accounts =
         jdbc.query(
             """
@@ -124,6 +143,7 @@ public class StockPushService {
             OffsetDateTime.class,
             accountId);
     if (!full
+        && !immediate
         && (since == null
             || since.toInstant().plusMillis(properties.getDebounceMs()).isAfter(Instant.now())))
       return 0;

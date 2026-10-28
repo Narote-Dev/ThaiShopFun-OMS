@@ -70,6 +70,18 @@ public class ControlController {
     this.catalog = catalog;
   }
 
+  @PostMapping("/listings/{listingSkuId}/quantity")
+  public ResponseEntity<String> listingQuantity(
+      @PathVariable String listingSkuId, HttpServletRequest request) throws IOException {
+    JsonNode body = readObject(request);
+    responses.requireInboundRest("listing-quantity-request", json.writeValueAsString(body));
+    JsonNode available = body.path("available");
+    if (!available.isIntegralNumber() || !available.canConvertToInt() || available.asInt() < 0)
+      throw new ApiException(422, "INVALID_QUANTITY", "available must be a nonnegative integer");
+    return responses.outbound(
+        200, "listing-quantity", catalog.forceListingQuantity(listingSkuId, available.asInt()));
+  }
+
   @PostMapping("/listings/{listingSkuId}/hidden")
   public ResponseEntity<String> listingHidden(
       @PathVariable String listingSkuId, HttpServletRequest request) throws IOException {

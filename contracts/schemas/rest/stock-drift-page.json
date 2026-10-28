@@ -1,0 +1,127 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "items"
+  ],
+  "properties": {
+    "items": {
+      "type": "array",
+      "items": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "status",
+          "details",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "enum": [
+              "OPEN",
+              "ACK",
+              "RESOLVED"
+            ]
+          },
+          "details": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "listings",
+              "run_id"
+            ],
+            "properties": {
+              "listings": {
+                "type": "array",
+                "items": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "listing_id",
+                    "channel_account_id",
+                    "external_listing_id",
+                    "sku_ids",
+                    "sku_codes",
+                    "expected",
+                    "seen",
+                    "first_seen_at",
+                    "last_seen_at",
+                    "repush_enqueued_at"
+                  ],
+                  "properties": {
+                    "listing_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "channel_account_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "external_listing_id": {
+                      "type": "string"
+                    },
+                    "sku_ids": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "format": "uuid"
+                      }
+                    },
+                    "expected": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "seen": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "first_seen_at": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "last_seen_at": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "repush_enqueued_at": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "sku_codes": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              },
+              "run_id": {
+                "type": "string",
+                "format": "uuid"
+              }
+            }
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      }
+    }
+  }
+}

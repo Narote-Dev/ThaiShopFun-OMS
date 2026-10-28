@@ -11,6 +11,7 @@ import {
   Upload,
   Warehouse,
 } from 'lucide-react'
+import { labelTh } from './labels'
 import type { Me } from '../auth/AuthContext'
 
 export type NavItem = {
@@ -58,6 +59,12 @@ export function buildNavSections(me: Me): NavSection[] {
           ariaLabel: 'คิวออเดอร์ค้าง',
           icon: PauseCircle,
           badgeKey: 'holds',
+        },
+        {
+          href: '#/channel/stock-drift',
+          labelTh: labelTh('STOCK_DRIFT'),
+          ariaLabel: labelTh('STOCK_DRIFT'),
+          icon: Store,
         },
         {
           href: '#/channel/listings',
@@ -125,6 +132,7 @@ export function breadcrumbParts(route: string): string[] {
   if (base.startsWith('#/orders/holds')) return ['คิวออเดอร์ค้าง']
   if (/^#\/orders\/[0-9a-f-]{36}$/.test(base)) return ['ออเดอร์', 'รายละเอียด']
   if (base.startsWith('#/orders')) return ['ออเดอร์']
+  if (base === '#/channel/stock-drift') return [labelTh('STOCK_DRIFT')]
   if (base.startsWith('#/channel/listings')) return ['รายการขาย']
   if (base.startsWith('#/catalog/products')) return ['สินค้า']
   if (base.startsWith('#/catalog/skus')) return ['รหัสสินค้า']

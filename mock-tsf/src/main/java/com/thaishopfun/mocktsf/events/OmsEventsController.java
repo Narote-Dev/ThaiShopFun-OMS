@@ -4,6 +4,7 @@ import com.thaishopfun.mocktsf.ApiException;
 import com.thaishopfun.mocktsf.Hmacs;
 import com.thaishopfun.mocktsf.MockProperties;
 import com.thaishopfun.mocktsf.contract.ContractResponses;
+import com.thaishopfun.mocktsf.rest.TsfCatalog;
 import jakarta.servlet.http.HttpServletRequest;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -30,16 +31,19 @@ public class OmsEventsController {
   private final ContractResponses responses;
   private final ReceivedEventStore store;
   private final JsonMapper json;
+  private final TsfCatalog catalog;
 
   public OmsEventsController(
       MockProperties properties,
       ContractResponses responses,
       ReceivedEventStore store,
-      JsonMapper json) {
+      JsonMapper json,
+      TsfCatalog catalog) {
     this.properties = properties;
     this.responses = responses;
     this.store = store;
     this.json = json;
+    this.catalog = catalog;
   }
 
   @PostMapping("/internal/v1/oms-events")
@@ -76,6 +80,12 @@ public class OmsEventsController {
     boolean created =
         store.add(
             new ReceivedEventStore.Received(eventId, eventType, ReceivedEventStore.now(), body));
+    if (created && eventType.equals("stock.updated"))
+      for (JsonNode item : node.path("data").path("items"))
+        catalog.applyStockPush(
+            item.path("listing_sku_id").asString(),
+            item.path("available").asInt(),
+            item.path("stock_version").asLong());
     Map<String, String> ack = new LinkedHashMap<>();
     ack.put("status", created ? "accepted" : "duplicate");
     ack.put("event_id", eventId);

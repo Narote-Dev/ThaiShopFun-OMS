@@ -290,15 +290,43 @@ public class TsfCatalog {
     orders.add(new Order("shop_active", orderId, updated, 1, detail, payment(orderId, "UNPAID")));
   }
 
-  public List<Map<String, Object>> listings() {
+  public synchronized List<Map<String, Object>> listings() {
     List<Map<String, Object>> visible = new ArrayList<>();
     for (Map<String, Object> row : listings) {
       String id = String.valueOf(row.get("listing_sku_id"));
       if (!hiddenListings.contains(id)) {
-        visible.add(row);
+        visible.add(Map.copyOf(row));
       }
     }
     return visible;
+  }
+
+  /** Harness mutation: simulate a TSF stock change without changing its accepted OMS version. */
+  public synchronized Map<String, Object> forceListingQuantity(String id, int available) {
+    if (available < 0)
+      throw new com.thaishopfun.mocktsf.ApiException(
+          422, "INVALID_QUANTITY", "available must be nonnegative");
+    for (Map<String, Object> row : listings) {
+      if (id.equals(row.get("listing_sku_id"))) {
+        row.put("available", available);
+        return Map.copyOf(row);
+      }
+    }
+    throw new com.thaishopfun.mocktsf.ApiException(404, "LISTING_NOT_FOUND", "Listing not found");
+  }
+
+  /** Apply accepted OMS stock in version order, including listings hidden from GET. */
+  public synchronized void applyStockPush(String id, int available, long version) {
+    for (Map<String, Object> row : listings) {
+      if (id.equals(row.get("listing_sku_id"))) {
+        if (version > ((Number) row.get("stock_version")).longValue()) {
+          row.put("available", available);
+          row.put("stock_version", version);
+        }
+        return;
+      }
+    }
+    // Unknown IDs are still acknowledged/recorded, but do not create catalog listings.
   }
 
   public void setListingHidden(String listingSkuId, boolean hidden) {

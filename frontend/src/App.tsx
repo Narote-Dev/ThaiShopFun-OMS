@@ -23,6 +23,7 @@ import WarehousesPage from './warehouse/WarehousesPage'
 import HoldQueuePage from './orders/HoldQueuePage'
 import OrderDetailPage from './orders/OrderDetailPage'
 import OrdersListPage from './orders/OrdersListPage'
+import StockDriftPage from './stockdrift/StockDriftPage'
 import ListingsPage from './channel/listings/ListingsPage'
 import { Button } from './ui/Button'
 import { PageContent } from './ui/PageContent'
@@ -41,6 +42,7 @@ const LISTINGS_ROUTE = /^#\/channel\/listings(\?.*)?$/
 function page(route: string, me: Me): ReactNode {
   const canWrite = canWriteCatalog(me)
   const readOnly = me.entitlement.status === 'GRACE'
+  if (route === '#/channel/stock-drift') return <StockDriftPage canRun={canWrite} />
   if (route === '#/admin/outbox') return <OutboxAdminPage readOnly={readOnly} />
   if (route === '#/') return <DashboardPage name={me.tenant.name} />
   if (route === '#/stock/documents') return <StockDocumentsPage access={stockAccess(me)} />
