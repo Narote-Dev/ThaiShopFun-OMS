@@ -102,7 +102,7 @@ const LABELS: Record<string, string> = {
   SHIP_MANUAL_SAVE: 'บันทึกเลขพัสดุ',
   SHIP_MANUAL_CANCEL: 'ยกเลิก',
   SHIP_MANUAL_ERROR: 'บันทึกเลขพัสดุไม่สำเร็จ',
-  LABEL_READY: 'พร้อมส่ง',
+  SHIPMENT_LABEL_READY: 'พร้อมส่ง',
   SHIPMENT_PENDING: 'รอใบปะหน้า/เลขพัสดุ',
   SHIPPED_STATUS: 'จัดส่งแล้ว',
   FLASH: 'แฟลช',

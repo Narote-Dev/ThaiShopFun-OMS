@@ -96,7 +96,7 @@ const OUTBOX: Record<string, StatusStyle> = {
 
 const SHIPMENT: Record<string, StatusStyle> = {
   PENDING: { variant: 'warning', label: labelTh('SHIPMENT_PENDING') },
-  LABEL_READY: { variant: 'success', label: labelTh('LABEL_READY') },
+  LABEL_READY: { variant: 'success', label: labelTh('SHIPMENT_LABEL_READY') },
   SHIPPED: { variant: 'neutral', label: labelTh('SHIPPED_STATUS') },
 }
 
