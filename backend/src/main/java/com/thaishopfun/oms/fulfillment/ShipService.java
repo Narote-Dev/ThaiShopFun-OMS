@@ -175,7 +175,7 @@ public class ShipService {
               """,
               carrier,
               tracking,
-              TenantContext.requireTenantId(),
+              order.tenantId(),
               shipmentId);
           // Step 3: Render packing slip into label cache for batch print.
           byte[] slip = packingSlipPdf.renderA6(buildPackingSlip(order, carrier, tracking));
@@ -188,7 +188,8 @@ public class ShipService {
               orderId,
               Map.of(),
               Map.of("carrier", carrier, "tracking_no", tracking));
-          ShipmentRow row = loadShipment(orderId).orElseThrow(OrderApiException::notFound);
+          ShipmentRow row =
+              loadShipment(orderId, order.tenantId()).orElseThrow(OrderApiException::notFound);
           return new FulfillmentViews.ManualTrackingResponse(
               order.fulfillmentStatus(), toSummary(row));
         });

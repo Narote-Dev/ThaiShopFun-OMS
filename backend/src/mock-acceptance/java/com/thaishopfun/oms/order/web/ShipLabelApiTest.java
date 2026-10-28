@@ -35,6 +35,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 class ShipLabelApiTest extends OrderIntegrationTest {
 
@@ -236,41 +237,69 @@ class ShipLabelApiTest extends OrderIntegrationTest {
   }
 
   private int onHand(UUID tenantId, UUID skuId) {
-    Integer value =
-        jdbc.queryForObject(
-            """
-            SELECT on_hand FROM inventory
-            WHERE tenant_id = ? AND sku_id = ?
-            LIMIT 1
-            """,
-            Integer.class,
-            tenantId,
-            skuId);
-    return value == null ? 0 : value;
+    TransactionTemplate read = new TransactionTemplate(transactions);
+    read.setReadOnly(true);
+    TenantContext.set(tenantId, null);
+    try {
+      return read.execute(
+          status -> {
+            Integer value =
+                jdbc.queryForObject(
+                    """
+                    SELECT on_hand FROM inventory
+                    WHERE tenant_id = ? AND sku_id = ?
+                    LIMIT 1
+                    """,
+                    Integer.class,
+                    tenantId,
+                    skuId);
+            return value == null ? 0 : value;
+          });
+    } finally {
+      TenantContext.clear();
+    }
   }
 
   private void expireLabelCache(UUID tenantId, UUID orderId) {
-    jdbc.update(
-        """
-        UPDATE shipment SET label_cached_until = ?
-        WHERE tenant_id = ? AND order_id = ?
-        """,
-        Timestamp.from(Instant.parse("2020-01-01T00:00:00Z")),
-        tenantId,
-        orderId);
+    TransactionTemplate write = new TransactionTemplate(transactions);
+    TenantContext.set(tenantId, null);
+    try {
+      write.executeWithoutResult(
+          status ->
+              jdbc.update(
+                  """
+                  UPDATE shipment SET label_cached_until = ?
+                  WHERE tenant_id = ? AND order_id = ?
+                  """,
+                  Timestamp.from(Instant.parse("2020-01-01T00:00:00Z")),
+                  tenantId,
+                  orderId));
+    } finally {
+      TenantContext.clear();
+    }
   }
 
   private int countLabelCache(UUID tenantId, UUID orderId) {
-    Integer count =
-        jdbc.queryForObject(
-            """
-            SELECT count(*) FROM shipment_label_cache slc
-            JOIN shipment s ON s.id = slc.shipment_id AND s.tenant_id = slc.tenant_id
-            WHERE s.tenant_id = ? AND s.order_id = ?
-            """,
-            Integer.class,
-            tenantId,
-            orderId);
-    return count == null ? 0 : count;
+    TransactionTemplate read = new TransactionTemplate(transactions);
+    read.setReadOnly(true);
+    TenantContext.set(tenantId, null);
+    try {
+      return read.execute(
+          status -> {
+            Integer count =
+                jdbc.queryForObject(
+                    """
+                    SELECT count(*) FROM shipment_label_cache slc
+                    JOIN shipment s ON s.id = slc.shipment_id AND s.tenant_id = slc.tenant_id
+                    WHERE s.tenant_id = ? AND s.order_id = ?
+                    """,
+                    Integer.class,
+                    tenantId,
+                    orderId);
+            return count == null ? 0 : count;
+          });
+    } finally {
+      TenantContext.clear();
+    }
   }
 }
