@@ -5,10 +5,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.thaishopfun.oms.catalog.CatalogHttp;
 import com.thaishopfun.oms.fulfillment.FulfillmentTestSupport;
 import com.thaishopfun.oms.order.OrderRecipientRepository;
+import com.thaishopfun.oms.order.OrderStateMachine;
 import com.thaishopfun.oms.order.OrderStatusHistoryRepository;
 import com.thaishopfun.oms.order.SalesOrder;
 import com.thaishopfun.oms.order.SalesOrderRepository;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -22,6 +24,7 @@ class PickListPackApiTest extends OrderIntegrationTest {
   @Autowired SalesOrderRepository orders;
   @Autowired OrderRecipientRepository recipients;
   @Autowired OrderStatusHistoryRepository history;
+  @Autowired OrderStateMachine stateMachine;
   @Autowired PlatformTransactionManager transactions;
 
   private OrderFixture fixture;
@@ -117,6 +120,89 @@ class PickListPackApiTest extends OrderIntegrationTest {
         http.post("/api/v1/pack/orders/" + order.id() + "/complete", httpShop.owner(), Map.of());
     assertThat(complete.status()).isEqualTo(200);
     assertThat(complete.body().path("fulfillment_status").asString()).isEqualTo("PACKED");
+  }
+
+  @Test
+  void packSessionAfterCompleteReturnsPackedWithoutError() throws Exception {
+    CatalogHttp.Shop httpShop = http.catalog().shop();
+    OrderFixture.Shop shop = OrderFixture.shopFor(httpShop);
+    SalesOrder order = fixture.insert(shop, "ORD-PACKED-SESSION", "READY_TO_PICK", "NONE");
+    FulfillmentTestSupport.SkuSeed sku =
+        FulfillmentTestSupport.seedSku(shop.tenantId(), "TEE-PACKED", "8850000000036");
+    FulfillmentTestSupport.addLine(order, sku.skuId(), 1);
+
+    http.post("/api/v1/pick-lists", httpShop.owner(), Map.of("order_ids", List.of(order.id())));
+    assertScan(httpShop.owner(), order.id(), sku.skuCode(), 1, 1, true);
+    assertThat(
+            http.post("/api/v1/pack/orders/" + order.id() + "/complete", httpShop.owner(), Map.of())
+                .status())
+        .isEqualTo(200);
+
+    CatalogHttp.Result session = http.get("/api/v1/pack/orders/" + order.id(), httpShop.owner());
+    assertThat(session.status()).isEqualTo(200);
+    assertThat(session.body().path("fulfillment_status").asString()).isEqualTo("PACKED");
+    assertThat(
+            CatalogHttp.auditsFor(shop.tenantId(), "ORDER_PACK_PII_VIEWED", order.id().toString()))
+        .isEqualTo(1);
+  }
+
+  @Test
+  void pickListDetailUsesOrderLineNameForPickLines() throws Exception {
+    CatalogHttp.Shop httpShop = http.catalog().shop();
+    OrderFixture.Shop shop = OrderFixture.shopFor(httpShop);
+    SalesOrder order = fixture.insert(shop, "ORD-PDF-NAME", "READY_TO_PICK", "NONE");
+    FulfillmentTestSupport.SkuSeed sku =
+        FulfillmentTestSupport.seedSku(shop.tenantId(), "SKU-PDF", "8850000000044");
+    FulfillmentTestSupport.addLine(order, sku.skuId(), 1);
+
+    CatalogHttp.Result created =
+        http.post("/api/v1/pick-lists", httpShop.owner(), Map.of("order_ids", List.of(order.id())));
+    String pickListId = created.body().path("id").asString();
+
+    CatalogHttp.Result detail = http.get("/api/v1/pick-lists/" + pickListId, httpShop.owner());
+    assertThat(detail.status()).isEqualTo(200);
+    assertThat(detail.body().path("pick_lines")).hasSize(1);
+    assertThat(detail.body().path("pick_lines").get(0).path("name").asString()).isEqualTo("Line");
+    assertThat(detail.body().path("pick_lines").get(0).path("sku_code").asString())
+        .isEqualTo("SKU-PDF");
+  }
+
+  @Test
+  void newPickingStintClearsPackProgress() throws Exception {
+    CatalogHttp.Shop httpShop = http.catalog().shop();
+    OrderFixture.Shop shop = OrderFixture.shopFor(httpShop);
+    SalesOrder order = fixture.insert(shop, "ORD-RE-PICK", "READY_TO_PICK", "NONE");
+    FulfillmentTestSupport.SkuSeed sku =
+        FulfillmentTestSupport.seedSku(shop.tenantId(), "TEE-RE", "8850000000051");
+    FulfillmentTestSupport.addLine(order, sku.skuId(), 2);
+
+    http.post("/api/v1/pick-lists", httpShop.owner(), Map.of("order_ids", List.of(order.id())));
+    assertScan(httpShop.owner(), order.id(), sku.skuCode(), 1, 2, false);
+    assertScan(httpShop.owner(), order.id(), sku.skuCode(), 2, 2, true);
+    assertThat(
+            http.post("/api/v1/pack/orders/" + order.id() + "/complete", httpShop.owner(), Map.of())
+                .status())
+        .isEqualTo(200);
+
+    fixture.inTenant(
+        shop.tenantId(),
+        () -> {
+          SalesOrder fresh = orders.findById(order.id()).orElseThrow();
+          stateMachine.applyFulfillmentStatus(
+              fresh,
+              "READY_TO_PICK",
+              "test reset",
+              "test",
+              new OrderStateMachine.GuardContext(false, true, Instant.now()));
+          return null;
+        });
+
+    http.post("/api/v1/pick-lists", httpShop.owner(), Map.of("order_ids", List.of(order.id())));
+
+    CatalogHttp.Result session = http.get("/api/v1/pack/orders/" + order.id(), httpShop.owner());
+    assertThat(session.status()).isEqualTo(200);
+    assertThat(session.body().path("fulfillment_status").asString()).isEqualTo("PICKING");
+    assertThat(session.body().path("lines").get(0).path("packed_qty").asInt()).isZero();
   }
 
   @Test

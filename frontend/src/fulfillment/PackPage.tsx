@@ -1,4 +1,4 @@
-import { Barcode, CheckCircle2 } from 'lucide-react'
+import { Barcode, CheckCircle2, ListChecks } from 'lucide-react'
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { Button } from '../ui/Button'
 import { Card } from '../ui/Card'
@@ -11,6 +11,7 @@ import { StatusBadge } from '../ui/StatusBadge'
 import { labelTh, packScanProgressToast } from '../ui/labels'
 import { useToast } from '../ui/useToast'
 import { fulfillmentMessage, packApi, type PackSession } from './api'
+import { formatPackAddress } from './formatAddress'
 
 type Props = { orderId: string }
 
@@ -21,6 +22,9 @@ export default function PackPage({ orderId }: Props) {
   const [scan, setScan] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+
+  const isPicking = session?.fulfillment_status === 'PICKING'
+  const isPacked = session?.fulfillment_status === 'PACKED'
 
   useEffect(() => {
     let active = true
@@ -41,7 +45,7 @@ export default function PackPage({ orderId }: Props) {
 
   async function submitScan(event: FormEvent) {
     event.preventDefault()
-    if (!scan.trim()) return
+    if (!scan.trim() || !isPicking) return
     setBusy(true)
     setError('')
     try {
@@ -65,10 +69,10 @@ export default function PackPage({ orderId }: Props) {
     setBusy(true)
     setError('')
     try {
-      const result = await packApi.complete(orderId)
+      await packApi.complete(orderId)
       toast.push(labelTh('PACK_DONE'), 'success')
       const refreshed = await packApi.session(orderId)
-      setSession({ ...refreshed, fulfillment_status: result.fulfillment_status })
+      setSession(refreshed)
     } catch (err: unknown) {
       setError(fulfillmentMessage(err, labelTh('PACK_COMPLETE_ERROR')))
     } finally {
@@ -84,25 +88,40 @@ export default function PackPage({ orderId }: Props) {
     )
   }
 
+  const addressLines = session
+    ? formatPackAddress(session.recipient.address, session.recipient.province, session.recipient.postcode)
+    : []
+
   return (
     <PageContent wide>
       <PageHeader
         title={labelTh('PACK_TITLE')}
         subtitle={session ? session.external_order_id : orderId}
         actions={
-          session?.fulfillment_status === 'PICKING' ? (
+          isPicking ? (
             <Button
               type="button"
               variant="primary"
-              disabled={busy || !session.complete}
+              disabled={busy || !session?.complete}
               onClick={() => void completePack()}
             >
               <CheckCircle2 className="h-4 w-4" />
               {labelTh('PACK_CONFIRM_BUTTON')}
             </Button>
+          ) : isPacked ? (
+            <Button asChild variant="secondary">
+              <a href="#/fulfillment/pick-lists">
+                <ListChecks className="h-4 w-4" />
+                {labelTh('PACK_BACK_TO_PICK_LISTS')}
+              </a>
+            </Button>
           ) : null
         }
       />
+
+      {isPacked ? (
+        <AlertBanner variant="success" className="mt-5" title={labelTh('PACK_PACKED_SUMMARY')} />
+      ) : null}
 
       {error ? <AlertBanner variant="danger" className="mt-5" title={error} /> : null}
 
@@ -113,40 +132,39 @@ export default function PackPage({ orderId }: Props) {
               <h2 className="text-[15px] font-semibold text-stone-900">{labelTh('PACK_RECIPIENT')}</h2>
               <p className="mt-3 text-[13px] text-stone-800">{session.recipient.name}</p>
               <p className="font-mono text-[13px] text-stone-800">{session.recipient.phone}</p>
-              <p className="mt-2 whitespace-pre-wrap text-[13px] text-stone-700">
-                {session.recipient.address}
-              </p>
-              <p className="mt-2 text-[13px] text-stone-600">
-                {session.recipient.province} {session.recipient.postcode}
-              </p>
+              <div className="mt-2 space-y-0.5 text-[13px] text-stone-700">
+                {addressLines.map((line) => (
+                  <p key={line}>{line}</p>
+                ))}
+              </div>
             </Card>
             <Card className="p-5">
               <div className="flex items-center justify-between gap-3">
                 <h2 className="text-[15px] font-semibold text-stone-900">{labelTh('PACK_STATUS')}</h2>
                 <StatusBadge value={session.fulfillment_status} kind="fulfillment" />
               </div>
-              <form className="mt-4 space-y-3" onSubmit={(e) => void submitScan(e)}>
-                <div>
-                  <Label htmlFor="pack-scan">{labelTh('PACK_SCAN_LABEL')}</Label>
-                  <Input
-                    id="pack-scan"
-                    ref={inputRef}
-                    autoComplete="off"
-                    value={scan}
-                    disabled={busy || session.fulfillment_status !== 'PICKING'}
-                    onChange={(e) => setScan(e.target.value)}
-                    placeholder={labelTh('PACK_SCAN_PLACEHOLDER')}
-                  />
-                </div>
-                <Button
-                  type="submit"
-                  variant="secondary"
-                  disabled={busy || session.fulfillment_status !== 'PICKING'}
-                >
-                  <Barcode className="h-4 w-4" />
-                  {labelTh('PACK_SCAN_BUTTON')}
-                </Button>
-              </form>
+              {isPicking ? (
+                <form className="mt-4 space-y-3" onSubmit={(e) => void submitScan(e)}>
+                  <div>
+                    <Label htmlFor="pack-scan">{labelTh('PACK_SCAN_LABEL')}</Label>
+                    <Input
+                      id="pack-scan"
+                      ref={inputRef}
+                      autoComplete="off"
+                      value={scan}
+                      disabled={busy}
+                      onChange={(e) => setScan(e.target.value)}
+                      placeholder={labelTh('PACK_SCAN_PLACEHOLDER')}
+                    />
+                  </div>
+                  <Button type="submit" variant="secondary" disabled={busy}>
+                    <Barcode className="h-4 w-4" />
+                    {labelTh('PACK_SCAN_BUTTON')}
+                  </Button>
+                </form>
+              ) : (
+                <p className="mt-4 text-[13px] text-stone-600">{labelTh('PACK_PACKED_SUMMARY')}</p>
+              )}
             </Card>
           </div>
 

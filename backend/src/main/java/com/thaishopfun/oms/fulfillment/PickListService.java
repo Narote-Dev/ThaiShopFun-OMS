@@ -139,6 +139,7 @@ public class PickListService {
           OrderStateMachine.GuardContext guards =
               new OrderStateMachine.GuardContext(false, true, Instant.now());
           for (SalesOrder order : locked) {
+            clearPackProgress(order.id());
             SalesOrder fresh = orders.findById(order.id()).orElseThrow(OrderApiException::notFound);
             stateMachine.applyFulfillmentStatus(
                 fresh, "PICKING", "pick list " + pickListId, actor.userId().toString(), guards);
@@ -216,11 +217,17 @@ public class PickListService {
   private List<PickLine> aggregatePickLines(UUID pickListId) {
     return jdbc.query(
         """
-        SELECT ol.sku_id, s.sku_code, s.barcode, s.name,
+        SELECT ol.sku_id, s.sku_code, s.barcode,
+          coalesce(
+            nullif(max(btrim(ol.name)), ''),
+            nullif(max(btrim(p.name)), ''),
+            s.sku_code
+          ) AS display_name,
           coalesce(w.code, wh.code) AS warehouse_code, sum(ol.qty)::int AS qty
         FROM pick_list_order plo
         JOIN order_line ol ON ol.tenant_id = plo.tenant_id AND ol.order_id = plo.order_id
         JOIN sku s ON s.tenant_id = ol.tenant_id AND s.id = ol.sku_id
+        JOIN product p ON p.tenant_id = s.tenant_id AND p.id = s.product_id
         JOIN pick_list pl ON pl.tenant_id = plo.tenant_id AND pl.id = plo.pick_list_id
         JOIN warehouse wh ON wh.tenant_id = pl.tenant_id AND wh.id = pl.warehouse_id
         LEFT JOIN LATERAL (
@@ -236,7 +243,7 @@ public class PickListService {
           LIMIT 1
         ) w ON true
         WHERE plo.pick_list_id = ? AND ol.sku_id IS NOT NULL
-        GROUP BY ol.sku_id, s.sku_code, s.barcode, s.name, coalesce(w.code, wh.code)
+        GROUP BY ol.sku_id, s.sku_code, s.barcode, coalesce(w.code, wh.code)
         ORDER BY s.sku_code
         """,
         (rs, rowNum) ->
@@ -244,10 +251,20 @@ public class PickListService {
                 rs.getObject("sku_id", UUID.class),
                 rs.getString("sku_code"),
                 rs.getString("barcode"),
-                rs.getString("name"),
+                rs.getString("display_name"),
                 rs.getString("warehouse_code"),
                 rs.getInt("qty")),
         pickListId);
+  }
+
+  private void clearPackProgress(UUID orderId) {
+    jdbc.update(
+        """
+        DELETE FROM order_pack_progress
+        WHERE tenant_id = ? AND order_id = ?
+        """,
+        TenantContext.requireTenantId(),
+        orderId);
   }
 
   private UUID requireDefaultWarehouse() {

@@ -67,9 +67,10 @@ public class PackService {
     return tx.write(
         () -> {
           SalesOrder order = orders.findById(orderId).orElseThrow(OrderApiException::notFound);
-          validatePackableStatus(order.fulfillmentStatus());
+          validatePackSessionStatus(order.fulfillmentStatus());
           PackSession session = buildSession(order, loadLines(orderId));
-          if (!packPiiViewAlreadyAudited(actor, orderId)) {
+          if ("PICKING".equals(order.fulfillmentStatus())
+              && !packPiiViewAlreadyAudited(actor, orderId)) {
             audit.writeEntity(
                 actor.tenantId(),
                 actor.userId(),
@@ -349,6 +350,13 @@ public class PackService {
       throw OrderApiException.conflict("PACK_SCAN_AMBIGUOUS", "Scan matches more than one SKU");
     }
     return java.util.Optional.of(matches.get(0));
+  }
+
+  private static void validatePackSessionStatus(String fulfillment) {
+    if (!"PICKING".equals(fulfillment) && !"PACKED".equals(fulfillment)) {
+      throw OrderApiException.conflict(
+          "ORDER_NOT_PACKING", "Order must be in PICKING to scan or complete pack");
+    }
   }
 
   private static void validatePackableStatus(String fulfillment) {

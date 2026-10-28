@@ -27,10 +27,10 @@ User JWT under `/api/v1/pick-lists` and `/api/v1/pack/orders`. Mock TSF only; la
 
 ## Pack session (full PII)
 
-`GET /pack/orders/{orderId}` — only when `fulfillment_status=PICKING`.
+`GET /pack/orders/{orderId}` — when `fulfillment_status` is `PICKING` or `PACKED` (read-only summary after pack complete).
 
-- Returns full recipient name, phone, and address JSON (not masked).
-- Audit: `ORDER_PACK_PII_VIEWED` once per user per order while the order stays in `PICKING` (repeat `GET` during the same pack session does not append another row). A new audit is written if the order enters `PICKING` again later.
+- Returns full recipient name, phone, and address JSON (not masked) while packing; same fields remain available on the packed summary view.
+- Audit: `ORDER_PACK_PII_VIEWED` once per user per order while the order stays in `PICKING` (repeat `GET` during the same pack session does not append another row). No new audit when reloading the session in `PACKED`. A new audit is written if the order enters `PICKING` again later.
 - Order detail API remains masked for all roles.
 
 ## Pack scan
