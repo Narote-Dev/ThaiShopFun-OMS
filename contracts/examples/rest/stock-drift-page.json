@@ -17,7 +17,10 @@
             "seen": 3,
             "first_seen_at": "2026-10-28T08:00:00Z",
             "last_seen_at": "2026-10-28T08:00:00Z",
-            "repush_enqueued_at": "2026-10-28T08:00:00Z"
+            "repush_enqueued_at": "2026-10-28T08:00:00Z",
+            "sku_codes": [
+              "TSHIRT-BLK-M"
+            ]
           }
         ]
       },

@@ -15,6 +15,7 @@ import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 @Service
 public class StockDriftService {
@@ -235,27 +236,51 @@ public class StockDriftService {
 
   public List<Map<String, Object>> issues(String status) {
     return tx.execute(
-        s ->
-            jdbc.query(
-                """
+        s -> {
+          List<Map<String, Object>> issues =
+              jdbc.query(
+                  """
         SELECT id, status, details::text, created_at, updated_at FROM reconciliation_issue
         WHERE rule = 'STOCK_DRIFT' AND (?::text IS NULL OR status = ?)
         ORDER BY created_at DESC LIMIT 100
         """,
-                (rs, n) ->
-                    Map.<String, Object>of(
-                        "id",
-                        rs.getString(1),
-                        "status",
-                        rs.getString(2),
-                        "details",
-                        json.readTree(rs.getString(3)),
-                        "created_at",
-                        rs.getObject(4, OffsetDateTime.class),
-                        "updated_at",
-                        rs.getObject(5, OffsetDateTime.class)),
-                status,
-                status));
+                  (rs, n) ->
+                      Map.<String, Object>of(
+                          "id",
+                          rs.getString(1),
+                          "status",
+                          rs.getString(2),
+                          "details",
+                          json.readTree(rs.getString(3)),
+                          "created_at",
+                          rs.getObject(4, OffsetDateTime.class),
+                          "updated_at",
+                          rs.getObject(5, OffsetDateTime.class)),
+                  status,
+                  status);
+          // Resolve at read time so issues written before SKU codes were exposed work too.
+          Set<String> ids = new LinkedHashSet<>();
+          for (var issue : issues)
+            for (JsonNode listing : ((JsonNode) issue.get("details")).path("listings"))
+              for (JsonNode id : listing.path("sku_ids")) ids.add(id.asString());
+          Map<String, String> codes = new HashMap<>();
+          if (!ids.isEmpty())
+            jdbc.query(
+                "SELECT id::text, code FROM sku WHERE id::text IN ("
+                    + String.join(",", Collections.nCopies(ids.size(), "?"))
+                    + ")",
+                (rs, n) -> codes.put(rs.getString(1), rs.getString(2)),
+                ids.toArray());
+          for (var issue : issues)
+            for (JsonNode listing : ((JsonNode) issue.get("details")).path("listings")) {
+              var skuCodes = ((ObjectNode) listing).putArray("sku_codes");
+              for (JsonNode id : listing.path("sku_ids")) {
+                String code = codes.get(id.asString());
+                if (code != null) skuCodes.add(code);
+              }
+            }
+          return issues;
+        });
   }
 
   private <T> T inTenant(UUID tenant, Supplier<T> work) {

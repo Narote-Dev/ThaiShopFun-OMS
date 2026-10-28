@@ -51,6 +51,7 @@
                     "channel_account_id",
                     "external_listing_id",
                     "sku_ids",
+                    "sku_codes",
                     "expected",
                     "seen",
                     "first_seen_at",
@@ -95,6 +96,12 @@
                     "repush_enqueued_at": {
                       "type": "string",
                       "format": "date-time"
+                    },
+                    "sku_codes": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
                     }
                   }
                 }

@@ -315,6 +315,20 @@ public class TsfCatalog {
     throw new com.thaishopfun.mocktsf.ApiException(404, "LISTING_NOT_FOUND", "Listing not found");
   }
 
+  /** Apply accepted OMS stock in version order, including listings hidden from GET. */
+  public synchronized void applyStockPush(String id, int available, long version) {
+    for (Map<String, Object> row : listings) {
+      if (id.equals(row.get("listing_sku_id"))) {
+        if (version > ((Number) row.get("stock_version")).longValue()) {
+          row.put("available", available);
+          row.put("stock_version", version);
+        }
+        return;
+      }
+    }
+    // Unknown IDs are still acknowledged/recorded, but do not create catalog listings.
+  }
+
   public void setListingHidden(String listingSkuId, boolean hidden) {
     if (hidden) {
       hiddenListings.add(listingSkuId);

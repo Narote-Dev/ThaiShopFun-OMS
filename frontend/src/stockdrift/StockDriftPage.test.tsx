@@ -6,8 +6,8 @@ import { driftApi, type DriftIssue } from './api'
 const issue: DriftIssue = {
   id: 'issue', status: 'OPEN', created_at: '2026-10-28T01:00:00Z', updated_at: '2026-10-28T02:00:00Z',
   details: { run_id: 'run', listings: [
-    { listing_id: 'a', external_listing_id: 'TSF-A', channel_account_id: 'ca', sku_ids: ['SKU-A'], expected: 10, seen: 3, first_seen_at: '2026-10-28T01:00:00Z', last_seen_at: '2026-10-28T02:00:00Z', repush_enqueued_at: '2026-10-28T02:00:00Z' },
-    { listing_id: 'b', external_listing_id: 'TSF-B', channel_account_id: 'ca', sku_ids: ['SKU-B'], expected: 8, seen: 4, first_seen_at: '2026-10-28T01:00:00Z', last_seen_at: '2026-10-28T02:00:00Z', repush_enqueued_at: '2026-10-28T02:00:00Z' },
+    { listing_id: 'a', external_listing_id: 'TSF-A', channel_account_id: 'ca', sku_ids: ['019a29e5-7000-7000-8000-000000000004'], sku_codes: ['SKU-A', 'COMPONENT-B'], expected: 10, seen: 3, first_seen_at: '2026-10-28T01:00:00Z', last_seen_at: '2026-10-28T02:00:00Z', repush_enqueued_at: '2026-10-28T02:00:00Z' },
+    { listing_id: 'b', external_listing_id: 'TSF-B', channel_account_id: 'ca', sku_ids: ['019a29e5-7000-7000-8000-000000000005'], sku_codes: ['SKU-B'], expected: 8, seen: 4, first_seen_at: '2026-10-28T01:00:00Z', last_seen_at: '2026-10-28T02:00:00Z', repush_enqueued_at: '2026-10-28T02:00:00Z' },
   ] },
 }
 afterEach(() => { cleanup(); vi.restoreAllMocks() })
@@ -18,6 +18,9 @@ describe('stock drift', () => {
     render(<StockDriftPage canRun />)
     expect(await screen.findByText('TSF-A')).toBeVisible()
     expect(screen.getByText('TSF-B')).toBeVisible()
+    expect(screen.getByText('SKU-A, COMPONENT-B')).toBeVisible()
+    expect(screen.getByText('SKU-B')).toBeVisible()
+    expect(screen.queryByText(issue.details.listings[0].sku_ids[0])).toBeNull()
     expect(screen.getAllByText('รอตรวจสอบ')).toHaveLength(3)
     expect(screen.getByText('ยอดที่ OMS ส่ง')).toBeVisible()
     expect(screen.getByText('ยอดที่ TSF แสดง')).toBeVisible()

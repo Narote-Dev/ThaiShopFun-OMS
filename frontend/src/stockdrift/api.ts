@@ -5,6 +5,7 @@ export type DriftListing = {
   channel_account_id: string
   external_listing_id: string
   sku_ids: string[]
+  sku_codes: string[]
   expected: number
   seen: number
   first_seen_at: string

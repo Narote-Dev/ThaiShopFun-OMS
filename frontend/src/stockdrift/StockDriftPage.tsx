@@ -55,7 +55,7 @@ export default function StockDriftPage({ canRun }: { canRun: boolean }) {
           return rows.map((listing) => <DataTableRow key={`${issue.id}-${listing?.listing_id ?? 'resolved'}`}>
             <DataTableCell><Badge variant={issue.status === 'RESOLVED' ? 'success' : issue.status === 'ACK' ? 'info' : 'warning'}>{labelTh(issue.status)}</Badge></DataTableCell>
             <DataTableCell mono>{listing?.external_listing_id ?? labelTh('DRIFT_CLEARED')}</DataTableCell>
-            <DataTableCell mono>{listing?.sku_ids.join(', ') ?? '—'}</DataTableCell>
+            <DataTableCell mono>{listing?.sku_codes.join(', ') || '—'}</DataTableCell>
             <DataTableCell>{listing?.expected ?? '—'}</DataTableCell>
             <DataTableCell>{listing?.seen ?? '—'}</DataTableCell>
             <DataTableCell>{formatBangkokDateTime(issue.created_at)}</DataTableCell>

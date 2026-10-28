@@ -31,6 +31,12 @@ Its details aggregate the listings:
 `sku_ids` includes the mapped SKU and any bundle component SKUs. Details and audit contain
 identifiers, quantities and timestamps only; no recipient, seller name or other PII.
 
+The read API enriches each listing with `sku_codes`, resolving `sku_ids` against the
+current tenant's `sku.code` values in the same order (mapped SKU, then components).
+This also works for existing issue rows without rewriting details or migrating data.
+Unavailable SKU references are omitted from `sku_codes`; the UI shows an em dash when
+no code can be resolved and never falls back to internal UUIDs.
+
 Each complete scan recomputes the aggregate, preserving `first_seen_at` for continuing
 drift. `OPEN` and `ACK` issues retain their status while drift remains. No duplicate
 unresolved row is created. An empty aggregate resolves the issue. A later recurrence
@@ -110,9 +116,13 @@ consistent with its existing listing endpoint.
 
 For example, establish a successful initial stock push, force a different TSF quantity,
 then invoke the demo scan. The outbox contains the versioned repair and the issue appears
-on the page. The mock receiver records OMS events; it does not apply stock events to its
-catalog. To simulate TSF applying a repair, set the mock quantity to the event's available
-quantity, let delivery finish, and scan again to resolve the issue.
+on the page. After HMAC/schema validation, the mock receiver records OMS events and
+applies each new `stock.updated` item's `available` quantity to the catalog when its
+`stock_version` is strictly newer than the listing's current version. Equal/older
+versions and duplicate event IDs leave quantity unchanged; unknown listing IDs are
+recorded but do not create listings. Ordering is per listing, including hidden listings,
+and uses the existing shared demo catalog. Let repair delivery finish and scan again:
+the TSF-visible quantity now matches OMS and the issue resolves automatically.
 
 ## Verification
 
