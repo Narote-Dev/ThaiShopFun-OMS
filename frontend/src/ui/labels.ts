@@ -92,7 +92,6 @@ const LABELS: Record<string, string> = {
   BUNDLE_REQUIRED: 'ต้องระบุว่าเป็นสินค้าชุดก่อนเพิ่มส่วนประกอบ',
   BUNDLE_NOT_STOCKABLE: 'สินค้าชุดไม่มีสต็อกของตัวเอง',
   AUTO_MATCH: 'จับคู่อัตโนมัติ',
-  SKU_CODE: 'จับคู่รหัสสินค้า',
   AUTO_EXACT_MATCH: 'จับคู่อัตโนมัติ',
   OUTBOX: 'คิวส่งเหตุการณ์',
   ACCEPTED: 'ยอมรับแล้ว',
