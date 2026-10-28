@@ -1,6 +1,15 @@
 import type { ReactNode } from 'react'
 import { cn } from './cn'
 
+type AlertVariant = 'warning' | 'danger' | 'info' | 'success'
+
+const alertStyles: Record<AlertVariant, string> = {
+  warning: 'border-amber-200 bg-amber-50 text-amber-950',
+  danger: 'border-red-200 bg-red-50 text-red-950',
+  info: 'border-sky-200 bg-sky-50 text-sky-950',
+  success: 'border-emerald-200 bg-emerald-50 text-emerald-950',
+}
+
 export function AlertBanner({
   variant = 'warning',
   title,
@@ -9,18 +18,14 @@ export function AlertBanner({
   footer,
   className,
 }: {
-  variant?: 'warning' | 'danger' | 'info'
+  variant?: AlertVariant
   title: ReactNode
   children?: ReactNode
   actions?: ReactNode
   footer?: ReactNode
   className?: string
 }) {
-  const styles = {
-    warning: 'border-amber-200 bg-amber-50 text-amber-950',
-    danger: 'border-red-200 bg-red-50 text-red-950',
-    info: 'border-sky-200 bg-sky-50 text-sky-950',
-  }[variant]
+  const styles = alertStyles[variant]
   return (
     <div className={cn('rounded-xl border px-4 py-3.5', styles, className)}>
       <div className="flex flex-wrap items-start justify-between gap-3">

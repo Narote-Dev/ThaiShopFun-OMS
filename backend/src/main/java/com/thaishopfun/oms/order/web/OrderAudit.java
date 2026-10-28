@@ -39,17 +39,38 @@ public class OrderAudit {
       UUID entityId,
       Map<String, ?> before,
       Map<String, ?> after) {
+    writeEntity(actor, action, "sales_order", entityId, before, after);
+  }
+
+  public void writeEntity(
+      UUID tenantId,
+      UUID userId,
+      String action,
+      String entityType,
+      UUID entityId,
+      Map<String, ?> before,
+      Map<String, ?> after) {
     jdbc.update(
         INSERT,
         UuidV7.generate(),
-        actor.tenantId(),
-        actor.userId().toString(),
+        tenantId,
+        userId.toString(),
         action,
-        "sales_order",
+        entityType,
         entityId.toString(),
         before == null ? null : json.writeValueAsString(before),
         after == null ? null : json.writeValueAsString(after),
         currentIp());
+  }
+
+  public void writeEntity(
+      OrderAccess.Actor actor,
+      String action,
+      String entityType,
+      UUID entityId,
+      Map<String, ?> before,
+      Map<String, ?> after) {
+    writeEntity(actor.tenantId(), actor.userId(), action, entityType, entityId, before, after);
   }
 
   private static String currentIp() {

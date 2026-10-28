@@ -40,7 +40,7 @@ class FlywayV15StockPushTest {
           statement.executeQuery(
               "SELECT version FROM flyway_schema_history ORDER BY installed_rank DESC LIMIT 1")) {
         assertThat(rows.next()).isTrue();
-        assertThat(rows.getString(1)).isEqualTo("16");
+        assertThat(rows.getString(1)).isEqualTo("17");
       }
       try (var rows = statement.executeQuery("SELECT * FROM list_stock_push_accounts(true)")) {
         assertThat(rows.getMetaData().getColumnCount()).isEqualTo(2);

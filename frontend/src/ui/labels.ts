@@ -47,6 +47,43 @@ const LABELS: Record<string, string> = {
   RETURNED_TO_SENDER: 'ตีกลับผู้ส่ง',
   'listing not mapped': 'รายการขายยังไม่ได้จับคู่',
   WAREHOUSE_IN_USE: 'คลังสินค้านี้ถูกใช้งานอยู่',
+  PICK_LIST_TITLE: 'ใบหยิบสินค้า',
+  PICK_LIST_SUBTITLE: 'เลือกออเดอร์ที่พร้อมหยิบแล้วพิมพ์ใบหยิบ A6',
+  PICK_LIST_HINT: 'ออเดอร์ที่มีการพักจะไม่แสดงในรายการนี้',
+  PICK_CREATE_BUTTON: 'สร้างใบหยิบและพิมพ์',
+  PICK_SELECT_ALL: 'เลือกออเดอร์ทั้งหมด',
+  PICK_SELECT_ORDER: 'เลือกออเดอร์',
+  PICK_EMPTY: 'ไม่มีออเดอร์พร้อมหยิบ',
+  PICK_LOAD_ERROR: 'โหลดรายการหยิบไม่สำเร็จ',
+  PICK_CREATE_ERROR: 'สร้างใบหยิบไม่สำเร็จ',
+  PICK_PDF_ERROR: 'เปิดไฟล์ PDF ไม่สำเร็จ',
+  ORDER_NUMBER: 'เลขออเดอร์',
+  ORDERED_AT: 'สั่งซื้อเมื่อ',
+  SHIP_BY: 'ส่งภายใน',
+  LINE_COUNT: 'จำนวนรายการ',
+  PACK_TITLE: 'แพ็กสินค้า',
+  PACK_RECIPIENT: 'ผู้รับ (ข้อมูลเต็ม)',
+  PACK_STATUS: 'ยิงบาร์โค้ด',
+  PACK_SCAN_LABEL: 'สแกนบาร์โค้ดหรือรหัสสินค้า',
+  PACK_SCAN_PLACEHOLDER: 'TEE-BLK-M หรือ EAN',
+  PACK_SCAN_BUTTON: 'บันทึกการสแกน',
+  PACK_CONFIRM_BUTTON: 'ยืนยันแพ็กเสร็จ',
+  PACK_PROGRESS: 'แพ็กแล้ว',
+  PACK_LOADING: 'กำลังโหลดหน้าแพ็ก…',
+  PACK_LOAD_ERROR: 'โหลดหน้าแพ็กไม่สำเร็จ',
+  PACK_SCAN_ERROR: 'สแกนไม่สำเร็จ',
+  PACK_SCAN_COMPLETE: 'ครบทุกชิ้นแล้ว กดยืนยันแพ็กได้',
+  PACK_COMPLETE_ERROR: 'ยืนยันแพ็กไม่สำเร็จ',
+  PACK_DONE: 'แพ็กเสร็จแล้ว',
+  PACK_PACKED_SUMMARY: 'แพ็กออเดอร์นี้เสร็จแล้ว ไม่ต้องสแกนเพิ่ม',
+  PACK_BACK_TO_PICK_LISTS: 'กลับไปหน้าใบหยิบ',
+  ORDER_NOT_PACKING: 'ออเดอร์นี้ไม่อยู่ในขั้นตอนแพ็ก',
+  FULFILLMENT_UNEXPECTED_ERROR: 'เกิดข้อผิดพลาดไม่คาดคิด',
+  SKU_CODE: 'รหัสสินค้า',
+  PRODUCT_NAME: 'ชื่อสินค้า',
+  PACK_SCAN_OVERFLOW: 'สแกนเกินจำนวนที่ต้องแพ็ก',
+  PACK_SCAN_MISMATCH: 'สินค้าไม่อยู่ในออเดอร์นี้',
+  PACK_SCAN_UNKNOWN: 'ไม่พบบาร์โค้ดหรือรหัสสินค้า',
   'stock.updated': 'ปรับปรุงสต็อก',
   'inventory.updated': 'ปรับปรุงสินค้าคงคลัง',
   'Invalid or expired token': 'เซสชันไม่ถูกต้องหรือหมดอายุ กรุณาเข้าสู่ระบบอีกครั้ง',
@@ -58,7 +95,6 @@ const LABELS: Record<string, string> = {
   BUNDLE_REQUIRED: 'ต้องระบุว่าเป็นสินค้าชุดก่อนเพิ่มส่วนประกอบ',
   BUNDLE_NOT_STOCKABLE: 'สินค้าชุดไม่มีสต็อกของตัวเอง',
   AUTO_MATCH: 'จับคู่อัตโนมัติ',
-  SKU_CODE: 'จับคู่รหัสสินค้า',
   AUTO_EXACT_MATCH: 'จับคู่อัตโนมัติ',
   OUTBOX: 'คิวส่งเหตุการณ์',
   ACCEPTED: 'ยอมรับแล้ว',
@@ -212,4 +248,12 @@ export function importErrorTh(value: string): string {
 export function holdDetailTh(value: string | null | undefined): string {
   if (!value) return '—'
   return LABELS[value] ?? value
+}
+
+export function pickCreatedToast(orderCount: number): string {
+  return `สร้างใบหยิบ ${orderCount} ออเดอร์แล้ว`
+}
+
+export function packScanProgressToast(skuCode: string, packed: number, required: number): string {
+  return `${skuCode}: ${packed}/${required}`
 }
