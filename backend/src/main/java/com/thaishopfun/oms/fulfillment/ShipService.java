@@ -90,29 +90,32 @@ public class ShipService {
   }
 
   public FulfillmentViews.ShipCandidatesView candidates() {
-    List<FulfillmentViews.ShipCandidateItem> items =
-        jdbc.query(
-            """
-            SELECT o.id, o.external_order_id, o.ordered_at, o.ship_by,
-              sh.tracking_no, sh.carrier,
-              (sh.id IS NOT NULL) AS has_shipment
-            FROM sales_order o
-            LEFT JOIN shipment sh ON sh.tenant_id = o.tenant_id AND sh.order_id = o.id
-            WHERE o.fulfillment_status = 'PACKED'
-              AND o.order_status = 'ACTIVE'
-              AND o.hold_reason = 'NONE'
-            ORDER BY o.ship_by NULLS LAST, o.ordered_at, o.id
-            """,
-            (rs, rowNum) ->
-                new FulfillmentViews.ShipCandidateItem(
-                    rs.getObject("id", UUID.class),
-                    rs.getString("external_order_id"),
-                    rs.getTimestamp("ordered_at").toInstant(),
-                    optionalInstant(rs.getTimestamp("ship_by")),
-                    rs.getBoolean("has_shipment"),
-                    rs.getString("tracking_no"),
-                    rs.getString("carrier")));
-    return new FulfillmentViews.ShipCandidatesView(items);
+    return tx.read(
+        () -> {
+          List<FulfillmentViews.ShipCandidateItem> items =
+              jdbc.query(
+                  """
+                  SELECT o.id, o.external_order_id, o.ordered_at, o.ship_by,
+                    sh.tracking_no, sh.carrier,
+                    (sh.id IS NOT NULL) AS has_shipment
+                  FROM sales_order o
+                  LEFT JOIN shipment sh ON sh.tenant_id = o.tenant_id AND sh.order_id = o.id
+                  WHERE o.fulfillment_status = 'PACKED'
+                    AND o.order_status = 'ACTIVE'
+                    AND o.hold_reason = 'NONE'
+                  ORDER BY o.ship_by NULLS LAST, o.ordered_at, o.id
+                  """,
+                  (rs, rowNum) ->
+                      new FulfillmentViews.ShipCandidateItem(
+                          rs.getObject("id", UUID.class),
+                          rs.getString("external_order_id"),
+                          rs.getTimestamp("ordered_at").toInstant(),
+                          optionalInstant(rs.getTimestamp("ship_by")),
+                          rs.getBoolean("has_shipment"),
+                          rs.getString("tracking_no"),
+                          rs.getString("carrier")));
+          return new FulfillmentViews.ShipCandidatesView(items);
+        });
   }
 
   public byte[] labelBatchPdf(FulfillmentViews.LabelBatchBody body) {
@@ -283,18 +286,17 @@ public class ShipService {
               ensureShipmentRow(order, warehouseId);
               return loadShipment(orderId).orElseThrow(ShipService::shipmentNotFound);
             });
-    Optional<byte[]> cached = labelCache.findPdf(shipment.id());
+    Optional<byte[]> cached = tx.read(() -> labelCache.findPdf(shipment.id()));
     if (cached.isPresent() && !cacheExpired(shipment)) {
       return cached.get();
     }
-    return fetchAndStoreLabel(order, plan, shipment.id());
+    return fetchAndStoreLabel(order, plan, shipment);
   }
 
-  private byte[] fetchAndStoreLabel(SalesOrder order, ChannelPlan plan, UUID shipmentId) {
+  private byte[] fetchAndStoreLabel(SalesOrder order, ChannelPlan plan, ShipmentRow shipment) {
     if (!plan.adapter().capabilities().supportsLabel()) {
       throw new OrderApiException(422, "CAPABILITY_UNSUPPORTED", "Labels are not supported");
     }
-    ShipmentRow shipment = loadShipment(order.id()).orElseThrow(ShipService::shipmentNotFound);
     Shipment channelShipment;
     if (shipment.externalShipmentId() != null) {
       channelShipment = shipment.asApi();
@@ -324,8 +326,8 @@ public class ShipService {
                   created.carrier(),
                   created.trackingNo(),
                   created.status(),
-                  TenantContext.requireTenantId(),
-                  shipmentId));
+                  order.tenantId(),
+                  shipment.id()));
       channelShipment = created;
     }
     LabelContent label;
@@ -343,7 +345,7 @@ public class ShipService {
     byte[] pdf = label.bytes();
     tx.write(
         () -> {
-          labelCache.upsert(shipmentId, "LABEL", pdf);
+          labelCache.upsert(shipment.id(), "LABEL", pdf);
           return Boolean.TRUE;
         });
     return pdf;
@@ -372,7 +374,7 @@ public class ShipService {
         VALUES (?, ?, ?, ?, 'PENDING')
         """,
         shipmentId,
-        TenantContext.requireTenantId(),
+        order.tenantId(),
         order.id(),
         warehouseId);
     return shipmentId;
@@ -410,6 +412,10 @@ public class ShipService {
   }
 
   private Optional<ShipmentRow> loadShipment(UUID orderId) {
+    return loadShipment(orderId, TenantContext.requireTenantId());
+  }
+
+  private Optional<ShipmentRow> loadShipment(UUID orderId, UUID tenantId) {
     List<ShipmentRow> rows =
         jdbc.query(
             """
@@ -424,7 +430,7 @@ public class ShipService {
                     rs.getString("status"),
                     rs.getString("external_shipment_id"),
                     optionalInstant(rs.getTimestamp("label_cached_until"))),
-            TenantContext.requireTenantId(),
+            tenantId,
             orderId);
     return rows.stream().findFirst();
   }
