@@ -284,7 +284,7 @@ class FlywayV4CatalogStockTest {
         assertThat(versions)
             .containsExactly(
                 "1", "2", "3", "4", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16",
-                "17");
+                "17", "18");
         assertThat(count(upgrade, "inbox_event")).isEqualTo(1);
         Graph graph = seedForTenant(upgrade, tenant);
         assertThat(countFor(upgrade, "inventory", graph.tenant())).isEqualTo(1);

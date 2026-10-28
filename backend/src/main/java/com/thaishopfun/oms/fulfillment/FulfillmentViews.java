@@ -82,4 +82,62 @@ public final class FulfillmentViews {
 
   public record CompletePackResponse(
       @JsonProperty("fulfillment_status") String fulfillmentStatus, long version) {}
+
+  public record ShipCandidateItem(
+      UUID id,
+      @JsonProperty("external_order_id") String externalOrderId,
+      @JsonProperty("ordered_at") Instant orderedAt,
+      @JsonProperty("ship_by") Instant shipBy,
+      @JsonProperty("has_shipment") boolean hasShipment,
+      @JsonProperty("tracking_no") String trackingNo,
+      String carrier,
+      @JsonProperty("shipment_status") String shipmentStatus) {}
+
+  public record ShipCandidatesView(List<ShipCandidateItem> items) {}
+
+  public record LabelBatchBody(@JsonProperty("order_ids") List<String> orderIds) {}
+
+  public record LabelBatchOrderResult(
+      @JsonProperty("order_id") UUID orderId,
+      @JsonProperty("external_order_id") String externalOrderId,
+      boolean ok,
+      String error,
+      String message) {}
+
+  public record LabelBatchResponse(
+      @JsonProperty("pdf_base64") String pdfBase64,
+      @JsonProperty("content_type") String contentType,
+      List<LabelBatchOrderResult> results) {}
+
+  public record ManualTrackingBody(
+      String carrier, @JsonProperty("tracking_no") String trackingNo) {}
+
+  public record ShipmentSummary(
+      UUID id,
+      String carrier,
+      @JsonProperty("tracking_no") String trackingNo,
+      String status,
+      @JsonProperty("external_shipment_id") String externalShipmentId,
+      @JsonProperty("manual") boolean manual) {}
+
+  public record ManualTrackingResponse(
+      @JsonProperty("fulfillment_status") String fulfillmentStatus, ShipmentSummary shipment) {}
+
+  public record ShipConfirmResponse(
+      @JsonProperty("fulfillment_status") String fulfillmentStatus,
+      long version,
+      ShipmentSummary shipment) {}
+
+  public record PackingSlipLine(String skuCode, String name, int qty) {}
+
+  public record PackingSlipData(
+      String externalOrderId,
+      String carrier,
+      String trackingNo,
+      @JsonProperty("recipient_name") String recipientName,
+      @JsonProperty("recipient_address") String recipientAddress,
+      String province,
+      String postcode,
+      Instant generatedAt,
+      List<PackingSlipLine> lines) {}
 }

@@ -102,7 +102,7 @@ class FlywayV1RlsTest {
         assertThat(versions)
             .containsExactly(
                 "1", "2", "3", "4", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16",
-                "17");
+                "17", "18");
       }
 
       // Step 2: Every foundation table exists.
@@ -232,6 +232,7 @@ class FlywayV1RlsTest {
       expected.add("pick_list");
       expected.add("pick_list_order");
       expected.add("order_pack_progress");
+      expected.add("shipment_label_cache");
       assertThat(policies.keySet()).containsExactlyInAnyOrderElementsOf(expected);
       for (String table : TENANT_TABLES) {
         TablePolicy policy = policies.get(table);

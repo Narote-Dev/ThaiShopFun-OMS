@@ -53,7 +53,7 @@ export type PackSession = {
 }
 
 export function fulfillmentMessage(err: unknown, fallback: string): string {
-  if (err instanceof ApiError) return messageTh(err.code, err.message)
+  if (err instanceof ApiError) return messageTh(err.code, fallback)
   if (err instanceof Error && err.message && /[ก-๙]/.test(err.message)) return err.message
   return fallback
 }
@@ -112,5 +112,74 @@ export const packApi = {
       `/api/v1/pack/orders/${orderId}/complete`,
       { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' },
     )
+  },
+}
+
+export type ShipCandidate = {
+  id: string
+  external_order_id: string
+  ordered_at: string
+  ship_by: string | null
+  has_shipment: boolean
+  tracking_no: string | null
+  carrier: string | null
+  shipment_status: string | null
+}
+
+export type LabelBatchOrderResult = {
+  order_id: string
+  external_order_id: string
+  ok: boolean
+  error: string | null
+  message: string | null
+}
+
+export type LabelBatchResponse = {
+  pdf_base64: string | null
+  content_type: string | null
+  results: LabelBatchOrderResult[]
+}
+
+function openPdfBase64(pdfBase64: string, contentType: string | null) {
+  const binary = atob(pdfBase64)
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+  const blob = new Blob([bytes], { type: contentType ?? 'application/pdf' })
+  const url = URL.createObjectURL(blob)
+  window.open(url, '_blank', 'noopener,noreferrer')
+  window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
+}
+
+export const shipApi = {
+  async candidates(): Promise<{ items: ShipCandidate[] }> {
+    return apiRequest('/api/v1/ship/candidates')
+  },
+  async labelBatch(orderIds: string[]): Promise<LabelBatchResponse> {
+    return apiRequest('/api/v1/ship/labels', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ order_ids: orderIds }),
+    })
+  },
+  async openLabelBatch(orderIds: string[]): Promise<LabelBatchResponse> {
+    const data = await shipApi.labelBatch(orderIds)
+    if (data.pdf_base64) {
+      openPdfBase64(data.pdf_base64, data.content_type)
+    }
+    return data
+  },
+  async manualTracking(orderId: string, body: { carrier: string; tracking_no: string }) {
+    return apiRequest(`/api/v1/ship/orders/${orderId}/manual-tracking`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+  },
+  async confirmShip(orderId: string) {
+    return apiRequest(`/api/v1/ship/orders/${orderId}/confirm`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}',
+    })
   },
 }

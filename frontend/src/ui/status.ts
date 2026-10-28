@@ -11,6 +11,8 @@ export type StatusKind =
   | 'stock_document'
   | 'product'
   | 'outbox'
+  | 'shipment'
+  | 'carrier'
   | 'generic'
 
 export type StatusVariant =
@@ -92,6 +94,18 @@ const OUTBOX: Record<string, StatusStyle> = {
   SENT: { variant: 'success', label: labelTh('SENT') },
 }
 
+const SHIPMENT: Record<string, StatusStyle> = {
+  PENDING: { variant: 'warning', label: labelTh('SHIPMENT_PENDING') },
+  LABEL_READY: { variant: 'success', label: labelTh('SHIPMENT_LABEL_READY') },
+  SHIPPED: { variant: 'neutral', label: labelTh('SHIPPED_STATUS') },
+}
+
+const CARRIER: Record<string, StatusStyle> = {
+  FLASH: { variant: 'info', label: labelTh('FLASH') },
+  KERRY: { variant: 'info', label: labelTh('KERRY') },
+  MANUAL: { variant: 'muted', label: labelTh('CARRIER_MANUAL') },
+}
+
 export function resolveStatus(value: string, kind: StatusKind = 'generic'): StatusStyle {
   const key = value.trim()
   if (!key) return { variant: 'muted', label: '—' }
@@ -106,10 +120,15 @@ export function resolveStatus(value: string, kind: StatusKind = 'generic'): Stat
     stock_document: STOCK_DOCUMENT,
     product: PRODUCT,
     outbox: OUTBOX,
+    shipment: SHIPMENT,
+    carrier: CARRIER,
     generic: undefined,
   }
   const map = maps[kind]
   if (map && map[key]) return map[key]
+  if (kind === 'carrier') {
+    return { variant: 'info', label: key }
+  }
   if ((kind === 'hold' || kind === 'hold_reason') && key !== 'NONE') {
     return { variant: 'danger', label: labelTh(key) }
   }
@@ -148,4 +167,6 @@ export const ALL_STATUS_VALUES: { kind: StatusKind; value: string }[] = [
   ...Object.keys(STOCK_DOCUMENT).map((value) => ({ kind: 'stock_document' as const, value })),
   ...Object.keys(PRODUCT).map((value) => ({ kind: 'product' as const, value })),
   ...Object.keys(OUTBOX).map((value) => ({ kind: 'outbox' as const, value })),
+  ...Object.keys(SHIPMENT).map((value) => ({ kind: 'shipment' as const, value })),
+  ...Object.keys(CARRIER).map((value) => ({ kind: 'carrier' as const, value })),
 ]
