@@ -8,6 +8,7 @@ import com.thaishopfun.oms.order.OrderRecipientRepository;
 import com.thaishopfun.oms.order.OrderStatusHistoryRepository;
 import com.thaishopfun.oms.order.SalesOrder;
 import com.thaishopfun.oms.order.SalesOrderRepository;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -59,7 +60,7 @@ class PickListPackApiTest extends OrderIntegrationTest {
     assertThat(orderAfter.body().path("fulfillment_status").asString()).isEqualTo("PICKING");
 
     byte[] pdf = http.getPdf("/api/v1/pick-lists/" + pickListId + "/pdf", httpShop.owner());
-    assertThat(pdf[0]).isEqualTo('%');
+    assertThat(new String(pdf, 0, 4, StandardCharsets.US_ASCII)).isEqualTo("%PDF");
   }
 
   @Test
