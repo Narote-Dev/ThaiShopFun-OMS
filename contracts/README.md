@@ -26,3 +26,14 @@ Event schemas describe `data` only. The envelope schema describes the wrapper. A
 - `/control` is not in this folder. Label download is raw PDF bytes (`%PDF`), not JSON. The authorize user picker is HTML.
 - Section 4.5/4.6 `data` objects that have no full example use a minimal schema: `order.paid`, `order.cancelled`, `order.updated`, `shipment.status_changed`, `return.decided`, `payment.status_changed`, `listing.changed`, `order.status_changed`, `return.received`. `payment.status_changed` includes `UNPAID` for the COD seed order.
 - `$id` is omitted. A bare filename is not a valid JSON Schema `$id`.
+
+## Optional payment provider metadata
+
+`payment.status_changed.data` and GET `/orders/{orderId}/payment-status` may include
+`provider` (`XENDIT` or `OPN`) and `provider_ref` (an opaque payment reference).
+Both fields are optional for compatibility; no card or account data is included.
+OMS takes the provider only from the explicit `provider` field; `provider_ref`
+is opaque and never used to infer it. If `provider` is absent
+(for example COD `UNPAID`), OMS skips the snapshot insert while still projecting
+payment/refund status and auditing the observation in the same transaction.
+The database provider NOT NULL and XENDIT/OPN constraints remain unchanged.

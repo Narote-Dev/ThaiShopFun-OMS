@@ -263,6 +263,12 @@ public class OrderIntakeSupport {
       reconciliation.upsertOpen(message.id(), "PAID_AFTER_CANCEL", order.id(), "{}");
       return;
     }
+    // Payment/refund mirrors may arrive before the older order.paid event.
+    if ("PARTIALLY_REFUNDED".equals(order.paymentStatus())
+        || "REFUNDED".equals(order.paymentStatus())) {
+      bumpExternalVersion(account, order, message);
+      return;
+    }
     Instant paidAt = eventOccurredAt(message);
     if ("PAID".equals(order.paymentStatus())) {
       // Change: gap REST may mark PAID before this inbox event; still advance fulfillment.
