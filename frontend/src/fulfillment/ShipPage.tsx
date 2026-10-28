@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { AlertBanner } from '../ui/Alert'
 import { Button } from '../ui/Button'
 import { Checkbox } from '../ui/Checkbox'
+import { ConfirmationDialog } from '../ui/ConfirmationDialog'
+import { Card } from '../ui/Card'
 import { DataTable, DataTableCell, DataTableHead, DataTableRow, DataTableTh } from '../ui/DataTable'
 import { Input } from '../ui/Input'
 import { Label } from '../ui/Label'
@@ -16,15 +18,22 @@ export default function ShipPage() {
   const toast = useToast()
   const [rows, setRows] = useState<ShipCandidate[]>([])
   const [selected, setSelected] = useState<Set<string>>(new Set())
-  const [loading, setLoading] = useState(true)
+  const [loaded, setLoaded] = useState(false)
   const [error, setError] = useState('')
   const [manualOrderId, setManualOrderId] = useState<string | null>(null)
   const [carrier, setCarrier] = useState('')
   const [tracking, setTracking] = useState('')
   const [busy, setBusy] = useState(false)
+  const [confirmOrderId, setConfirmOrderId] = useState<string | null>(null)
 
-  const load = useCallback(() => {
-    setLoading(true)
+  async function refreshCandidates() {
+    const data = await shipApi.candidates()
+    setRows(data.items)
+    setSelected(new Set())
+    setError('')
+  }
+
+  useEffect(() => {
     let active = true
     shipApi
       .candidates()
@@ -34,18 +43,16 @@ export default function ShipPage() {
         setSelected(new Set())
         setError('')
       })
-      .catch((err) => {
+      .catch((err: unknown) => {
         if (active) setError(fulfillmentMessage(err, labelTh('SHIP_LOAD_ERROR')))
       })
       .finally(() => {
-        if (active) setLoading(false)
+        if (active) setLoaded(true)
       })
     return () => {
       active = false
     }
   }, [])
-
-  useEffect(() => load(), [load])
 
   const toggle = (id: string) => {
     setSelected((prev) => {
@@ -68,21 +75,23 @@ export default function ShipPage() {
     try {
       await shipApi.openLabelBatch([...selected])
       toast.push(labelTh('SHIP_LABELS_OPENED'), 'success')
-    } catch (err) {
+    } catch (err: unknown) {
       setError(fulfillmentMessage(err, labelTh('SHIP_LABELS_ERROR')))
     } finally {
       setBusy(false)
     }
   }
 
-  const confirmShip = async (orderId: string) => {
+  const runConfirmShip = async () => {
+    if (!confirmOrderId) return
     setBusy(true)
     setError('')
     try {
-      await shipApi.confirm(orderId)
+      await shipApi.confirmShip(confirmOrderId)
       toast.push(labelTh('SHIP_CONFIRMED'), 'success')
-      load()
-    } catch (err) {
+      setConfirmOrderId(null)
+      await refreshCandidates()
+    } catch (err: unknown) {
       setError(fulfillmentMessage(err, labelTh('SHIP_CONFIRM_ERROR')))
     } finally {
       setBusy(false)
@@ -102,8 +111,8 @@ export default function ShipPage() {
       setManualOrderId(null)
       setCarrier('')
       setTracking('')
-      load()
-    } catch (err) {
+      await refreshCandidates()
+    } catch (err: unknown) {
       setError(fulfillmentMessage(err, labelTh('SHIP_MANUAL_ERROR')))
     } finally {
       setBusy(false)
@@ -111,7 +120,7 @@ export default function ShipPage() {
   }
 
   return (
-    <PageContent>
+    <PageContent wide>
       <PageHeader
         title={labelTh('SHIP_TITLE')}
         subtitle={labelTh('SHIP_SUBTITLE')}
@@ -121,7 +130,7 @@ export default function ShipPage() {
           </Button>
         }
       />
-      {error ? <AlertBanner variant="error" className="mt-5" title={error} /> : null}
+      {error ? <AlertBanner variant="danger" className="mt-5" title={error} /> : null}
       {manualOrderId ? (
         <div className="mt-5 rounded-lg border border-stone-200 bg-white p-5 shadow-sm">
           <h2 className="text-[15px] font-semibold text-stone-900">{labelTh('SHIP_MANUAL_TITLE')}</h2>
@@ -146,38 +155,26 @@ export default function ShipPage() {
           </div>
         </div>
       ) : null}
-      <DataTable aria-label={labelTh('SHIP_TITLE')} className="mt-5">
-        <DataTableHead>
-          <DataTableRow>
-            <DataTableTh className="w-10">
-              <Checkbox
-                checked={rows.length > 0 && selected.size === rows.length}
-                aria-label={labelTh('SHIP_SELECT_ALL')}
-                onCheckedChange={toggleAll}
-              />
-            </DataTableTh>
-            <DataTableTh>{labelTh('ORDER_NUMBER')}</DataTableTh>
-            <DataTableTh>{labelTh('SHIP_BY')}</DataTableTh>
-            <DataTableTh>{labelTh('SHIP_TRACKING')}</DataTableTh>
-            <DataTableTh>{labelTh('SHIP_CARRIER')}</DataTableTh>
-            <DataTableTh>{labelTh('SHIP_ACTIONS')}</DataTableTh>
-          </DataTableRow>
-        </DataTableHead>
-        <tbody>
-          {loading ? (
+      <Card className="mt-5 overflow-hidden">
+        <DataTable aria-label={labelTh('SHIP_TITLE')} className="rounded-none border-0 shadow-none">
+          <DataTableHead>
             <DataTableRow>
-              <DataTableCell colSpan={6} className="p-6 text-stone-600">
-                {labelTh('SHIP_LOADING')}
-              </DataTableCell>
+              <DataTableTh className="w-10">
+                <Checkbox
+                  checked={rows.length > 0 && selected.size === rows.length}
+                  aria-label={labelTh('SHIP_SELECT_ALL')}
+                  onCheckedChange={toggleAll}
+                />
+              </DataTableTh>
+              <DataTableTh>{labelTh('ORDER_NUMBER')}</DataTableTh>
+              <DataTableTh>{labelTh('SHIP_BY')}</DataTableTh>
+              <DataTableTh>{labelTh('SHIP_TRACKING')}</DataTableTh>
+              <DataTableTh>{labelTh('SHIP_CARRIER')}</DataTableTh>
+              <DataTableTh>{labelTh('SHIP_ACTIONS')}</DataTableTh>
             </DataTableRow>
-          ) : rows.length === 0 ? (
-            <DataTableRow>
-              <DataTableCell colSpan={6} className="p-6 text-stone-600">
-                {labelTh('SHIP_EMPTY')}
-              </DataTableCell>
-            </DataTableRow>
-          ) : (
-            rows.map((row) => (
+          </DataTableHead>
+          <tbody>
+            {rows.map((row) => (
               <DataTableRow key={row.id}>
                 <DataTableCell>
                   <Checkbox
@@ -192,7 +189,7 @@ export default function ShipPage() {
                 <DataTableCell>{row.carrier ?? '—'}</DataTableCell>
                 <DataTableCell>
                   <div className="flex flex-wrap gap-2">
-                    <Button type="button" size="sm" disabled={busy} onClick={() => void confirmShip(row.id)}>
+                    <Button type="button" size="sm" disabled={busy} onClick={() => setConfirmOrderId(row.id)}>
                       {labelTh('SHIP_CONFIRM')}
                     </Button>
                     <Button
@@ -207,10 +204,25 @@ export default function ShipPage() {
                   </div>
                 </DataTableCell>
               </DataTableRow>
-            ))
-          )}
-        </tbody>
-      </DataTable>
+            ))}
+          </tbody>
+        </DataTable>
+        {!loaded ? (
+          <p className="p-6 text-[13px] text-stone-600">{labelTh('SHIP_LOADING')}</p>
+        ) : rows.length === 0 ? (
+          <p className="p-6 text-[13px] text-stone-600">{labelTh('SHIP_EMPTY')}</p>
+        ) : null}
+      </Card>
+      <ConfirmationDialog
+        open={confirmOrderId !== null}
+        onOpenChange={(open) => {
+          if (!open && !busy) setConfirmOrderId(null)
+        }}
+        title={labelTh('SHIP_CONFIRM_DIALOG_TITLE')}
+        description={labelTh('SHIP_CONFIRM_DIALOG_DESC')}
+        danger
+        onConfirm={() => void runConfirmShip()}
+      />
     </PageContent>
   )
 }

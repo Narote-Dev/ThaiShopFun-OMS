@@ -161,7 +161,7 @@ export const shipApi = {
       body: JSON.stringify(body),
     })
   },
-  async confirm(orderId: string) {
+  async confirmShip(orderId: string) {
     return apiRequest(`/api/v1/ship/orders/${orderId}/confirm`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

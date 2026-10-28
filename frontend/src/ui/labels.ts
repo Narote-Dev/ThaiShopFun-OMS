@@ -86,6 +86,8 @@ const LABELS: Record<string, string> = {
   SHIP_LABELS_ERROR: 'พิมพ์ใบปะหน้าไม่สำเร็จ',
   SHIP_LABELS_OPENED: 'เปิดไฟล์ PDF ใบปะหน้าแล้ว',
   SHIP_CONFIRM: 'ยืนยันส่ง',
+  SHIP_CONFIRM_DIALOG_TITLE: 'ยืนยันจัดส่งออเดอร์นี้?',
+  SHIP_CONFIRM_DIALOG_DESC: 'ระบบจะตัดสต็อกและเปลี่ยนสถานะเป็นจัดส่งแล้ว ไม่สามารถย้อนกลับได้',
   SHIP_CONFIRMED: 'บันทึกการจัดส่งแล้ว',
   SHIP_CONFIRM_ERROR: 'ยืนยันจัดส่งไม่สำเร็จ',
   SHIP_SELECT_ALL: 'เลือกออเดอร์ทั้งหมด',
