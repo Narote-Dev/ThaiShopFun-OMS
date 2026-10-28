@@ -30,7 +30,7 @@ User JWT under `/api/v1/pick-lists` and `/api/v1/pack/orders`. Mock TSF only; la
 `GET /pack/orders/{orderId}` — only when `fulfillment_status=PICKING`.
 
 - Returns full recipient name, phone, and address JSON (not masked).
-- Audit: `ORDER_PACK_PII_VIEWED` once per successful read (per request in v1).
+- Audit: `ORDER_PACK_PII_VIEWED` once per user per order while the order stays in `PICKING` (repeat `GET` during the same pack session does not append another row). A new audit is written if the order enters `PICKING` again later.
 - Order detail API remains masked for all roles.
 
 ## Pack scan

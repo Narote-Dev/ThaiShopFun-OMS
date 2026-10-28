@@ -13,6 +13,7 @@ import com.thaishopfun.oms.order.OrderRecipientRepository;
 import com.thaishopfun.oms.order.OrderStateException;
 import com.thaishopfun.oms.order.OrderStateMachine;
 import com.thaishopfun.oms.order.SalesOrder;
+import com.thaishopfun.oms.order.OrderStatusHistoryRepository;
 import com.thaishopfun.oms.order.SalesOrderRepository;
 import com.thaishopfun.oms.order.StoredRecipient;
 import com.thaishopfun.oms.order.web.OrderApiException;
@@ -36,6 +37,7 @@ public class PackService {
   private final OrderLineRepository lines;
   private final OrderRecipientRepository recipients;
   private final OrderStateMachine stateMachine;
+  private final OrderStatusHistoryRepository statusHistory;
   private final FulfillmentAccess access;
   private final OrderAudit audit;
 
@@ -46,6 +48,7 @@ public class PackService {
       OrderLineRepository lines,
       OrderRecipientRepository recipients,
       OrderStateMachine stateMachine,
+      OrderStatusHistoryRepository statusHistory,
       FulfillmentAccess access,
       OrderAudit audit) {
     this.jdbc = jdbc;
@@ -54,6 +57,7 @@ public class PackService {
     this.lines = lines;
     this.recipients = recipients;
     this.stateMachine = stateMachine;
+    this.statusHistory = statusHistory;
     this.access = access;
     this.audit = audit;
   }
@@ -65,14 +69,16 @@ public class PackService {
           SalesOrder order = orders.findById(orderId).orElseThrow(OrderApiException::notFound);
           validatePackableStatus(order.fulfillmentStatus());
           PackSession session = buildSession(order, loadLines(orderId));
-          audit.writeEntity(
-              actor.tenantId(),
-              actor.userId(),
-              "ORDER_PACK_PII_VIEWED",
-              "sales_order",
-              orderId,
-              Map.of(),
-              Map.of("fulfillment_status", order.fulfillmentStatus()));
+          if (!packPiiViewAlreadyAudited(actor, orderId)) {
+            audit.writeEntity(
+                actor.tenantId(),
+                actor.userId(),
+                "ORDER_PACK_PII_VIEWED",
+                "sales_order",
+                orderId,
+                Map.of(),
+                Map.of("fulfillment_status", order.fulfillmentStatus()));
+          }
           return session;
         });
   }
@@ -144,6 +150,32 @@ public class PackService {
               Map.of("fulfillment_status", updated.fulfillmentStatus()));
           return new CompletePackResponse(updated.fulfillmentStatus(), updated.version());
         });
+  }
+
+  private boolean packPiiViewAlreadyAudited(FulfillmentAccess.Actor actor, UUID orderId) {
+    java.time.Instant pickingSince =
+        statusHistory
+            .transitionedAt(orderId, "FULFILLMENT", "PICKING")
+            .orElse(java.time.Instant.EPOCH);
+    List<Integer> found =
+        jdbc.query(
+            """
+            SELECT 1 FROM audit_log
+            WHERE tenant_id = ?
+              AND actor_type = 'USER'
+              AND actor_id = ?
+              AND action = 'ORDER_PACK_PII_VIEWED'
+              AND entity_type = 'sales_order'
+              AND entity_id = ?
+              AND created_at >= ?
+            LIMIT 1
+            """,
+            (rs, rowNum) -> 1,
+            actor.tenantId(),
+            actor.userId().toString(),
+            orderId.toString(),
+            java.sql.Timestamp.from(pickingSince));
+    return !found.isEmpty();
   }
 
   private PackSession buildSession(SalesOrder order, List<PackLine> packLines) {

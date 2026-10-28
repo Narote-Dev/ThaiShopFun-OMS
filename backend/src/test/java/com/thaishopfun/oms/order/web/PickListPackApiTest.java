@@ -83,6 +83,12 @@ class PickListPackApiTest extends OrderIntegrationTest {
     assertThat(CatalogHttp.auditsFor(shop.tenantId(), "ORDER_PACK_PII_VIEWED", order.id().toString()))
         .isEqualTo(1);
 
+    CatalogHttp.Result sessionAgain =
+        http.get("/api/v1/pack/orders/" + order.id(), httpShop.owner());
+    assertThat(sessionAgain.status()).isEqualTo(200);
+    assertThat(CatalogHttp.auditsFor(shop.tenantId(), "ORDER_PACK_PII_VIEWED", order.id().toString()))
+        .isEqualTo(1);
+
     CatalogHttp.Result detailBefore =
         http.get(OrderHttp.ordersPath("/" + order.id()), httpShop.owner());
     assertThat(detailBefore.body().path("recipient").path("phone_masked").asString())

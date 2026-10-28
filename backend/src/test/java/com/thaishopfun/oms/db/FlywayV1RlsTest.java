@@ -228,6 +228,9 @@ class FlywayV1RlsTest {
       expected.addAll(FlywayV7OrdersTest.V7_TABLES);
       expected.addAll(FlywayV13OrderHoldRetryTest.V13_TABLES);
       expected.add("stock_push_pending");
+      expected.add("pick_list");
+      expected.add("pick_list_order");
+      expected.add("order_pack_progress");
       assertThat(policies.keySet()).containsExactlyInAnyOrderElementsOf(expected);
       for (String table : TENANT_TABLES) {
         TablePolicy policy = policies.get(table);
