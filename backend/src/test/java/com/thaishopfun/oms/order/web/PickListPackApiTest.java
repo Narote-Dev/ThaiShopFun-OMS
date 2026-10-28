@@ -132,7 +132,8 @@ class PickListPackApiTest extends OrderIntegrationTest {
     FulfillmentTestSupport.addLine(order, sku.skuId(), 1);
 
     http.post("/api/v1/pick-lists", httpShop.owner(), Map.of("order_ids", List.of(order.id())));
-    assertThat(http.get("/api/v1/pack/orders/" + order.id(), httpShop.owner()).status()).isEqualTo(200);
+    assertThat(http.get("/api/v1/pack/orders/" + order.id(), httpShop.owner()).status())
+        .isEqualTo(200);
     assertScan(httpShop.owner(), order.id(), sku.skuCode(), 1, 1, true);
     assertThat(
             http.post("/api/v1/pack/orders/" + order.id() + "/complete", httpShop.owner(), Map.of())
