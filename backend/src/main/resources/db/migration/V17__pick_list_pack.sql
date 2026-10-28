@@ -19,6 +19,7 @@ CREATE TABLE pick_list_order (
   pick_list_id uuid NOT NULL,
   order_id uuid NOT NULL,
   sequence int NOT NULL,
+  released_at timestamptz,
   PRIMARY KEY (tenant_id, pick_list_id, order_id),
   CONSTRAINT pick_list_order_pick_fkey FOREIGN KEY (tenant_id, pick_list_id)
     REFERENCES pick_list (tenant_id, id) ON DELETE CASCADE,
@@ -27,7 +28,8 @@ CREATE TABLE pick_list_order (
   CONSTRAINT pick_list_order_sequence_check CHECK (sequence >= 0)
 );
 
-CREATE UNIQUE INDEX pick_list_order_active_order_uq ON pick_list_order (tenant_id, order_id);
+CREATE UNIQUE INDEX pick_list_order_active_order_uq ON pick_list_order (tenant_id, order_id)
+  WHERE released_at IS NULL;
 
 CREATE TABLE order_pack_progress (
   tenant_id uuid NOT NULL,

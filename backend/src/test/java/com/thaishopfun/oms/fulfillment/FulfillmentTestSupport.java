@@ -4,6 +4,7 @@ import com.thaishopfun.oms.auth.UuidV7;
 import com.thaishopfun.oms.catalog.CatalogHttp;
 import com.thaishopfun.oms.order.SalesOrder;
 import java.math.BigDecimal;
+import java.sql.SQLException;
 import java.util.UUID;
 
 /** Seeds catalog rows for pick/pack API tests. */
@@ -13,11 +14,24 @@ public final class FulfillmentTestSupport {
 
   public record SkuSeed(UUID skuId, String skuCode, String barcode, UUID warehouseId) {}
 
-  public static SkuSeed seedSku(UUID tenantId, String skuCode, String barcode) {
-    UUID productId = UuidV7.generate();
-    UUID skuId = UuidV7.generate();
+  public static UUID ensureDefaultWarehouse(UUID tenantId) {
+    try (var admin = com.thaishopfun.oms.auth.AuthTestSupport.admin();
+        var statement =
+            admin.prepareStatement(
+                """
+                SELECT id FROM warehouse WHERE tenant_id = ? AND is_default = true LIMIT 1
+                """)) {
+      statement.setObject(1, tenantId);
+      try (var rows = statement.executeQuery()) {
+        if (rows.next()) {
+          return rows.getObject(1, UUID.class);
+        }
+      }
+    } catch (SQLException ex) {
+      throw new IllegalStateException(ex);
+    }
     UUID warehouseId = UuidV7.generate();
-    String whCode = "WH-" + warehouseId.toString().substring(0, 8);
+    String whCode = "MAIN-" + warehouseId.toString().substring(0, 6);
     CatalogHttp.execute(
         """
         INSERT INTO warehouse (id, tenant_id, code, name, is_default)
@@ -26,6 +40,13 @@ public final class FulfillmentTestSupport {
         warehouseId,
         tenantId,
         whCode);
+    return warehouseId;
+  }
+
+  public static SkuSeed seedSku(UUID tenantId, String skuCode, String barcode) {
+    UUID warehouseId = ensureDefaultWarehouse(tenantId);
+    UUID productId = UuidV7.generate();
+    UUID skuId = UuidV7.generate();
     CatalogHttp.execute(
         """
         INSERT INTO product (id, tenant_id, name, status)
@@ -42,23 +63,28 @@ public final class FulfillmentTestSupport {
         tenantId,
         productId,
         skuCode,
-        "Test SKU " + skuCode,
+        "เสื้อ " + skuCode,
         barcode);
     return new SkuSeed(skuId, skuCode, barcode, warehouseId);
   }
 
   public static void addLine(SalesOrder order, UUID skuId, int qty) {
+    addLine(order, skuId, qty, "L1");
+  }
+
+  public static void addLine(SalesOrder order, UUID skuId, int qty, String externalLineId) {
     CatalogHttp.execute(
         """
         INSERT INTO order_line (
           id, tenant_id, order_id, sku_id, external_line_id, external_sku_id, name, qty,
           unit_price, discount, line_total
-        ) VALUES (?, ?, ?, ?, 'L1', 'ext-sku', 'Line', ?, 100, 0, ?)
+        ) VALUES (?, ?, ?, ?, ?, 'ext-sku', 'Line', ?, 100, 0, ?)
         """,
         UuidV7.generate(),
         order.tenantId(),
         order.id(),
         skuId,
+        externalLineId,
         qty,
         BigDecimal.valueOf(100L * qty));
   }

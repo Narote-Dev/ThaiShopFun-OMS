@@ -60,7 +60,7 @@ public class PackService {
 
   public PackSession session(UUID orderId) {
     FulfillmentAccess.Actor actor = access.actor();
-    return tx.read(
+    return tx.write(
         () -> {
           SalesOrder order = orders.findById(orderId).orElseThrow(OrderApiException::notFound);
           validatePackableStatus(order.fulfillmentStatus());
@@ -91,13 +91,9 @@ public class PackService {
               orders.findByIdForUpdate(orderId).orElseThrow(OrderApiException::notFound);
           validatePackableStatus(order.fulfillmentStatus());
 
-          // Step 2: Resolve SKU by code or EAN within tenant.
+          // Step 2: Resolve SKU and the next order line that still needs scans.
           SkuMatch sku = resolveSku(scan).orElseThrow(() -> scanUnknown(scan));
-          OrderLine line =
-              lines.findByOrderId(orderId).stream()
-                  .filter(row -> sku.id().equals(row.skuId()))
-                  .findFirst()
-                  .orElseThrow(() -> scanMismatch(scan));
+          OrderLine line = findScannableLine(orderId, sku).orElseThrow(() -> scanMismatch(scan));
 
           // Step 3: Load progress and enforce qty limits.
           int required = line.qty();
@@ -137,6 +133,7 @@ public class PackService {
             throw OrderApiException.conflict("ORDER_OPTIMISTIC_LOCK", ex.getMessage());
           }
           SalesOrder updated = orders.findById(orderId).orElseThrow(OrderApiException::notFound);
+          releasePickListMembership(orderId);
           audit.writeEntity(
               actor.tenantId(),
               actor.userId(),
@@ -264,6 +261,35 @@ public class PackService {
       }
     }
     return true;
+  }
+
+  private java.util.Optional<OrderLine> findScannableLine(UUID orderId, SkuMatch sku) {
+    List<OrderLine> matching =
+        lines.findByOrderId(orderId).stream()
+            .filter(row -> sku.id().equals(row.skuId()))
+            .sorted(java.util.Comparator.comparing(OrderLine::id))
+            .toList();
+    if (matching.isEmpty()) {
+      return java.util.Optional.empty();
+    }
+    for (OrderLine line : matching) {
+      if (progressQty(orderId, line.id()) < line.qty()) {
+        return java.util.Optional.of(line);
+      }
+    }
+    throw OrderApiException.conflict(
+        "PACK_SCAN_OVERFLOW", "Scan exceeds required quantity for " + sku.code());
+  }
+
+  private void releasePickListMembership(UUID orderId) {
+    jdbc.update(
+        """
+        UPDATE pick_list_order
+        SET released_at = now()
+        WHERE tenant_id = ? AND order_id = ? AND released_at IS NULL
+        """,
+        TenantContext.requireTenantId(),
+        orderId);
   }
 
   private java.util.Optional<SkuMatch> resolveSku(String scan) {

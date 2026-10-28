@@ -31,67 +31,72 @@ public class PickListPdfRenderer {
       PDPage page = new PDPage(A6);
       document.addPage(page);
       float margin = 8 * MM;
+      float maxWidth = A6.getWidth() - 2 * margin;
       float y = A6.getHeight() - margin;
       try (PDPageContentStream stream = new PDPageContentStream(document, page)) {
-        y = writeLine(stream, font, 14, margin, y, "ใบหยิบสินค้า");
-        y -= 4 * MM;
+        y = writeFitted(stream, font, 14, margin, y, maxWidth, "ใบหยิบสินค้า");
+        y -= 3 * MM;
+        String shortId = detail.id().toString().substring(0, 8);
         y =
-            writeLine(
+            writeFitted(
                 stream,
                 font,
-                9,
+                8,
                 margin,
                 y,
-                "รหัส: "
-                    + detail.id()
+                maxWidth,
+                "รหัส "
+                    + shortId
                     + " · คลัง "
                     + detail.warehouseCode()
                     + " · "
                     + WHEN.format(detail.createdAt()));
-        y -= 3 * MM;
-        y = writeLine(stream, font, 9, margin, y, "จำนวนออเดอร์: " + detail.orders().size());
-        y -= 5 * MM;
-        y = writeLine(stream, font, 10, margin, y, "รายการหยิบ (SKU)");
-        y -= 3 * MM;
+        y -= 2 * MM;
+        y =
+            writeFitted(
+                stream, font, 8, margin, y, maxWidth, "จำนวนออเดอร์: " + detail.orders().size());
+        y -= 4 * MM;
+        y = writeFitted(stream, font, 10, margin, y, maxWidth, "รายการหยิบ");
+        y -= 2 * MM;
         for (FulfillmentViews.PickLine line : detail.pickLines()) {
           String barcode =
               line.barcode() == null || line.barcode().isBlank()
                   ? ""
                   : " · EAN " + line.barcode();
           y =
-              writeLine(
+              writeFitted(
                   stream,
                   font,
                   9,
                   margin,
                   y,
-                  line.skuCode() + barcode + " × " + line.qty());
+                  maxWidth,
+                  line.skuCode() + " × " + line.qty() + barcode);
+          y -= 1 * MM;
+          y = writeFitted(stream, font, 8, margin, y, maxWidth, line.name());
+          y -= 1 * MM;
           y =
-              writeLine(
-                  stream,
-                  font,
-                  8,
-                  margin,
-                  y - 2 * MM,
-                  truncate(line.name(), 48) + " @ " + line.warehouseCode());
-          y -= 5 * MM;
+              writeFitted(
+                  stream, font, 7, margin, y, maxWidth, "คลัง " + line.warehouseCode());
+          y -= 3 * MM;
           if (y < margin + 10 * MM) {
             break;
           }
         }
         if (detail.orders().size() <= 12) {
           y -= 2 * MM;
-          y = writeLine(stream, font, 8, margin, y, "ออเดอร์:");
+          y = writeFitted(stream, font, 8, margin, y, maxWidth, "ออเดอร์:");
           for (FulfillmentViews.PickListOrderRef order : detail.orders()) {
             y =
-                writeLine(
+                writeFitted(
                     stream,
                     font,
-                    8,
+                    7,
                     margin,
                     y,
+                    maxWidth,
                     order.sequence() + 1 + ". " + order.externalOrderId());
-            y -= 1.5f * MM;
+            y -= 1 * MM;
           }
         }
       }
@@ -110,6 +115,31 @@ public class PickListPdfRenderer {
     }
   }
 
+  private static float writeFitted(
+      PDPageContentStream stream,
+      PDFont font,
+      float size,
+      float x,
+      float y,
+      float maxWidth,
+      String text)
+      throws IOException {
+    return writeLine(stream, font, size, x, y, fit(font, size, maxWidth, text));
+  }
+
+  private static String fit(PDFont font, float size, float maxWidth, String text)
+      throws IOException {
+    String value = text == null ? "" : text;
+    while (value.length() > 1 && stringWidth(font, size, value) > maxWidth) {
+      value = value.substring(0, value.length() - 2) + "…";
+    }
+    return value;
+  }
+
+  private static float stringWidth(PDFont font, float size, String text) throws IOException {
+    return font.getStringWidth(text) / 1000f * size;
+  }
+
   private static float writeLine(
       PDPageContentStream stream, PDFont font, float size, float x, float y, String text)
       throws IOException {
@@ -118,16 +148,6 @@ public class PickListPdfRenderer {
     stream.newLineAtOffset(x, y);
     stream.showText(text == null ? "" : text);
     stream.endText();
-    return y - size * 1.4f;
-  }
-
-  private static String truncate(String value, int max) {
-    if (value == null) {
-      return "";
-    }
-    if (value.length() <= max) {
-      return value;
-    }
-    return value.substring(0, max - 1) + "…";
+    return y - size * 1.35f;
   }
 }

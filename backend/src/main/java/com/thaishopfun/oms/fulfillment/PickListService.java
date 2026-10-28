@@ -70,6 +70,7 @@ public class PickListService {
                       AND NOT EXISTS (
                         SELECT 1 FROM pick_list_order plo
                         WHERE plo.tenant_id = o.tenant_id AND plo.order_id = o.id
+                          AND plo.released_at IS NULL
                       )
                     ORDER BY o.ship_by NULLS LAST, o.ordered_at, o.id
                     LIMIT 500

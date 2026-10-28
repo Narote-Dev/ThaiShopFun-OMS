@@ -75,6 +75,7 @@ const LABELS: Record<string, string> = {
   PACK_SCAN_COMPLETE: 'ครบทุกชิ้นแล้ว กดยืนยันแพ็กได้',
   PACK_COMPLETE_ERROR: 'ยืนยันแพ็กไม่สำเร็จ',
   PACK_DONE: 'แพ็กเสร็จแล้ว',
+  FULFILLMENT_UNEXPECTED_ERROR: 'เกิดข้อผิดพลาดไม่คาดคิด',
   SKU_CODE: 'รหัสสินค้า',
   PRODUCT_NAME: 'ชื่อสินค้า',
   PACK_SCAN_OVERFLOW: 'สแกนเกินจำนวนที่ต้องแพ็ก',
@@ -245,4 +246,12 @@ export function importErrorTh(value: string): string {
 export function holdDetailTh(value: string | null | undefined): string {
   if (!value) return '—'
   return LABELS[value] ?? value
+}
+
+export function pickCreatedToast(orderCount: number): string {
+  return `สร้างใบหยิบ ${orderCount} ออเดอร์แล้ว`
+}
+
+export function packScanProgressToast(skuCode: string, packed: number, required: number): string {
+  return `${skuCode}: ${packed}/${required}`
 }

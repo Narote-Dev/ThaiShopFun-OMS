@@ -1,4 +1,4 @@
-import { ClipboardList, Printer } from 'lucide-react'
+import { Printer } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Button } from '../ui/Button'
 import { Card } from '../ui/Card'
@@ -7,7 +7,7 @@ import { DataTable, DataTableCell, DataTableHead, DataTableRow, DataTableTh } fr
 import { AlertBanner } from '../ui/Alert'
 import { PageContent } from '../ui/PageContent'
 import { PageHeader } from '../ui/PageHeader'
-import { labelTh } from '../ui/labels'
+import { labelTh, pickCreatedToast } from '../ui/labels'
 import { formatBangkokDateTime } from '../ui/format'
 import { useToast } from '../ui/useToast'
 import { fulfillmentMessage, pickListsApi, type PickCandidate } from './api'
@@ -44,7 +44,7 @@ export default function PickListsPage() {
     setError('')
     try {
       const response = await pickListsApi.create([...selected])
-      toast.show(`สร้างใบหยิบ ${response.order_count} ออเดอร์แล้ว`)
+      toast.push(pickCreatedToast(response.order_count), 'success')
       await pickListsApi.openPdf(response.id)
       setSelected(new Set())
       const page = await pickListsApi.candidates()

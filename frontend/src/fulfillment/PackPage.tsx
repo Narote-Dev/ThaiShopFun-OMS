@@ -8,7 +8,7 @@ import { Label } from '../ui/Label'
 import { PageContent } from '../ui/PageContent'
 import { PageHeader } from '../ui/PageHeader'
 import { StatusBadge } from '../ui/StatusBadge'
-import { labelTh } from '../ui/labels'
+import { labelTh, packScanProgressToast } from '../ui/labels'
 import { useToast } from '../ui/useToast'
 import { fulfillmentMessage, packApi, type PackSession } from './api'
 
@@ -49,9 +49,9 @@ export default function PackPage({ orderId }: Props) {
       setScan('')
       const refreshed = await packApi.session(orderId)
       setSession(refreshed)
-      toast.show(`${result.sku_code}: ${result.packed_qty}/${result.required_qty}`)
+      toast.push(packScanProgressToast(result.sku_code, result.packed_qty, result.required_qty))
       if (result.complete) {
-        toast.show(labelTh('PACK_SCAN_COMPLETE'))
+        toast.push(labelTh('PACK_SCAN_COMPLETE'), 'success')
       }
       inputRef.current?.focus()
     } catch (err: unknown) {
@@ -66,7 +66,7 @@ export default function PackPage({ orderId }: Props) {
     setError('')
     try {
       const result = await packApi.complete(orderId)
-      toast.show(labelTh('PACK_DONE'))
+      toast.push(labelTh('PACK_DONE'), 'success')
       const refreshed = await packApi.session(orderId)
       setSession({ ...refreshed, fulfillment_status: result.fulfillment_status })
     } catch (err: unknown) {

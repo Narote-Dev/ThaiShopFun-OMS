@@ -16,7 +16,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.PlatformTransactionManager;
-import tools.jackson.databind.JsonNode;
 
 class PickListPackApiTest extends OrderIntegrationTest {
 
@@ -37,7 +36,7 @@ class PickListPackApiTest extends OrderIntegrationTest {
     CatalogHttp.Shop httpShop = http.catalog().shop();
     OrderFixture.Shop shop = OrderFixture.shopFor(httpShop);
     SalesOrder ready = fixture.insert(shop, "ORD-PICK-1", "READY_TO_PICK", "NONE");
-    fixture.insert(shop, "ORD-HOLD", "READY_TO_PICK", "OUT_OF_STOCK");
+    fixture.insert(shop, "ORD-HOLD", "UNFULFILLED", "OUT_OF_STOCK");
     FulfillmentTestSupport.SkuSeed sku =
         FulfillmentTestSupport.seedSku(shop.tenantId(), "TEE-BLK-M", "8850000000010");
     FulfillmentTestSupport.addLine(ready, sku.skuId(), 2);
@@ -112,6 +111,29 @@ class PickListPackApiTest extends OrderIntegrationTest {
         http.post("/api/v1/pack/orders/" + order.id() + "/complete", httpShop.owner(), Map.of());
     assertThat(complete.status()).isEqualTo(200);
     assertThat(complete.body().path("fulfillment_status").asString()).isEqualTo("PACKED");
+  }
+
+  @Test
+  void packScanFillsNextLineWhenSameSkuOnMultipleLines() throws Exception {
+    CatalogHttp.Shop httpShop = http.catalog().shop();
+    OrderFixture.Shop shop = OrderFixture.shopFor(httpShop);
+    SalesOrder order = fixture.insert(shop, "ORD-DUP-SKU", "READY_TO_PICK", "NONE");
+    FulfillmentTestSupport.SkuSeed sku =
+        FulfillmentTestSupport.seedSku(shop.tenantId(), "DUP-SKU", "8850000000099");
+    FulfillmentTestSupport.addLine(order, sku.skuId(), 1, "L1");
+    FulfillmentTestSupport.addLine(order, sku.skuId(), 1, "L2");
+    http.post("/api/v1/pick-lists", httpShop.owner(), Map.of("order_ids", List.of(order.id())));
+
+    assertScan(httpShop.owner(), order.id(), sku.skuCode(), 1, 1, false);
+    CatalogHttp.Result second =
+        http.post(
+            "/api/v1/pack/orders/" + order.id() + "/scans",
+            httpShop.owner(),
+            Map.of("scan", sku.skuCode()));
+    assertThat(second.status()).isEqualTo(200);
+    assertThat(second.body().path("packed_qty").asInt()).isEqualTo(1);
+    assertThat(second.body().path("required_qty").asInt()).isEqualTo(1);
+    assertThat(second.body().path("complete").asBoolean()).isTrue();
   }
 
   @Test
