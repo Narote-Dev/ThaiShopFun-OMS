@@ -166,17 +166,22 @@ public class ShipService {
           UUID warehouseId = resolveWarehouseId(orderId);
           UUID shipmentId = ensureShipmentRow(order, warehouseId);
           // Step 2: Persist manual carrier + tracking (no TSF label).
-          jdbc.update(
-              """
-              UPDATE shipment
-              SET carrier = ?, tracking_no = ?, external_shipment_id = NULL,
-                  status = 'LABEL_READY', updated_at = now()
-              WHERE tenant_id = ? AND id = ?
-              """,
-              carrier,
-              tracking,
-              order.tenantId(),
-              shipmentId);
+          int updated =
+              jdbc.update(
+                  """
+                  UPDATE shipment
+                  SET carrier = ?, tracking_no = ?, external_shipment_id = NULL,
+                      status = 'LABEL_READY', updated_at = now()
+                  WHERE tenant_id = ? AND id = ?
+                  """,
+                  carrier,
+                  tracking,
+                  order.tenantId(),
+                  shipmentId);
+          if (updated != 1) {
+            throw OrderApiException.conflict(
+                "SHIPMENT_UPDATE_FAILED", "Could not persist manual tracking on shipment");
+          }
           // Step 3: Render packing slip into label cache for batch print.
           byte[] slip = packingSlipPdf.renderA6(buildPackingSlip(order, carrier, tracking));
           labelCache.upsert(shipmentId, "PACKING_SLIP", slip);
@@ -364,7 +369,7 @@ public class ShipService {
   }
 
   private UUID ensureShipmentRow(SalesOrder order, UUID warehouseId) {
-    Optional<ShipmentRow> existing = loadShipment(order.id());
+    Optional<ShipmentRow> existing = loadShipment(order.id(), order.tenantId());
     if (existing.isPresent()) {
       return existing.get().id();
     }

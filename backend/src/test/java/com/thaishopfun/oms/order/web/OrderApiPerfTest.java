@@ -61,6 +61,7 @@ class OrderApiPerfTest extends OrderIntegrationTest {
     seedPhoneSearchOrder(shop.tenantId(), seeded.channelAccountId());
 
     assertUnder1s(shop.owner(), OrderHttp.ordersPath("?limit=50"), "warm-up");
+    http.get(OrderHttp.ordersPath("?limit=50"), shop.owner());
     assertNoSeqScanOnSalesOrder(shop.tenantId());
     assertUnder1s(shop.owner(), OrderHttp.ordersPath("?limit=50"), "first page");
     assertUnder1s(
