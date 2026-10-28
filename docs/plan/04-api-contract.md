@@ -214,6 +214,15 @@ Error format ทุก endpoint:
 ```
 Error codes ที่ใช้กับ entitlement และ membership: `ENTITLEMENT_INACTIVE`, `ENTITLEMENT_GRACE`, `ENTITLEMENT_STALE`, `MEMBERSHIP_REVOKED`. `401` จาก token ใช้ message เดียว (`Invalid or expired token`) ไม่ว่า claim ไหนพัง.
 
+### Stock drift (T23)
+
+- `GET /api/v1/stock-drift?status=OPEN|ACK|RESOLVED` — tenant-scoped aggregate issues; omit status for all (latest 100).
+- `POST /api/v1/stock-drift/runs` — OWNER/ADMIN; scan all connected TSF accounts and enqueue T15 repairs.
+- Each unresolved `STOCK_DRIFT` issue has `order_id = NULL` and `details.listings[]`, one entry per drifting listing. One issue per tenant preserves the existing V7 unique index without a migration.
+- Response schemas/examples: `contracts/{schemas,examples}/rest/stock-drift-{page,run}.json`.
+- Local mock control: `POST /control/listings/{listingSkuId}/quantity` with `{ "available": 3 }`; schemas/examples `listing-quantity-request` and `listing-quantity`.
+- Design, concurrency and demo controls: [Stock drift](../stock-drift.md).
+
 ## 4.9 Contract Governance
 - **in-repo `contracts/`** เป็น source of truth สำหรับตอนนี้ (อาจย้ายไป repo แยก **`tsf-oms-contracts`** ภายหลังแบบเดิม; ทั้ง 2 repo pin tag เดียวกันเมื่อแยกแล้ว)
   - `openapi/oms-internal.yaml` (reservation, events receiver), `openapi/tsf-internal.yaml` (4.7)

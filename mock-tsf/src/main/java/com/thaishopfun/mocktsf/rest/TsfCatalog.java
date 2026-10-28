@@ -290,15 +290,29 @@ public class TsfCatalog {
     orders.add(new Order("shop_active", orderId, updated, 1, detail, payment(orderId, "UNPAID")));
   }
 
-  public List<Map<String, Object>> listings() {
+  public synchronized List<Map<String, Object>> listings() {
     List<Map<String, Object>> visible = new ArrayList<>();
     for (Map<String, Object> row : listings) {
       String id = String.valueOf(row.get("listing_sku_id"));
       if (!hiddenListings.contains(id)) {
-        visible.add(row);
+        visible.add(Map.copyOf(row));
       }
     }
     return visible;
+  }
+
+  /** Harness mutation: simulate a TSF stock change without changing its accepted OMS version. */
+  public synchronized Map<String, Object> forceListingQuantity(String id, int available) {
+    if (available < 0)
+      throw new com.thaishopfun.mocktsf.ApiException(
+          422, "INVALID_QUANTITY", "available must be nonnegative");
+    for (Map<String, Object> row : listings) {
+      if (id.equals(row.get("listing_sku_id"))) {
+        row.put("available", available);
+        return Map.copyOf(row);
+      }
+    }
+    throw new com.thaishopfun.mocktsf.ApiException(404, "LISTING_NOT_FOUND", "Listing not found");
   }
 
   public void setListingHidden(String listingSkuId, boolean hidden) {

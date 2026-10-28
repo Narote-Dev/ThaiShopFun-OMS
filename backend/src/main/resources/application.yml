@@ -144,6 +144,9 @@ oms:
       bulkhead-max-concurrent: 8
       bulkhead-max-wait: 10s
   stock:
+    drift:
+      enabled: ${OMS_STOCK_DRIFT_ENABLED:true}
+      interval-ms: ${OMS_STOCK_DRIFT_INTERVAL_MS:300000}
     checkout-ttl: 15m
     lock-timeout: 2s
     retry:

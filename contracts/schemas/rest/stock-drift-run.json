@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "run_id",
+    "drifting",
+    "repush_events",
+    "superseded"
+  ],
+  "properties": {
+    "run_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "drifting": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "repush_events": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "superseded": {
+      "type": "boolean"
+    }
+  }
+}
