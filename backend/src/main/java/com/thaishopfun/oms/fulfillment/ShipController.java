@@ -26,17 +26,10 @@ class ShipController {
     return ship.candidates();
   }
 
-  @PostMapping(
-      value = "/labels",
-      consumes = MediaType.APPLICATION_JSON_VALUE,
-      produces = {MediaType.APPLICATION_PDF_VALUE, MediaType.APPLICATION_JSON_VALUE})
-  ResponseEntity<byte[]> labelBatch(@RequestBody FulfillmentViews.LabelBatchBody body) {
-    byte[] pdf = ship.labelBatchPdf(body);
-    return ResponseEntity.ok()
-        .cacheControl(CacheControl.noStore())
-        .contentType(MediaType.APPLICATION_PDF)
-        .header("Content-Disposition", "inline; filename=\"labels-batch.pdf\"")
-        .body(pdf);
+  @PostMapping(value = "/labels", consumes = MediaType.APPLICATION_JSON_VALUE)
+  ResponseEntity<FulfillmentViews.LabelBatchResponse> labelBatch(
+      @RequestBody FulfillmentViews.LabelBatchBody body) {
+    return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(ship.labelBatch(body));
   }
 
   @PostMapping("/orders/{orderId}/manual-tracking")

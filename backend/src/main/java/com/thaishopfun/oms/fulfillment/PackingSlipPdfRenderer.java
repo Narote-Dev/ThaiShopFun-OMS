@@ -47,6 +47,10 @@ public class PackingSlipPdfRenderer {
                 maxWidth,
                 "ขนส่ง " + data.carrier() + " · " + data.trackingNo());
         y -= 2 * MM;
+        y = writeFitted(stream, font, 9, margin, y, maxWidth, "ถึง " + data.recipientName());
+        y -= 2 * MM;
+        y = writeFitted(stream, font, 8, margin, y, maxWidth, data.recipientAddress());
+        y -= 2 * MM;
         y =
             writeFitted(
                 stream,

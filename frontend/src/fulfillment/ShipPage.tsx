@@ -11,6 +11,7 @@ import { PageContent } from '../ui/PageContent'
 import { PageHeader } from '../ui/PageHeader'
 import { labelTh, shipManualSavedToast } from '../ui/labels'
 import { formatBangkokDateTime } from '../ui/format'
+import { StatusBadge } from '../ui/StatusBadge'
 import { useToast } from '../ui/useToast'
 import { fulfillmentMessage, shipApi, type ShipCandidate } from './api'
 
@@ -73,8 +74,22 @@ export default function ShipPage() {
     setBusy(true)
     setError('')
     try {
-      await shipApi.openLabelBatch([...selected])
-      toast.push(labelTh('SHIP_LABELS_OPENED'), 'success')
+      const batch = await shipApi.openLabelBatch([...selected])
+      await refreshCandidates()
+      const labelUnavailable = batch.results.find((r) => !r.ok && r.error === 'LABEL_NOT_AVAILABLE')
+      if (labelUnavailable) {
+        setManualOrderId(labelUnavailable.order_id)
+        setError(labelTh('LABEL_NOT_AVAILABLE'))
+      }
+      const otherFailures = batch.results.filter(
+        (r) => !r.ok && r.error !== 'LABEL_NOT_AVAILABLE',
+      )
+      if (otherFailures.length > 0 && !labelUnavailable) {
+        setError(fulfillmentMessage(otherFailures[0].message, labelTh('SHIP_LABELS_ERROR')))
+      }
+      if (batch.pdf_base64) {
+        toast.push(labelTh('SHIP_LABELS_OPENED'), 'success')
+      }
     } catch (err: unknown) {
       setError(fulfillmentMessage(err, labelTh('SHIP_LABELS_ERROR')))
     } finally {
@@ -170,6 +185,7 @@ export default function ShipPage() {
               <DataTableTh>{labelTh('SHIP_BY')}</DataTableTh>
               <DataTableTh>{labelTh('SHIP_TRACKING')}</DataTableTh>
               <DataTableTh>{labelTh('SHIP_CARRIER')}</DataTableTh>
+              <DataTableTh>{labelTh('SHIP_STATUS')}</DataTableTh>
               <DataTableTh>{labelTh('SHIP_ACTIONS')}</DataTableTh>
             </DataTableRow>
           </DataTableHead>
@@ -186,7 +202,16 @@ export default function ShipPage() {
                 <DataTableCell className="font-medium">{row.external_order_id}</DataTableCell>
                 <DataTableCell>{row.ship_by ? formatBangkokDateTime(row.ship_by) : '—'}</DataTableCell>
                 <DataTableCell>{row.tracking_no ?? '—'}</DataTableCell>
-                <DataTableCell>{row.carrier ?? '—'}</DataTableCell>
+                <DataTableCell>
+                  {row.carrier ? <StatusBadge value={row.carrier} kind="carrier" /> : '—'}
+                </DataTableCell>
+                <DataTableCell>
+                  {row.shipment_status ? (
+                    <StatusBadge value={row.shipment_status} kind="shipment" />
+                  ) : (
+                    '—'
+                  )}
+                </DataTableCell>
                 <DataTableCell>
                   <div className="flex flex-wrap gap-2">
                     <Button type="button" size="sm" disabled={busy} onClick={() => setConfirmOrderId(row.id)}>

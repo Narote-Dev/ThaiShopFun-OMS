@@ -90,11 +90,24 @@ public final class FulfillmentViews {
       @JsonProperty("ship_by") Instant shipBy,
       @JsonProperty("has_shipment") boolean hasShipment,
       @JsonProperty("tracking_no") String trackingNo,
-      String carrier) {}
+      String carrier,
+      @JsonProperty("shipment_status") String shipmentStatus) {}
 
   public record ShipCandidatesView(List<ShipCandidateItem> items) {}
 
   public record LabelBatchBody(@JsonProperty("order_ids") List<String> orderIds) {}
+
+  public record LabelBatchOrderResult(
+      @JsonProperty("order_id") UUID orderId,
+      @JsonProperty("external_order_id") String externalOrderId,
+      boolean ok,
+      String error,
+      String message) {}
+
+  public record LabelBatchResponse(
+      @JsonProperty("pdf_base64") String pdfBase64,
+      @JsonProperty("content_type") String contentType,
+      List<LabelBatchOrderResult> results) {}
 
   public record ManualTrackingBody(
       String carrier, @JsonProperty("tracking_no") String trackingNo) {}
@@ -121,6 +134,8 @@ public final class FulfillmentViews {
       String externalOrderId,
       String carrier,
       String trackingNo,
+      @JsonProperty("recipient_name") String recipientName,
+      @JsonProperty("recipient_address") String recipientAddress,
       String province,
       String postcode,
       Instant generatedAt,

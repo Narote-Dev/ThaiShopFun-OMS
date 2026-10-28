@@ -32,14 +32,6 @@ import tools.jackson.databind.json.JsonMapper;
 @RequestMapping("/internal/v1")
 public class TsfApiController {
 
-  private static final byte[] LABEL_PDF =
-      ("%PDF-1.1\n"
-              + "1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n"
-              + "2 0 obj<</Type/Pages/Count 0>>endobj\n"
-              + "trailer<</Root 1 0 R>>\n"
-              + "%%EOF\n")
-          .getBytes(StandardCharsets.US_ASCII);
-
   private final TsfCatalog catalog;
   private final ContractResponses responses;
   private final JsonMapper json;
@@ -151,7 +143,10 @@ public class TsfApiController {
       throw new ApiException(
           404, "LABEL_NOT_AVAILABLE", "TSF did not issue a label for this shipment");
     }
-    return ResponseEntity.ok().contentType(MediaType.APPLICATION_PDF).body(LABEL_PDF);
+    String id = String.valueOf(shipment.get("shipment_id"));
+    return ResponseEntity.ok()
+        .contentType(MediaType.APPLICATION_PDF)
+        .body(MockLabelPdf.a6Label(id));
   }
 
   @PostMapping("/orders/{orderId}/cancel-requests")

@@ -7,7 +7,7 @@ User JWT under `/api/v1/ship`. Labels come from mock TSF (`ChannelAdapter` + `su
 | Method | Path | Purpose |
 |--------|------|---------|
 | GET | `/api/v1/ship/candidates` | `PACKED` orders ready to print label / confirm ship |
-| POST | `/api/v1/ship/labels` | Body `{ "order_ids": [uuid…] }` → merged A6 PDF (max 100). Idempotent per order: repeats TSF `createShipment` with the same idempotency key and reuses cached PDF when present. |
+| POST | `/api/v1/ship/labels` | Body `{ "order_ids": [uuid…] }` → JSON `{ "pdf_base64", "content_type", "results": [{ "order_id", "external_order_id", "ok", "error", "message" }] }`. Merges successful A6 PDFs (max 100). Per-order errors do not fail the whole batch. |
 | POST | `/api/v1/ship/orders/{orderId}/manual-tracking` | Body `{ "carrier", "tracking_no" }` when TSF returns `LABEL_NOT_AVAILABLE` (422). Stores shipment + packing-slip PDF in cache. |
 | POST | `/api/v1/ship/orders/{orderId}/confirm` | `PACKED` → `SHIPPED`, `ReservationEngine.consume`, `shipment.updated` outbox, `label_cached_until = shipped_at + 7 days`. Idempotent if already shipped. |
 

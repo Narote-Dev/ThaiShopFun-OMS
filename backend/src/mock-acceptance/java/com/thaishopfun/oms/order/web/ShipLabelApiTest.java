@@ -22,9 +22,11 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import org.apache.pdfbox.Loader;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -94,18 +96,10 @@ class ShipLabelApiTest extends OrderIntegrationTest {
     packToComplete(httpShop, order.id(), sku.skuCode(), 2);
     assertPacked(httpShop, order.id());
 
-    byte[] firstPdf =
-        http.postPdf(
-            "/api/v1/ship/labels",
-            httpShop.owner(),
-            Map.of("order_ids", List.of(order.id().toString())));
-    assertThat(new String(firstPdf, 0, 4, StandardCharsets.US_ASCII)).isEqualTo("%PDF");
+    byte[] firstPdf = labelBatchPdf(httpShop, order.id());
+    assertThat(Loader.loadPDF(firstPdf).getNumberOfPages()).isEqualTo(1);
 
-    byte[] replay =
-        http.postPdf(
-            "/api/v1/ship/labels",
-            httpShop.owner(),
-            Map.of("order_ids", List.of(order.id().toString())));
+    byte[] replay = labelBatchPdf(httpShop, order.id());
     assertThat(replay).isEqualTo(firstPdf);
 
     ensureOrderHold(shop.tenantId(), order.id(), sku.skuId(), 2);
@@ -145,8 +139,16 @@ class ShipLabelApiTest extends OrderIntegrationTest {
             "/api/v1/ship/labels",
             httpShop.owner(),
             Map.of("order_ids", List.of(order.id().toString())));
-    assertThat(labels.status()).isEqualTo(422);
-    assertThat(labels.body().path("error").asString()).isEqualTo("LABEL_NOT_AVAILABLE");
+    assertThat(labels.status()).isEqualTo(200);
+    JsonNode result = labels.body().path("results").get(0);
+    assertThat(result.path("ok").asBoolean()).isFalse();
+    assertThat(result.path("error").asString()).isEqualTo("LABEL_NOT_AVAILABLE");
+    assertThat(labels.body().path("pdf_base64").isNull()).isTrue();
+
+    CatalogHttp.Result confirmBeforeManual =
+        http.post("/api/v1/ship/orders/" + order.id() + "/confirm", httpShop.owner(), Map.of());
+    assertThat(confirmBeforeManual.status()).isEqualTo(409);
+    assertThat(confirmBeforeManual.body().path("error").asString()).isEqualTo("SHIPMENT_STATE");
 
     CatalogHttp.Result manual =
         http.post(
@@ -161,12 +163,56 @@ class ShipLabelApiTest extends OrderIntegrationTest {
             : shipmentNode.path("tracking_no").asString("");
     assertThat(tracking).isEqualTo("K123456789TH");
 
-    byte[] slip =
-        http.postPdf(
+    byte[] slip = labelBatchPdf(httpShop, order.id());
+    assertThat(Loader.loadPDF(slip).getNumberOfPages()).isEqualTo(1);
+  }
+
+  @Test
+  void labelBatchPartialSuccess() throws Exception {
+    CatalogHttp.Shop httpShop = http.catalog().shop();
+    OrderFixture.Shop shop = OrderFixture.shopFor(httpShop);
+    String goodExternal = "LBL-MIX-" + UUID.randomUUID().toString().substring(0, 6);
+    String badExternal = "NO-LBL-MIX-" + UUID.randomUUID().toString().substring(0, 6);
+    registerMockOrder(goodExternal);
+    registerMockOrder(badExternal);
+    SalesOrder good = fixture.insert(shop, goodExternal, "READY_TO_PICK", "NONE");
+    SalesOrder bad = fixture.insert(shop, badExternal, "READY_TO_PICK", "NONE");
+    FulfillmentTestSupport.SkuSeed sku =
+        FulfillmentTestSupport.seedSku(shop.tenantId(), "MIX-TEE", "8850000000102");
+    FulfillmentTestSupport.addLine(good, sku.skuId(), 1);
+    FulfillmentTestSupport.addLine(bad, sku.skuId(), 1);
+    FulfillmentTestSupport.seedInventory(shop.tenantId(), sku.skuId(), sku.warehouseId(), 10);
+    packToComplete(httpShop, good.id(), sku.skuCode(), 1);
+    packToComplete(httpShop, bad.id(), sku.skuCode(), 1);
+
+    CatalogHttp.Result batch =
+        http.post(
             "/api/v1/ship/labels",
             httpShop.owner(),
-            Map.of("order_ids", List.of(order.id().toString())));
-    assertThat(new String(slip, 0, 4, StandardCharsets.US_ASCII)).isEqualTo("%PDF");
+            Map.of("order_ids", List.of(good.id().toString(), bad.id().toString())));
+    assertThat(batch.status()).isEqualTo(200);
+    assertThat(batch.body().path("pdf_base64").asString()).isNotBlank();
+    assertThat(batch.body().path("results")).hasSize(2);
+    assertThat(batch.body().path("results").get(0).path("ok").asBoolean()).isTrue();
+    assertThat(batch.body().path("results").get(1).path("ok").asBoolean()).isFalse();
+    assertThat(batch.body().path("results").get(1).path("error").asString())
+        .isEqualTo("LABEL_NOT_AVAILABLE");
+  }
+
+  private byte[] labelBatchPdf(CatalogHttp.Shop httpShop, UUID orderId) throws Exception {
+    CatalogHttp.Result labels =
+        http.post(
+            "/api/v1/ship/labels",
+            httpShop.owner(),
+            Map.of("order_ids", List.of(orderId.toString())));
+    assertThat(labels.status()).isEqualTo(200);
+    JsonNode result = labels.body().path("results").get(0);
+    assertThat(result.path("ok").asBoolean()).isTrue();
+    String encoded = labels.body().path("pdf_base64").asString();
+    assertThat(encoded).isNotBlank();
+    byte[] pdf = Base64.getDecoder().decode(encoded);
+    assertThat(new String(pdf, 0, 4, StandardCharsets.US_ASCII)).isEqualTo("%PDF");
+    return pdf;
   }
 
   private void packToComplete(CatalogHttp.Shop httpShop, UUID orderId, String skuCode, int qty)

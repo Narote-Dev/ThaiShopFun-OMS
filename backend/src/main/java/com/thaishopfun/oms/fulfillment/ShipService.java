@@ -11,10 +11,12 @@ import com.thaishopfun.oms.channel.api.ShipmentRequest;
 import com.thaishopfun.oms.channel.exception.ChannelClientException;
 import com.thaishopfun.oms.channel.exception.UnsupportedCapabilityException;
 import com.thaishopfun.oms.order.OrderOptimisticLockException;
+import com.thaishopfun.oms.order.OrderRecipientRepository;
 import com.thaishopfun.oms.order.OrderStateException;
 import com.thaishopfun.oms.order.OrderStateMachine;
 import com.thaishopfun.oms.order.SalesOrder;
 import com.thaishopfun.oms.order.SalesOrderRepository;
+import com.thaishopfun.oms.order.StoredRecipient;
 import com.thaishopfun.oms.order.web.OrderApiException;
 import com.thaishopfun.oms.order.web.OrderAudit;
 import com.thaishopfun.oms.order.web.OrderTransactions;
@@ -28,6 +30,7 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -40,6 +43,7 @@ import org.springframework.stereotype.Service;
 @Service
 public class ShipService {
 
+  private static final String PLACEHOLDER_TRACKING = "MANUAL-TBD";
   private static final Duration LABEL_RETENTION = Duration.ofDays(7);
   private static final int MAX_BATCH = LabelBatchPdfRenderer.MAX_LABELS;
   private static final int MAX_TRACKING_LENGTH = 64;
@@ -56,6 +60,8 @@ public class ShipService {
   private final FulfillmentAccess access;
   private final OrderAudit audit;
   private final ShipmentLabelCacheRepository labelCache;
+  private final OrderRecipientRepository recipients;
+  private final LabelPdfNormalizer labelPdfNormalizer;
   private final LabelBatchPdfRenderer labelBatchPdf;
   private final PackingSlipPdfRenderer packingSlipPdf;
   private final Clock clock;
@@ -70,7 +76,9 @@ public class ShipService {
       OutboxAppender outbox,
       FulfillmentAccess access,
       OrderAudit audit,
+      OrderRecipientRepository recipients,
       ShipmentLabelCacheRepository labelCache,
+      LabelPdfNormalizer labelPdfNormalizer,
       LabelBatchPdfRenderer labelBatchPdf,
       PackingSlipPdfRenderer packingSlipPdf,
       Clock clock) {
@@ -83,7 +91,9 @@ public class ShipService {
     this.outbox = outbox;
     this.access = access;
     this.audit = audit;
+    this.recipients = recipients;
     this.labelCache = labelCache;
+    this.labelPdfNormalizer = labelPdfNormalizer;
     this.labelBatchPdf = labelBatchPdf;
     this.packingSlipPdf = packingSlipPdf;
     this.clock = clock;
@@ -96,7 +106,7 @@ public class ShipService {
               jdbc.query(
                   """
                   SELECT o.id, o.external_order_id, o.ordered_at, o.ship_by,
-                    sh.tracking_no, sh.carrier,
+                    sh.tracking_no, sh.carrier, sh.status AS shipment_status,
                     (sh.id IS NOT NULL) AS has_shipment
                   FROM sales_order o
                   LEFT JOIN shipment sh ON sh.tenant_id = o.tenant_id AND sh.order_id = o.id
@@ -113,13 +123,14 @@ public class ShipService {
                           optionalInstant(rs.getTimestamp("ship_by")),
                           rs.getBoolean("has_shipment"),
                           rs.getString("tracking_no"),
-                          rs.getString("carrier")));
+                          rs.getString("carrier"),
+                          rs.getString("shipment_status")));
           return new FulfillmentViews.ShipCandidatesView(items);
         });
   }
 
-  public byte[] labelBatchPdf(FulfillmentViews.LabelBatchBody body) {
-    FulfillmentAccess.Actor actor = access.requireWriter();
+  public FulfillmentViews.LabelBatchResponse labelBatch(FulfillmentViews.LabelBatchBody body) {
+    access.requireWriter();
     if (body == null || body.orderIds() == null || body.orderIds().isEmpty()) {
       throw OrderApiException.fieldValidationFailed("order_ids", "order_ids is required");
     }
@@ -128,11 +139,36 @@ public class ShipService {
           "order_ids", "At most " + MAX_BATCH + " orders per batch");
     }
     Set<UUID> unique = parseOrderIds(body.orderIds());
+    List<FulfillmentViews.LabelBatchOrderResult> results = new ArrayList<>();
     List<byte[]> pages = new ArrayList<>();
     for (UUID orderId : unique) {
-      pages.add(issueLabelPdf(orderId));
+      try {
+        pages.add(issueLabelPdf(orderId));
+        SalesOrder order =
+            tx.read(() -> orders.findById(orderId).orElseThrow(OrderApiException::notFound));
+        results.add(
+            new FulfillmentViews.LabelBatchOrderResult(
+                orderId, order.externalOrderId(), true, null, null));
+      } catch (OrderApiException ex) {
+        String external =
+            tx.read(
+                () ->
+                    orders
+                        .findById(orderId)
+                        .map(SalesOrder::externalOrderId)
+                        .orElse(orderId.toString()));
+        results.add(
+            new FulfillmentViews.LabelBatchOrderResult(
+                orderId, external, false, ex.code(), ex.getMessage()));
+      }
     }
-    return labelBatchPdf.merge(pages);
+    String pdfBase64 = null;
+    String contentType = null;
+    if (!pages.isEmpty()) {
+      pdfBase64 = Base64.getEncoder().encodeToString(labelBatchPdf.merge(pages));
+      contentType = "application/pdf";
+    }
+    return new FulfillmentViews.LabelBatchResponse(pdfBase64, contentType, results);
   }
 
   private static Set<UUID> parseOrderIds(List<String> raw) {
@@ -184,7 +220,7 @@ public class ShipService {
           }
           // Step 3: Render packing slip into label cache for batch print.
           byte[] slip = packingSlipPdf.renderA6(buildPackingSlip(order, carrier, tracking));
-          labelCache.upsert(shipmentId, "PACKING_SLIP", slip);
+          storeLabelPdf(shipmentId, "PACKING_SLIP", slip);
           audit.writeEntity(
               actor.tenantId(),
               actor.userId(),
@@ -215,13 +251,7 @@ public class ShipService {
           }
           validatePacked(order);
           ShipmentRow shipment = loadShipment(orderId).orElseThrow(() -> missingShipment(orderId));
-          if (shipment.trackingNo() == null || shipment.trackingNo().isBlank()) {
-            throw OrderApiException.conflict("SHIPMENT_INCOMPLETE", "Tracking number is required");
-          }
-          if (!"LABEL_READY".equals(shipment.status()) && !"PENDING".equals(shipment.status())) {
-            throw OrderApiException.conflict(
-                "SHIPMENT_STATE", "Shipment is not ready to confirm: " + shipment.status());
-          }
+          validateShipmentReadyForConfirm(shipment);
           // Step 2: Consume stock once per order (idempotent key).
           stock.consume(StockOwner.order(orderId.toString()), "ship:" + orderId);
           // Step 3: Move fulfillment to SHIPPED.
@@ -319,6 +349,16 @@ public class ShipService {
         throw new OrderApiException(422, "CAPABILITY_UNSUPPORTED", ex.getMessage());
       }
       Shipment created = channelShipment;
+      String carrier = created.carrier();
+      String tracking = sanitizeTracking(created.trackingNo());
+      String status = created.status();
+      if ("PENDING".equals(status) || tracking == null) {
+        status = "PENDING";
+        tracking = null;
+      }
+      final String persistCarrier = carrier;
+      final String persistTracking = tracking;
+      final String persistStatus = status;
       tx.write(
           () ->
               jdbc.update(
@@ -329,12 +369,12 @@ public class ShipService {
                   WHERE tenant_id = ? AND id = ?
                   """,
                   created.shipmentId(),
-                  created.carrier(),
-                  created.trackingNo(),
-                  created.status(),
+                  persistCarrier,
+                  persistTracking,
+                  persistStatus,
                   order.tenantId(),
                   shipment.id()));
-      channelShipment = created;
+      channelShipment = new Shipment(created.shipmentId(), null, carrier, tracking, status);
     }
     LabelContent label;
     try {
@@ -348,13 +388,26 @@ public class ShipService {
       }
       throw ex;
     }
-    byte[] pdf = label.bytes();
+    byte[] pdf = labelPdfNormalizer.validateAndNormalizeA6(label.bytes());
+    storeLabelPdf(shipment.id(), "LABEL", pdf);
+    return pdf;
+  }
+
+  private void storeLabelPdf(UUID shipmentId, String kind, byte[] pdf) {
+    Instant cacheUntil = clock.instant().plus(LABEL_RETENTION);
     tx.write(
         () -> {
-          labelCache.upsert(shipment.id(), "LABEL", pdf);
+          labelCache.upsert(shipmentId, kind, pdf);
+          jdbc.update(
+              """
+              UPDATE shipment SET label_cached_until = ?, updated_at = now()
+              WHERE tenant_id = ? AND id = ?
+              """,
+              Timestamp.from(cacheUntil),
+              TenantContext.requireTenantId(),
+              shipmentId);
           return Boolean.TRUE;
         });
-    return pdf;
   }
 
   private ChannelPlan channelPlan(SalesOrder order) {
@@ -459,23 +512,26 @@ public class ShipService {
                     rs.getInt("qty")),
             TenantContext.requireTenantId(),
             order.id());
-    String province = "—";
-    String postcode = "—";
-    List<RecipientSlice> recipient =
-        jdbc.query(
-            """
-            SELECT province, postcode FROM order_recipient
-            WHERE tenant_id = ? AND order_id = ?
-            """,
-            (rs, rowNum) -> new RecipientSlice(rs.getString("province"), rs.getString("postcode")),
-            TenantContext.requireTenantId(),
-            order.id());
-    if (!recipient.isEmpty()) {
-      province = nullToDash(recipient.get(0).province());
-      postcode = nullToDash(recipient.get(0).postcode());
+    StoredRecipient stored = recipients.find(order.id()).orElseThrow(OrderApiException::notFound);
+    if (stored.redacted()) {
+      throw OrderApiException.conflict("PII_REDACTED", "Recipient PII is no longer available");
     }
+    String recipientName = nullToDash(stored.name());
+    String recipientAddress =
+        RecipientAddressFormat.formatSingleBlock(
+            stored.address(), stored.province(), stored.postcode());
+    String province = nullToDash(stored.province());
+    String postcode = nullToDash(stored.postcode());
     return new FulfillmentViews.PackingSlipData(
-        order.externalOrderId(), carrier, tracking, province, postcode, clock.instant(), lines);
+        order.externalOrderId(),
+        carrier,
+        tracking,
+        recipientName,
+        recipientAddress,
+        province,
+        postcode,
+        clock.instant(),
+        lines);
   }
 
   private static FulfillmentViews.ShipmentSummary toSummary(ShipmentRow row) {
@@ -486,6 +542,37 @@ public class ShipService {
         row.status(),
         row.externalShipmentId(),
         row.externalShipmentId() == null);
+  }
+
+  private static void validateShipmentReadyForConfirm(ShipmentRow shipment) {
+    if (!"LABEL_READY".equals(shipment.status())) {
+      throw OrderApiException.conflict(
+          "SHIPMENT_STATE",
+          "Shipment is not ready to confirm"
+              + (shipment.status() == null ? "" : ": " + shipment.status()));
+    }
+    if (isPlaceholderTracking(shipment.trackingNo())) {
+      throw OrderApiException.conflict(
+          "SHIPMENT_INCOMPLETE", "Enter carrier and tracking before confirming ship");
+    }
+  }
+
+  private static boolean isPlaceholderTracking(String tracking) {
+    if (tracking == null || tracking.isBlank()) {
+      return true;
+    }
+    String normalized = tracking.trim();
+    if (PLACEHOLDER_TRACKING.equalsIgnoreCase(normalized)) {
+      return true;
+    }
+    return "PENDING".equalsIgnoreCase(normalized);
+  }
+
+  private static String sanitizeTracking(String tracking) {
+    if (isPlaceholderTracking(tracking)) {
+      return null;
+    }
+    return tracking.trim();
   }
 
   private static void validatePacked(SalesOrder order) {
@@ -551,8 +638,6 @@ public class ShipService {
   private record AccountRow(UUID id, String channel, String externalShopId) {}
 
   private record ChannelPlan(ChannelAccountRef account, ChannelAdapter adapter) {}
-
-  private record RecipientSlice(String province, String postcode) {}
 
   private static String nullToDash(String value) {
     return value == null || value.isBlank() ? "—" : value;
