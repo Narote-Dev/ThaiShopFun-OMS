@@ -133,11 +133,7 @@ class CancelPackedUnpackAcceptanceTest extends OrderIntegrationTest {
   private String fulfillmentStatus(UUID tenantId, UUID orderId) {
     TenantContext.set(tenantId, null);
     try {
-      return jdbc.queryForObject(
-          "SELECT fulfillment_status FROM sales_order WHERE tenant_id = ? AND id = ?",
-          String.class,
-          tenantId,
-          orderId);
+      return orders.findById(orderId).orElseThrow().fulfillmentStatus();
     } finally {
       TenantContext.clear();
     }

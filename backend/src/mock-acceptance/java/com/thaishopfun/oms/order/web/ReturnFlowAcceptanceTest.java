@@ -8,6 +8,7 @@ import com.thaishopfun.mocktsf.contract.ContractValidator;
 import com.thaishopfun.oms.auth.AuthTestSupport;
 import com.thaishopfun.oms.fulfillment.FulfillmentTestSupport;
 import com.thaishopfun.oms.inbox.InboxWorker;
+import com.thaishopfun.oms.invariant.SkipInvariantCheck;
 import com.thaishopfun.oms.order.OrderIntakeScenarioSupport;
 import com.thaishopfun.oms.order.SalesOrder;
 import com.thaishopfun.oms.order.SalesOrderRepository;
@@ -44,6 +45,7 @@ import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
 
 @ActiveProfiles("test")
+@SkipInvariantCheck("Return acceptance seeds inventory without opening ledger rows")
 @SpringBootTest(
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
     properties = "oms.outbox.publisher-enabled=false")
@@ -129,7 +131,7 @@ class ReturnFlowAcceptanceTest extends OrderIntegrationTest {
         """
             .formatted(fixture.inTenant(tenantId, () -> returnLineId(returnId, "L1")));
     assertThat(postReceive(returnId, body).statusCode()).isEqualTo(200);
-    SalesOrder fresh = orders.findById(order.id()).orElseThrow();
+    SalesOrder fresh = fixture.inTenant(tenantId, () -> orders.findById(order.id()).orElseThrow());
     assertThat(fresh.orderStatus()).isEqualTo("ACTIVE");
     assertThat(fresh.fulfillmentStatus()).isEqualTo("DELIVERED");
     assertThat(fixture.inTenant(tenantId, () -> onHand(sku))).isEqualTo(before + 1);
