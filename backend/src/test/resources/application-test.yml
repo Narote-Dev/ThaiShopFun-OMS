@@ -34,6 +34,9 @@ oms:
       backoff-base: 0s
     backfill:
       enabled: false
+  fulfillment:
+    label-cache-purge:
+      enabled: false
   invariant:
     enabled: false
   inbox:

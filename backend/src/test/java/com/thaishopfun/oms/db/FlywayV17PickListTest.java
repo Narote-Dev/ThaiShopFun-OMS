@@ -32,7 +32,7 @@ class FlywayV17PickListTest {
           statement.executeQuery(
               "SELECT version FROM flyway_schema_history ORDER BY installed_rank DESC LIMIT 1")) {
         assertThat(rows.next()).isTrue();
-        assertThat(rows.getString(1)).isEqualTo("17");
+        assertThat(rows.getString(1)).isEqualTo("18");
       }
       for (String table : new String[] {"pick_list", "pick_list_order", "order_pack_progress"}) {
         try (var rows =

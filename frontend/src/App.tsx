@@ -27,6 +27,7 @@ import StockDriftPage from './stockdrift/StockDriftPage'
 import ListingsPage from './channel/listings/ListingsPage'
 import PickListsPage from './fulfillment/PickListsPage'
 import PackPage from './fulfillment/PackPage'
+import ShipPage from './fulfillment/ShipPage'
 import { Button } from './ui/Button'
 import { PageContent } from './ui/PageContent'
 import { PageHeader } from './ui/PageHeader'
@@ -46,6 +47,7 @@ function page(route: string, me: Me): ReactNode {
   const canWrite = canWriteCatalog(me)
   const readOnly = me.entitlement.status === 'GRACE'
   if (route === '#/fulfillment/pick-lists') return <PickListsPage />
+  if (route === '#/fulfillment/ship') return <ShipPage />
   const pack = PACK_ROUTE.exec(route.split('?')[0])
   if (pack) return <PackPage key={pack[1]} orderId={pack[1]} />
   if (route === '#/channel/stock-drift') return <StockDriftPage canRun={canWrite} />
