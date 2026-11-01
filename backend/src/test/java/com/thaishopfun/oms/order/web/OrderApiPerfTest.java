@@ -59,6 +59,7 @@ class OrderApiPerfTest extends OrderIntegrationTest {
     }
     seedOrders(noiseTenant, noiseChannel, 50, false);
     seedPhoneSearchOrder(shop.tenantId(), seeded.channelAccountId());
+    analyzeSalesOrderAfterBulkSeed();
 
     assertUnder1s(shop.owner(), OrderHttp.ordersPath("?limit=50"), "warm-up");
     assertNoSeqScanOnSalesOrder(shop.tenantId());
@@ -99,6 +100,15 @@ class OrderApiPerfTest extends OrderIntegrationTest {
     log.info("{} {} ms status={}", label, ms, result.status());
     assertThat(result.status()).isEqualTo(200);
     assertThat(ms).isLessThan(1000);
+  }
+
+  /** Bulk perf fixture skips ORM; analyze so list/count plans stay index-backed on CI. */
+  private static void analyzeSalesOrderAfterBulkSeed() throws Exception {
+    try (Connection admin = AuthTestSupport.admin();
+        var statement = admin.createStatement()) {
+      statement.execute("ANALYZE sales_order");
+      statement.execute("ANALYZE order_recipient");
+    }
   }
 
   private static void seedOrders(UUID tenantId, UUID channelAccountId, int count, boolean varied)
