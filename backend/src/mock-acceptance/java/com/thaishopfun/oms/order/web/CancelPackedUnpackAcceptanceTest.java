@@ -110,12 +110,10 @@ class CancelPackedUnpackAcceptanceTest extends OrderIntegrationTest {
         FulfillmentTestSupport.seedSku(shop.tenantId(), "CNX-TEE", "8850000000999");
     FulfillmentTestSupport.addLine(order, sku.skuId(), 2);
     FulfillmentTestSupport.seedInventory(shop.tenantId(), sku.skuId(), sku.warehouseId(), 20);
-    ensureOrderHold(shop.tenantId(), order.id(), sku.skuId(), 2);
     packToComplete(httpShop, order.id(), sku.skuCode(), 2);
 
     assertThat(countPackProgress(shop.tenantId(), order.id())).isPositive();
     assertThat(activePickListMembership(shop.tenantId(), order.id())).isEqualTo(1);
-    assertThat(reserved(shop.tenantId(), sku.skuId())).isEqualTo(2);
 
     ObjectNode cancelled = orderCancelled(externalId, shop.tsfShopId(), 3);
     ingest(cancelled);

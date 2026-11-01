@@ -95,6 +95,10 @@ class InboxHandlerIdempotencyTest {
               "seed-" + eventType);
         }
         if (eventType.startsWith("return.")) {
+          deliver(
+              registry.find("order.created"),
+              loadExample("order.created.json", tsfShopId),
+              "seed-order-for-return");
           jdbc.update(
               """
               UPDATE sales_order SET fulfillment_status = 'DELIVERED'

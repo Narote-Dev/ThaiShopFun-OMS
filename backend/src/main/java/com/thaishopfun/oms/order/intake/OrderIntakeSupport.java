@@ -357,7 +357,7 @@ public class OrderIntakeSupport {
     boolean packed =
         "PACKED".equals(order.fulfillmentStatus()) || "PICKING".equals(order.fulfillmentStatus());
     if (packed) {
-      fulfillmentCancel.clearPackingState(order.id());
+      fulfillmentCancel.clearPackingState(order.tenantId(), order.id());
     }
     try {
       if ("PACKED".equals(order.fulfillmentStatus())) {

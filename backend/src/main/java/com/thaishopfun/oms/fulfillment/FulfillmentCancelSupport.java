@@ -1,6 +1,5 @@
 package com.thaishopfun.oms.fulfillment;
 
-import com.thaishopfun.oms.tenant.TenantContext;
 import java.util.UUID;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
@@ -17,8 +16,7 @@ public class FulfillmentCancelSupport {
     this.jdbc = jdbc;
   }
 
-  public void clearPackingState(UUID orderId) {
-    UUID tenantId = TenantContext.requireTenantId();
+  public void clearPackingState(UUID tenantId, UUID orderId) {
     // Step 1: Drop per-line scan counts so a future order cannot inherit stale progress.
     jdbc.update(
         """

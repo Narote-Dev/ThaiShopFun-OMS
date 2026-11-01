@@ -63,6 +63,8 @@ class ReturnFlowAcceptanceTest extends OrderIntegrationTest {
 
   StockFixture fixture;
   String tsfShopId;
+  UUID tenantId;
+  UUID channelAccountId;
   UUID sku7781;
   UUID sku9001;
 
@@ -97,8 +99,10 @@ class ReturnFlowAcceptanceTest extends OrderIntegrationTest {
     mock.getBean(OmsEndpoint.class).setBaseUrl("http://127.0.0.1:" + port);
     fixture = new StockFixture(jdbc, transactions);
     StockFixture.Shop shop = fixture.shop("ACTIVE");
+    tenantId = shop.tenant();
     tsfShopId = fixture.tsfShopId(shop);
     UUID account = fixture.channelAccount(shop, tsfShopId, "ACTIVE", "CONNECTED");
+    channelAccountId = account;
     sku7781 = fixture.sku(shop, 30);
     sku9001 = fixture.sku(shop, 30);
     fixture.channelListing(shop, account, "tsf_sku_7781", sku7781, true);
@@ -108,44 +112,50 @@ class ReturnFlowAcceptanceTest extends OrderIntegrationTest {
   @Test
   void partialReturnKeepsOrderActiveDeliveredAndRestocksResellable() throws Exception {
     SalesOrder order = seedDeliveredTwoLineOrder();
-    UUID sku = lineSku(order.id(), "L1");
+    UUID sku = fixture.inTenant(tenantId, () -> lineSku(order.id(), "L1"));
     FulfillmentTestSupport.seedInventory(
         order.tenantId(), sku, FulfillmentTestSupport.ensureDefaultWarehouse(order.tenantId()), 10);
     ingest(returnRequested(order.externalOrderId(), "L1", 1));
     ingest(returnDecided(order.externalOrderId(), "APPROVED"));
-    UUID returnId = returns.findByExternalId(order.id(), "tsf_ret_partial").orElseThrow().id();
-    int before = onHand(order.tenantId(), sku);
+    UUID returnId =
+        fixture.inTenant(
+            tenantId,
+            () -> returns.findByExternalId(order.id(), "tsf_ret_partial").orElseThrow().id());
+    int before = fixture.inTenant(tenantId, () -> onHand(sku));
     String body =
         """
         {"lines":[{"return_line_id":"%s","condition":"RESELLABLE"}]}
         """
-            .formatted(returnLineId(returnId, "L1"));
+            .formatted(fixture.inTenant(tenantId, () -> returnLineId(returnId, "L1")));
     assertThat(postReceive(returnId, body).statusCode()).isEqualTo(200);
     SalesOrder fresh = orders.findById(order.id()).orElseThrow();
     assertThat(fresh.orderStatus()).isEqualTo("ACTIVE");
     assertThat(fresh.fulfillmentStatus()).isEqualTo("DELIVERED");
-    assertThat(onHand(order.tenantId(), sku)).isEqualTo(before + 1);
+    assertThat(fixture.inTenant(tenantId, () -> onHand(sku))).isEqualTo(before + 1);
     assertThat(postReceive(returnId, body).statusCode()).isEqualTo(200);
-    assertThat(onHand(order.tenantId(), sku)).isEqualTo(before + 1);
+    assertThat(fixture.inTenant(tenantId, () -> onHand(sku))).isEqualTo(before + 1);
   }
 
   @Test
   void damagedReturnWritesOffWithoutRestock() throws Exception {
     SalesOrder order = seedDeliveredTwoLineOrder();
-    UUID sku = lineSku(order.id(), "L1");
+    UUID sku = fixture.inTenant(tenantId, () -> lineSku(order.id(), "L1"));
     FulfillmentTestSupport.seedInventory(
         order.tenantId(), sku, FulfillmentTestSupport.ensureDefaultWarehouse(order.tenantId()), 10);
     ingest(returnRequested(order.externalOrderId(), "L1", 1));
     ingest(returnDecided(order.externalOrderId(), "APPROVED"));
-    UUID returnId = returns.findByExternalId(order.id(), "tsf_ret_partial").orElseThrow().id();
-    int before = onHand(order.tenantId(), sku);
+    UUID returnId =
+        fixture.inTenant(
+            tenantId,
+            () -> returns.findByExternalId(order.id(), "tsf_ret_partial").orElseThrow().id());
+    int before = fixture.inTenant(tenantId, () -> onHand(sku));
     String body =
         """
         {"lines":[{"return_line_id":"%s","condition":"DAMAGED"}]}
         """
-            .formatted(returnLineId(returnId, "L1"));
+            .formatted(fixture.inTenant(tenantId, () -> returnLineId(returnId, "L1")));
     assertThat(postReceive(returnId, body).statusCode()).isEqualTo(200);
-    assertThat(onHand(order.tenantId(), sku)).isEqualTo(before - 1);
+    assertThat(fixture.inTenant(tenantId, () -> onHand(sku))).isEqualTo(before - 1);
   }
 
   @Test
@@ -167,32 +177,30 @@ class ReturnFlowAcceptanceTest extends OrderIntegrationTest {
     String external = "RET-ONE-" + UUID.randomUUID().toString().substring(0, 8);
     ingest(orderCreated(external, 1));
     ingest(orderPaid(external, 2));
-    return jdbc
-        .query(
-            "SELECT id FROM sales_order WHERE external_order_id = ?",
-            (rs, rowNum) -> rs.getObject("id", UUID.class),
-            external)
-        .stream()
-        .findFirst()
-        .flatMap(orders::findById)
-        .orElseThrow();
+    return fixture.inTenant(
+        tenantId, () -> orders.findByExternalId(channelAccountId, external).orElseThrow());
   }
 
   private SalesOrder seedDeliveredTwoLineOrder() throws Exception {
     String external = "RET-TWO-" + UUID.randomUUID().toString().substring(0, 8);
     ingest(orderCreatedTwoLines(external, 1));
     ingest(orderPaid(external, 2));
-    UUID orderId =
-        jdbc.queryForObject(
-            "SELECT id FROM sales_order WHERE external_order_id = ?", UUID.class, external);
-    jdbc.update(
-        """
-        UPDATE sales_order
-        SET fulfillment_status = 'DELIVERED', payment_status = 'PAID', order_status = 'ACTIVE'
-        WHERE id = ?
-        """,
-        orderId);
-    return orders.findById(orderId).orElseThrow();
+    SalesOrder order =
+        fixture.inTenant(
+            tenantId, () -> orders.findByExternalId(channelAccountId, external).orElseThrow());
+    fixture.inTenant(
+        tenantId,
+        () -> {
+          jdbc.update(
+              """
+              UPDATE sales_order
+              SET fulfillment_status = 'DELIVERED', payment_status = 'PAID', order_status = 'ACTIVE'
+              WHERE id = ?
+              """,
+              order.id());
+          return null;
+        });
+    return orders.findById(order.id()).orElseThrow();
   }
 
   private HttpResponse<String> postReceive(UUID returnId, String jsonBody) throws Exception {
@@ -338,7 +346,7 @@ class ReturnFlowAcceptanceTest extends OrderIntegrationTest {
         externalLineId);
   }
 
-  private int onHand(UUID tenantId, UUID skuId) {
+  private int onHand(UUID skuId) {
     Integer value =
         jdbc.queryForObject(
             """
