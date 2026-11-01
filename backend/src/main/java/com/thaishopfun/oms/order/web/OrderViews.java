@@ -109,7 +109,8 @@ public final class OrderViews {
       RecipientView recipient,
       List<TimelineEntry> timeline,
       @JsonProperty("payment_snapshot") PaymentSnapshotView paymentSnapshot,
-      List<RefundView> refunds) {}
+      List<RefundView> refunds,
+      List<ReturnSummaryView> returns) {}
 
   public record PaymentSnapshotView(
       String status,
@@ -125,6 +126,15 @@ public final class OrderViews {
       BigDecimal amount,
       String currency,
       @JsonProperty("observed_at") Instant observedAt) {}
+
+  public record ReturnSummaryView(
+      UUID id,
+      @JsonProperty("external_return_id") String externalReturnId,
+      String type,
+      String status,
+      @JsonProperty("requested_at") Instant requestedAt,
+      @JsonProperty("received_at") Instant receivedAt,
+      @JsonProperty("receive_url") String receiveUrl) {}
 
   public record ChannelAccountHoldCount(
       @JsonProperty("channel_account_id") UUID channelAccountId, long count) {}

@@ -1,6 +1,7 @@
 package com.thaishopfun.oms.order.intake;
 
 import com.thaishopfun.oms.auth.UuidV7;
+import com.thaishopfun.oms.fulfillment.FulfillmentCancelSupport;
 import com.thaishopfun.oms.inbox.InboxDeferException;
 import com.thaishopfun.oms.inbox.InboxMessage;
 import com.thaishopfun.oms.inbox.InboxProperties;
@@ -75,6 +76,7 @@ public class OrderIntakeSupport {
   private final JdbcTemplate jdbc;
   private final Clock clock;
   private final OrderPiiLifecycle piiLifecycle;
+  private final FulfillmentCancelSupport fulfillmentCancel;
 
   public OrderIntakeSupport(
       ChannelAccountLookup channels,
@@ -94,7 +96,8 @@ public class OrderIntakeSupport {
       InboxProperties inboxProperties,
       JdbcTemplate jdbc,
       Clock clock,
-      OrderPiiLifecycle piiLifecycle) {
+      OrderPiiLifecycle piiLifecycle,
+      FulfillmentCancelSupport fulfillmentCancel) {
     this.channels = channels;
     this.orders = orders;
     this.lines = lines;
@@ -113,6 +116,7 @@ public class OrderIntakeSupport {
     this.jdbc = jdbc;
     this.clock = clock;
     this.piiLifecycle = piiLifecycle;
+    this.fulfillmentCancel = fulfillmentCancel;
   }
 
   TsfAccount requireTsfAccount(InboxMessage message) {
@@ -348,7 +352,27 @@ public class OrderIntakeSupport {
       return;
     }
     hooks.beforeEngineWrite();
-    engine.release(StockOwner.order(order.id().toString()), "order.release:" + message.eventId());
+    String releaseKey = "order.release:" + message.eventId();
+    String unpackKey = "order.unpack:" + message.eventId();
+    boolean packed =
+        "PACKED".equals(order.fulfillmentStatus()) || "PICKING".equals(order.fulfillmentStatus());
+    if (packed) {
+      fulfillmentCancel.clearPackingState(order.id());
+    }
+    try {
+      if ("PACKED".equals(order.fulfillmentStatus())) {
+        engine.unpack(StockOwner.order(order.id().toString()), unpackKey);
+      } else {
+        engine.release(StockOwner.order(order.id().toString()), releaseKey);
+      }
+    } catch (StockOperationException ex) {
+      if (ex.error() != StockError.RESERVATION_NOT_ACTIVE) {
+        throw ex;
+      }
+    }
+    if (!"NONE".equals(order.holdReason())) {
+      stateMachine.applyHoldReason(order, "NONE", order.holdNote(), "order cancelled", "TSF");
+    }
     stateMachine.applyOrderStatus(
         order, "CANCELLED", "TSF cancel", "TSF", guard(account, order, List.of()));
     piiLifecycle.onOrderClosed(order.id(), clock.instant());

@@ -14,6 +14,8 @@ export type StatusKind =
   | 'shipment'
   | 'carrier'
   | 'generic'
+  | 'return'
+  | 'return_condition'
 
 export type StatusVariant =
   | 'success'
@@ -100,6 +102,19 @@ const SHIPMENT: Record<string, StatusStyle> = {
   SHIPPED: { variant: 'neutral', label: labelTh('SHIPPED_STATUS') },
 }
 
+const RETURN: Record<string, StatusStyle> = {
+  REQUESTED: { variant: 'warning', label: labelTh('REQUESTED', 'return_status') },
+  APPROVED: { variant: 'info', label: labelTh('APPROVED', 'return_status') },
+  REJECTED: { variant: 'muted', label: labelTh('REJECTED', 'return_status') },
+  RECEIVED: { variant: 'success', label: labelTh('RECEIVED', 'return_status') },
+  CLOSED: { variant: 'neutral', label: labelTh('CLOSED', 'return_status') },
+}
+
+const RETURN_CONDITION: Record<string, StatusStyle> = {
+  RESELLABLE: { variant: 'success', label: labelTh('RESELLABLE') },
+  DAMAGED: { variant: 'danger', label: labelTh('DAMAGED') },
+}
+
 const CARRIER: Record<string, StatusStyle> = {
   FLASH: { variant: 'info', label: labelTh('FLASH') },
   KERRY: { variant: 'info', label: labelTh('KERRY') },
@@ -122,6 +137,8 @@ export function resolveStatus(value: string, kind: StatusKind = 'generic'): Stat
     outbox: OUTBOX,
     shipment: SHIPMENT,
     carrier: CARRIER,
+    return: RETURN,
+    return_condition: RETURN_CONDITION,
     generic: undefined,
   }
   const map = maps[kind]
