@@ -118,7 +118,7 @@ class CancelPackedUnpackAcceptanceTest extends OrderIntegrationTest {
                 shop.tenantId(),
                 () -> orders.findById(order.id()).orElseThrow().fulfillmentStatus()))
         .isEqualTo("PACKED");
-    seedPackProgressRow(shop.tenantId(), order.id(), sku.skuId(), 2);
+    seedPackProgressRow(shop.tenantId(), order.id(), 2);
 
     assertThat(countPackProgress(shop.tenantId(), order.id())).isPositive();
     assertThat(activePickListMembership(shop.tenantId(), order.id())).isEqualTo(1);
@@ -137,20 +137,19 @@ class CancelPackedUnpackAcceptanceTest extends OrderIntegrationTest {
     assertThat(reserved(shop.tenantId(), sku.skuId())).isZero();
   }
 
-  private void seedPackProgressRow(UUID tenantId, UUID orderId, UUID skuId, int packedQty) {
+  private void seedPackProgressRow(UUID tenantId, UUID orderId, int packedQty) {
     TenantContext.set(tenantId, null);
     try {
       UUID lineId =
           jdbc.queryForObject(
               """
               SELECT id FROM order_line
-              WHERE tenant_id = ? AND order_id = ? AND sku_id = ?
+              WHERE tenant_id = ? AND order_id = ? AND external_line_id = 'L1'
               LIMIT 1
               """,
               UUID.class,
               tenantId,
-              orderId,
-              skuId);
+              orderId);
       jdbc.update(
           """
           INSERT INTO order_pack_progress (tenant_id, order_id, order_line_id, packed_qty)
