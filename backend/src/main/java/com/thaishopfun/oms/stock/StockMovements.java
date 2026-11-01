@@ -50,6 +50,7 @@ public class StockMovements {
   static final String SCOPE_VOID = "stock.document.void";
   static final String SCOPE_RESTOCK = "stock.return.restock";
   static final String SCOPE_RETURN_WRITE_OFF = "stock.return.writeoff";
+  static final String SCOPE_RETURN_RECEIVE = "stock.return.receive";
   static final String SCOPE_PREPARE = "stock.document.prepare";
 
   public static final int MAX_LINES = 500;
@@ -181,7 +182,62 @@ public class StockMovements {
         SCOPE_RESTOCK, () -> doRestock(returnLineId, skuId, warehouseId, qty, key, hash));
   }
 
-  // ---- post --------------------------------------------------------------------------------
+  /** Applies resellable restock and/or qty-neutral damaged ledger in one engine write (T20 receive). */
+  public ReturnReceiveMovement receiveReturnUnits(
+      UUID returnLineId,
+      UUID skuId,
+      UUID warehouseId,
+      int resellableQty,
+      int damagedQty,
+      String restockIdempotencyKey,
+      String writeOffIdempotencyKey) {
+    if (returnLineId == null || skuId == null) {
+      throw new IllegalArgumentException("returnLineId and skuId are required");
+    }
+    if (resellableQty < 0 || damagedQty < 0 || resellableQty + damagedQty < 1) {
+      throw new IllegalArgumentException("receive qty must be positive");
+    }
+    if (resellableQty > MAX_QTY || damagedQty > MAX_QTY) {
+      throw new IllegalArgumentException("qty must be at most " + MAX_QTY);
+    }
+    return transactions.write(
+        SCOPE_RETURN_RECEIVE,
+        () -> {
+          RestockResult restock = null;
+          if (resellableQty > 0) {
+            String key = StockIdempotency.requireKey(restockIdempotencyKey);
+            String hash =
+                StockIdempotency.sha256(
+                    "restock|"
+                        + returnLineId
+                        + "|"
+                        + skuId
+                        + "|"
+                        + (warehouseId == null ? "default" : warehouseId)
+                        + "|"
+                        + resellableQty);
+            restock = doRestock(returnLineId, skuId, warehouseId, resellableQty, key, hash);
+          }
+          WriteOffResult writeOff = null;
+          if (damagedQty > 0) {
+            String key = StockIdempotency.requireKey(writeOffIdempotencyKey);
+            String hash =
+                StockIdempotency.sha256(
+                    "writeoff|"
+                        + returnLineId
+                        + "|"
+                        + skuId
+                        + "|"
+                        + (warehouseId == null ? "default" : warehouseId)
+                        + "|"
+                        + damagedQty);
+            writeOff = doWriteOffReturn(returnLineId, skuId, warehouseId, damagedQty, key, hash);
+          }
+          return new ReturnReceiveMovement(restock, writeOff);
+        });
+  }
+
+  public record ReturnReceiveMovement(RestockResult restock, WriteOffResult writeOff) {}
 
   private DocumentMovement doPost(UUID documentId, Consumer<DocumentMovement> hook) {
     UUID tenantId = TenantContext.requireTenantId();

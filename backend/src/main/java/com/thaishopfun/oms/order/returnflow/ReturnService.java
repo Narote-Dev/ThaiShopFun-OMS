@@ -9,9 +9,7 @@ import com.thaishopfun.oms.order.web.OrderAudit;
 import com.thaishopfun.oms.order.web.OrderTransactions;
 import com.thaishopfun.oms.outbox.OutboxAppender;
 import com.thaishopfun.oms.outbox.OutboxDraft;
-import com.thaishopfun.oms.stock.RestockResult;
 import com.thaishopfun.oms.stock.StockMovements;
-import com.thaishopfun.oms.stock.WriteOffResult;
 import com.thaishopfun.oms.tenant.TenantContext;
 import java.time.Clock;
 import java.time.Instant;
@@ -138,30 +136,15 @@ public class ReturnService {
             if (line.skuId() == null) {
               throw OrderApiException.conflict("SKU_NOT_MAPPED", "Return line has no mapped SKU");
             }
-            if (resellable > 0) {
-              RestockResult restock =
-                  stock.restockReturn(
-                      line.id(),
-                      line.skuId(),
-                      null,
-                      resellable,
-                      idempotencyKey(returnId, line.id(), "RESELLABLE", resellable, line));
-              if (restock.qty() != resellable) {
-                throw new IllegalStateException("restock qty mismatch");
-              }
-            }
-            if (damaged > 0) {
-              WriteOffResult writeOff =
-                  stock.writeOffReturn(
-                      line.id(),
-                      line.skuId(),
-                      null,
-                      damaged,
-                      idempotencyKey(returnId, line.id(), "DAMAGED", damaged, line));
-              if (writeOff.qty() != damaged) {
-                throw new IllegalStateException("write-off qty mismatch");
-              }
-            }
+            String chunkKey = idempotencyKey(returnId, line.id(), resellable, damaged, line);
+            stock.receiveReturnUnits(
+                line.id(),
+                line.skuId(),
+                null,
+                resellable,
+                damaged,
+                chunkKey + ":restock",
+                chunkKey + ":writeoff");
             int nextRestocked = line.restockedQty() + resellable;
             int nextDamaged = line.damagedQty() + damaged;
             String lineCondition = null;
@@ -239,12 +222,23 @@ public class ReturnService {
   private static String idempotencyKey(
       UUID returnId,
       UUID returnLineId,
-      String condition,
-      int qty,
+      int resellableQty,
+      int damagedQty,
       ReturnRepository.ReturnLineRow before) {
-    int prior =
-        "RESELLABLE".equals(condition) ? before.restockedQty() : before.damagedQty();
-    return "return-receive:" + returnId + ":" + returnLineId + ":" + condition + ":" + prior + "+" + qty;
+    int priorRestocked = before.restockedQty();
+    int priorDamaged = before.damagedQty();
+    return "return-receive:"
+        + returnId
+        + ":"
+        + returnLineId
+        + ":"
+        + priorRestocked
+        + "+"
+        + resellableQty
+        + ":"
+        + priorDamaged
+        + "+"
+        + damagedQty;
   }
 
   private static String summarizeCondition(int restocked, int damaged) {
