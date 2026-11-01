@@ -126,7 +126,7 @@ class CancelPackedUnpackAcceptanceTest extends OrderIntegrationTest {
     ObjectNode cancelled = orderCancelled(externalId, shop.tsfShopId(), 3);
     ingest(cancelled);
     worker.processAvailable(1);
-    ingest(cancelled);
+    ingestDuplicate(cancelled);
     worker.processAvailable(1);
 
     SalesOrder fresh =
@@ -234,6 +234,14 @@ class CancelPackedUnpackAcceptanceTest extends OrderIntegrationTest {
   }
 
   private void ingest(ObjectNode event) throws Exception {
+    assertThat(postInbox(event)).isEqualTo(202);
+  }
+
+  private void ingestDuplicate(ObjectNode event) throws Exception {
+    assertThat(postInbox(event)).isEqualTo(200);
+  }
+
+  private int postInbox(ObjectNode event) throws Exception {
     byte[] body = JSON.writeValueAsBytes(event);
     String eventId = event.path("event_id").asString();
     HttpRequest request =
@@ -245,8 +253,7 @@ class CancelPackedUnpackAcceptanceTest extends OrderIntegrationTest {
             .header("Authorization", "Bearer " + tsfToken())
             .POST(HttpRequest.BodyPublishers.ofByteArray(body))
             .build();
-    assertThat(HTTP.send(request, HttpResponse.BodyHandlers.ofString()).statusCode())
-        .isEqualTo(202);
+    return HTTP.send(request, HttpResponse.BodyHandlers.ofString()).statusCode();
   }
 
   private static ObjectNode loadExample(String name) throws IOException {
