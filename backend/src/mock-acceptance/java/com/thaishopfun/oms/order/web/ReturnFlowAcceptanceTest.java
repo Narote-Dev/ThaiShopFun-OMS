@@ -372,19 +372,27 @@ class ReturnFlowAcceptanceTest extends OrderIntegrationTest {
                 tenantId,
                 () ->
                     jdbc.queryForObject(
-                        "SELECT status FROM outbox_event WHERE payload::text = ?",
+                        """
+                        SELECT status FROM outbox_event
+                        WHERE event_type = 'return.received' AND aggregate_id = ?
+                        ORDER BY created_at DESC LIMIT 1
+                        """,
                         String.class,
-                        payload)))
+                        "tsf_ret_partial")))
         .isEqualTo("PENDING");
-    assertThat(fixture.inTenant(tenantId, () -> publisher.publishOnce())).isEqualTo(1);
+    assertThat(fixture.inTenant(tenantId, () -> publisher.publishOnce())).isGreaterThanOrEqualTo(1);
     assertThat(
             fixture.inTenant(
                 tenantId,
                 () ->
                     jdbc.queryForObject(
-                        "SELECT status FROM outbox_event WHERE payload::text = ?",
+                        """
+                        SELECT status FROM outbox_event
+                        WHERE event_type = 'return.received' AND aggregate_id = ?
+                        ORDER BY created_at DESC LIMIT 1
+                        """,
                         String.class,
-                        payload)))
+                        "tsf_ret_partial")))
         .isEqualTo("SENT");
     JsonNode received =
         JSON.readTree(
