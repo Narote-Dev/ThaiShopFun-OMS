@@ -18,7 +18,6 @@ import com.thaishopfun.oms.order.SalesOrderRepository;
 import com.thaishopfun.oms.stock.ReservationEngine;
 import com.thaishopfun.oms.stock.ReserveItem;
 import com.thaishopfun.oms.stock.StockOwner;
-import com.thaishopfun.oms.tenant.TenantContext;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
@@ -41,7 +40,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.ConfigurableApplicationContext;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -66,7 +64,6 @@ class CancelPackedUnpackAcceptanceTest extends OrderIntegrationTest {
   @Autowired OrderStatusHistoryRepository history;
   @Autowired PlatformTransactionManager transactions;
   @Autowired InboxWorker worker;
-  @Autowired JdbcTemplate jdbc;
   @Autowired ReservationEngine stock;
 
   private OrderFixture fixture;
@@ -119,7 +116,7 @@ class CancelPackedUnpackAcceptanceTest extends OrderIntegrationTest {
                 shop.tenantId(),
                 () -> orders.findById(order.id()).orElseThrow().fulfillmentStatus()))
         .isEqualTo("PACKED");
-    ensureOrderHold(shop.tenantId(), order.id(), sku.skuId(), 2);
+    ensureOrderHold(fixture, shop.tenantId(), order.id(), sku.skuId(), 2);
     seedActivePickListMembership(shop.tenantId(), order.id(), sku.warehouseId());
 
     assertThat(countPackProgress(shop.tenantId(), order.id())).isPositive();
@@ -182,68 +179,46 @@ class CancelPackedUnpackAcceptanceTest extends OrderIntegrationTest {
     assertThat(done.body().path("fulfillment_status").asString()).isEqualTo("PACKED");
   }
 
-  private void ensureOrderHold(UUID tenantId, UUID orderId, UUID skuId, int qty) {
-    TenantContext.set(tenantId, null);
-    try {
-      stock.ensureOrderHold(
-          StockOwner.order(orderId.toString()),
-          List.of(ReserveItem.of(skuId, qty)),
-          "hold-" + orderId);
-    } finally {
-      TenantContext.clear();
-    }
+  private void ensureOrderHold(
+      OrderFixture fixture, UUID tenantId, UUID orderId, UUID skuId, int qty) {
+    fixture.inTenant(
+        tenantId,
+        () -> {
+          stock.ensureOrderHold(
+              StockOwner.order(orderId.toString()),
+              List.of(ReserveItem.of(skuId, qty)),
+              "hold-" + orderId);
+          return null;
+        });
   }
 
   private int reserved(UUID tenantId, UUID skuId) {
-    TenantContext.set(tenantId, null);
-    try {
-      Integer value =
-          jdbc.queryForObject(
-              """
-              SELECT reserved FROM inventory
-              WHERE tenant_id = ? AND sku_id = ?
-              LIMIT 1
-              """,
-              Integer.class,
-              tenantId,
-              skuId);
-      return value == null ? 0 : value;
-    } finally {
-      TenantContext.clear();
-    }
+    return (int)
+        CatalogHttp.textLong(
+            """
+            SELECT reserved FROM inventory
+            WHERE tenant_id = ? AND sku_id = ?
+            LIMIT 1
+            """,
+            tenantId,
+            skuId);
   }
 
   private long countPackProgress(UUID tenantId, UUID orderId) {
-    TenantContext.set(tenantId, null);
-    try {
-      Long count =
-          jdbc.queryForObject(
-              "SELECT count(*) FROM order_pack_progress WHERE tenant_id = ? AND order_id = ?",
-              Long.class,
-              tenantId,
-              orderId);
-      return count == null ? 0 : count;
-    } finally {
-      TenantContext.clear();
-    }
+    return CatalogHttp.textLong(
+        "SELECT count(*) FROM order_pack_progress WHERE tenant_id = ? AND order_id = ?",
+        tenantId,
+        orderId);
   }
 
   private long activePickListMembership(UUID tenantId, UUID orderId) {
-    TenantContext.set(tenantId, null);
-    try {
-      Long count =
-          jdbc.queryForObject(
-              """
-              SELECT count(*) FROM pick_list_order
-              WHERE tenant_id = ? AND order_id = ? AND released_at IS NULL
-              """,
-              Long.class,
-              tenantId,
-              orderId);
-      return count == null ? 0 : count;
-    } finally {
-      TenantContext.clear();
-    }
+    return CatalogHttp.textLong(
+        """
+        SELECT count(*) FROM pick_list_order
+        WHERE tenant_id = ? AND order_id = ? AND released_at IS NULL
+        """,
+        tenantId,
+        orderId);
   }
 
   private ObjectNode orderCancelled(String externalOrderId, String shopId, long version)
