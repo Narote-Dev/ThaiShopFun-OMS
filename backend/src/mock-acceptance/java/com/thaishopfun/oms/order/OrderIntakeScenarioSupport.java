@@ -13,13 +13,13 @@ import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
 
 /** Shared event builders for T12 mock acceptance tests. */
-final class OrderIntakeScenarioSupport {
+public final class OrderIntakeScenarioSupport {
 
   private static final ContractValidator CONTRACT = ContractValidator.classpath();
 
   private OrderIntakeScenarioSupport() {}
 
-  static ObjectNode orderCreated(
+  public static ObjectNode orderCreated(
       JsonMapper json,
       String orderId,
       String shopId,
@@ -58,7 +58,7 @@ final class OrderIntakeScenarioSupport {
     return event;
   }
 
-  static ObjectNode orderCreatedTwoLines(
+  public static ObjectNode orderCreatedTwoLines(
       JsonMapper json,
       String orderId,
       String shopId,
@@ -104,7 +104,7 @@ final class OrderIntakeScenarioSupport {
     return event;
   }
 
-  static ObjectNode orderPaid(JsonMapper json, String orderId, String shopId, long aggregateVersion)
+  public static ObjectNode orderPaid(JsonMapper json, String orderId, String shopId, long aggregateVersion)
       throws IOException {
     ObjectNode event = loadExample(json, "order.paid.json");
     event.put("event_id", "evt-" + java.util.UUID.randomUUID());
