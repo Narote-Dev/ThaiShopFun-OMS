@@ -6,6 +6,7 @@ import com.thaishopfun.mocktsf.MockTsfApplication;
 import com.thaishopfun.mocktsf.OmsEndpoint;
 import com.thaishopfun.mocktsf.contract.ContractValidator;
 import com.thaishopfun.oms.auth.AuthTestSupport;
+import com.thaishopfun.oms.auth.UuidV7;
 import com.thaishopfun.oms.catalog.CatalogHttp;
 import com.thaishopfun.oms.fulfillment.FulfillmentTestSupport;
 import com.thaishopfun.oms.inbox.InboxWorker;
@@ -118,10 +119,12 @@ class CancelPackedUnpackAcceptanceTest extends OrderIntegrationTest {
                 shop.tenantId(),
                 () -> orders.findById(order.id()).orElseThrow().fulfillmentStatus()))
         .isEqualTo("PACKED");
-    seedPackProgressRow(shop.tenantId(), order.id(), 2);
+    ensureOrderHold(shop.tenantId(), order.id(), sku.skuId(), 2);
+    seedActivePickListMembership(shop.tenantId(), order.id(), sku.warehouseId());
 
     assertThat(countPackProgress(shop.tenantId(), order.id())).isPositive();
     assertThat(activePickListMembership(shop.tenantId(), order.id())).isEqualTo(1);
+    assertThat(reserved(shop.tenantId(), sku.skuId())).isEqualTo(2);
 
     ObjectNode cancelled = orderCancelled(externalId, shop.tsfShopId(), 3);
     ingest(cancelled);
@@ -137,32 +140,24 @@ class CancelPackedUnpackAcceptanceTest extends OrderIntegrationTest {
     assertThat(reserved(shop.tenantId(), sku.skuId())).isZero();
   }
 
-  private void seedPackProgressRow(UUID tenantId, UUID orderId, int packedQty) {
-    TenantContext.set(tenantId, null);
-    try {
-      UUID lineId =
-          jdbc.queryForObject(
-              """
-              SELECT id FROM order_line
-              WHERE tenant_id = ? AND order_id = ? AND external_line_id = 'L1'
-              LIMIT 1
-              """,
-              UUID.class,
-              tenantId,
-              orderId);
-      jdbc.update(
-          """
-          INSERT INTO order_pack_progress (tenant_id, order_id, order_line_id, packed_qty)
-          VALUES (?, ?, ?, ?)
-          ON CONFLICT (tenant_id, order_id, order_line_id) DO UPDATE SET packed_qty = EXCLUDED.packed_qty
-          """,
-          tenantId,
-          orderId,
-          lineId,
-          packedQty);
-    } finally {
-      TenantContext.clear();
-    }
+  private void seedActivePickListMembership(UUID tenantId, UUID orderId, UUID warehouseId) {
+    UUID pickListId = UuidV7.generate();
+    CatalogHttp.execute(
+        """
+        INSERT INTO pick_list (id, tenant_id, warehouse_id)
+        VALUES (?, ?, ?)
+        """,
+        pickListId,
+        tenantId,
+        warehouseId);
+    CatalogHttp.execute(
+        """
+        INSERT INTO pick_list_order (tenant_id, pick_list_id, order_id, sequence, released_at)
+        VALUES (?, ?, ?, 0, NULL)
+        """,
+        tenantId,
+        pickListId,
+        orderId);
   }
 
   private void packToComplete(CatalogHttp.Shop httpShop, UUID orderId, String skuCode, int qty)
