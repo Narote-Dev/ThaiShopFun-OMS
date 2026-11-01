@@ -182,7 +182,9 @@ public class StockMovements {
         SCOPE_RESTOCK, () -> doRestock(returnLineId, skuId, warehouseId, qty, key, hash));
   }
 
-  /** Applies resellable restock and/or qty-neutral damaged ledger in one engine write (T20 receive). */
+  /**
+   * Applies resellable restock and/or qty-neutral damaged ledger in one engine write (T20 receive).
+   */
   public ReturnReceiveMovement receiveReturnUnits(
       UUID returnLineId,
       UUID skuId,

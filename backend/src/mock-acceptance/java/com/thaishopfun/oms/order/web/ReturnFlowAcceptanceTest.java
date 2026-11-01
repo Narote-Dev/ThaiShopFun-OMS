@@ -124,8 +124,7 @@ class ReturnFlowAcceptanceTest extends OrderIntegrationTest {
         fixture.inTenant(
             tenantId,
             () -> returns.findByExternalId(order.id(), "tsf_ret_partial").orElseThrow().id());
-    UUID returnLine =
-        fixture.inTenant(tenantId, () -> returnLineId(returnId, "L1"));
+    UUID returnLine = fixture.inTenant(tenantId, () -> returnLineId(returnId, "L1"));
     int before = fixture.inTenant(tenantId, () -> onHand(sku));
     String body =
         """
@@ -169,7 +168,10 @@ class ReturnFlowAcceptanceTest extends OrderIntegrationTest {
     UUID sku = fixture.inTenant(tenantId, () -> lineSku(order.id(), "L1"));
     int startOnHand = 10;
     FulfillmentTestSupport.seedInventory(
-        order.tenantId(), sku, FulfillmentTestSupport.ensureDefaultWarehouse(order.tenantId()), startOnHand);
+        order.tenantId(),
+        sku,
+        FulfillmentTestSupport.ensureDefaultWarehouse(order.tenantId()),
+        startOnHand);
     simulateShippedUnits(order, sku, 2);
     ingest(returnRequested(order.externalOrderId(), "L1", 2));
     ingest(returnDecided(order.externalOrderId(), "APPROVED"));
@@ -177,8 +179,7 @@ class ReturnFlowAcceptanceTest extends OrderIntegrationTest {
         fixture.inTenant(
             tenantId,
             () -> returns.findByExternalId(order.id(), "tsf_ret_partial").orElseThrow().id());
-    UUID returnLine =
-        fixture.inTenant(tenantId, () -> returnLineId(returnId, "L1"));
+    UUID returnLine = fixture.inTenant(tenantId, () -> returnLineId(returnId, "L1"));
     String body =
         """
         {"lines":[
@@ -218,10 +219,7 @@ class ReturnFlowAcceptanceTest extends OrderIntegrationTest {
             fixture.inTenant(
                 tenantId,
                 () ->
-                    returns
-                        .findByExternalId(order.id(), "tsf_ret_partial")
-                        .orElseThrow()
-                        .status()))
+                    returns.findByExternalId(order.id(), "tsf_ret_partial").orElseThrow().status()))
         .isEqualTo("APPROVED");
     String second =
         """
@@ -233,10 +231,7 @@ class ReturnFlowAcceptanceTest extends OrderIntegrationTest {
             fixture.inTenant(
                 tenantId,
                 () ->
-                    returns
-                        .findByExternalId(order.id(), "tsf_ret_partial")
-                        .orElseThrow()
-                        .status()))
+                    returns.findByExternalId(order.id(), "tsf_ret_partial").orElseThrow().status()))
         .isEqualTo("RECEIVED");
   }
 

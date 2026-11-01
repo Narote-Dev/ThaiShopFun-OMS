@@ -374,11 +374,7 @@ public class OrderIntakeSupport {
     if ("PACKED".equals(afterStock.fulfillmentStatus())
         || "PICKING".equals(afterStock.fulfillmentStatus())) {
       stateMachine.applyFulfillmentStatus(
-          afterStock,
-          "UNFULFILLED",
-          "TSF cancel",
-          "TSF",
-          guard(account, afterStock, List.of()));
+          afterStock, "UNFULFILLED", "TSF cancel", "TSF", guard(account, afterStock, List.of()));
     }
     SalesOrder toCancel = orders.findById(order.id()).orElseThrow();
     stateMachine.applyOrderStatus(

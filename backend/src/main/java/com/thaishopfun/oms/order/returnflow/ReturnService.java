@@ -1,6 +1,5 @@
 package com.thaishopfun.oms.order.returnflow;
 
-import com.thaishopfun.oms.order.OrderStateMachine;
 import com.thaishopfun.oms.order.SalesOrder;
 import com.thaishopfun.oms.order.SalesOrderRepository;
 import com.thaishopfun.oms.order.web.OrderAccess;
@@ -126,8 +125,7 @@ public class ReturnService {
                 damaged += piece.qty();
               }
             }
-            int remaining =
-                line.qty() - line.restockedQty() - line.damagedQty();
+            int remaining = line.qty() - line.restockedQty() - line.damagedQty();
             if (resellable + damaged > remaining) {
               throw OrderApiException.conflict(
                   "RETURN_RECEIVE_QTY_EXCEEDED",
@@ -151,8 +149,7 @@ public class ReturnService {
             if (nextRestocked + nextDamaged == line.qty()) {
               lineCondition = summarizeCondition(nextRestocked, nextDamaged);
             }
-            returns.updateLineReceiveProgress(
-                line.id(), nextRestocked, nextDamaged, lineCondition);
+            returns.updateLineReceiveProgress(line.id(), nextRestocked, nextDamaged, lineCondition);
             byId.put(
                 line.id(),
                 new ReturnRepository.ReturnLineRow(
