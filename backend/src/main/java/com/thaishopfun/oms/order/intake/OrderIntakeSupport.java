@@ -370,9 +370,6 @@ public class OrderIntakeSupport {
         throw ex;
       }
     }
-    if (!"NONE".equals(order.holdReason())) {
-      stateMachine.applyHoldReason(order, "NONE", order.holdNote(), "order cancelled", "TSF");
-    }
     stateMachine.applyOrderStatus(
         order, "CANCELLED", "TSF cancel", "TSF", guard(account, order, List.of()));
     piiLifecycle.onOrderClosed(order.id(), clock.instant());

@@ -99,12 +99,17 @@ class InboxHandlerIdempotencyTest {
               registry.find("order.created"),
               loadExample("order.created.json", tsfShopId),
               "seed-order-for-return");
-          jdbc.update(
-              """
-              UPDATE sales_order SET fulfillment_status = 'DELIVERED'
-              WHERE tenant_id = ? AND external_order_id = 'TSF-240929-000123'
-              """,
-              tenantId);
+          fixture.inTenant(
+              tenantId,
+              () -> {
+                jdbc.update(
+                    """
+                    UPDATE sales_order SET fulfillment_status = 'DELIVERED'
+                    WHERE tenant_id = ? AND external_order_id = 'TSF-240929-000123'
+                    """,
+                    tenantId);
+                return null;
+              });
         }
         if ("return.decided".equals(eventType)) {
           deliver(

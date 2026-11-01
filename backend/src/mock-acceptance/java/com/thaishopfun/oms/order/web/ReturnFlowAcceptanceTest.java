@@ -8,6 +8,7 @@ import com.thaishopfun.mocktsf.contract.ContractValidator;
 import com.thaishopfun.oms.auth.AuthTestSupport;
 import com.thaishopfun.oms.fulfillment.FulfillmentTestSupport;
 import com.thaishopfun.oms.inbox.InboxWorker;
+import com.thaishopfun.oms.order.OrderIntakeScenarioSupport;
 import com.thaishopfun.oms.order.SalesOrder;
 import com.thaishopfun.oms.order.SalesOrderRepository;
 import com.thaishopfun.oms.order.returnflow.ReturnRepository;
@@ -166,25 +167,48 @@ class ReturnFlowAcceptanceTest extends OrderIntegrationTest {
     ingestOnly(event);
     worker.processAvailable(1);
     assertThat(
-            jdbc.queryForObject(
-                "SELECT status FROM inbox_event WHERE event_id = ?",
-                String.class,
-                event.path("event_id").asString()))
+            fixture.inTenant(
+                tenantId,
+                () ->
+                    jdbc.queryForObject(
+                        "SELECT status FROM inbox_event WHERE event_id = ?",
+                        String.class,
+                        event.path("event_id").asString())))
         .isEqualTo("DEAD");
   }
 
   private SalesOrder seedPaidOneLineOrder() throws Exception {
     String external = "RET-ONE-" + UUID.randomUUID().toString().substring(0, 8);
-    ingest(orderCreated(external, 1));
-    ingest(orderPaid(external, 2));
+    ingest(
+        OrderIntakeScenarioSupport.orderCreated(
+            JSON,
+            external,
+            tsfShopId,
+            UUID.randomUUID().toString(),
+            "PREPAID",
+            "tsf_sku_7781",
+            2,
+            1));
+    ingest(OrderIntakeScenarioSupport.orderPaid(JSON, external, tsfShopId, 2));
     return fixture.inTenant(
         tenantId, () -> orders.findByExternalId(channelAccountId, external).orElseThrow());
   }
 
   private SalesOrder seedDeliveredTwoLineOrder() throws Exception {
     String external = "RET-TWO-" + UUID.randomUUID().toString().substring(0, 8);
-    ingest(orderCreatedTwoLines(external, 1));
-    ingest(orderPaid(external, 2));
+    ingest(
+        OrderIntakeScenarioSupport.orderCreatedTwoLines(
+            JSON,
+            external,
+            tsfShopId,
+            UUID.randomUUID().toString(),
+            "PREPAID",
+            "tsf_sku_7781",
+            "tsf_sku_9001",
+            2,
+            1,
+            1));
+    ingest(OrderIntakeScenarioSupport.orderPaid(JSON, external, tsfShopId, 2));
     SalesOrder order =
         fixture.inTenant(
             tenantId, () -> orders.findByExternalId(channelAccountId, external).orElseThrow());
