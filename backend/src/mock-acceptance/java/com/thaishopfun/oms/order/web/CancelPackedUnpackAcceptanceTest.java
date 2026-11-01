@@ -9,6 +9,7 @@ import com.thaishopfun.oms.auth.AuthTestSupport;
 import com.thaishopfun.oms.catalog.CatalogHttp;
 import com.thaishopfun.oms.fulfillment.FulfillmentTestSupport;
 import com.thaishopfun.oms.inbox.InboxWorker;
+import com.thaishopfun.oms.invariant.SkipInvariantCheck;
 import com.thaishopfun.oms.order.OrderRecipientRepository;
 import com.thaishopfun.oms.order.OrderStatusHistoryRepository;
 import com.thaishopfun.oms.order.SalesOrder;
@@ -49,6 +50,7 @@ import tools.jackson.databind.node.ObjectNode;
 @SpringBootTest(
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
     properties = "oms.outbox.publisher-enabled=false")
+@SkipInvariantCheck("Pick/pack fixture order is inserted without full stock ledger shape")
 class CancelPackedUnpackAcceptanceTest extends OrderIntegrationTest {
 
   private static final String INBOX_SECRET = "dev-inbox-hmac-secret";
@@ -111,7 +113,11 @@ class CancelPackedUnpackAcceptanceTest extends OrderIntegrationTest {
     FulfillmentTestSupport.addLine(order, sku.skuId(), 2);
     FulfillmentTestSupport.seedInventory(shop.tenantId(), sku.skuId(), sku.warehouseId(), 20);
     packToComplete(httpShop, order.id(), sku.skuCode(), 2);
-    assertThat(fulfillmentStatus(shop.tenantId(), order.id())).isEqualTo("PACKED");
+    assertThat(
+            fixture.inTenant(
+                shop.tenantId(),
+                () -> orders.findById(order.id()).orElseThrow().fulfillmentStatus()))
+        .isEqualTo("PACKED");
     seedPackProgressRow(shop.tenantId(), order.id(), sku.skuId(), 2);
 
     assertThat(countPackProgress(shop.tenantId(), order.id())).isPositive();
@@ -123,20 +129,12 @@ class CancelPackedUnpackAcceptanceTest extends OrderIntegrationTest {
     ingest(cancelled);
     worker.processAvailable(1);
 
-    SalesOrder fresh = orders.findById(order.id()).orElseThrow();
+    SalesOrder fresh =
+        fixture.inTenant(shop.tenantId(), () -> orders.findById(order.id()).orElseThrow());
     assertThat(fresh.orderStatus()).isEqualTo("CANCELLED");
     assertThat(countPackProgress(shop.tenantId(), order.id())).isZero();
     assertThat(activePickListMembership(shop.tenantId(), order.id())).isZero();
     assertThat(reserved(shop.tenantId(), sku.skuId())).isZero();
-  }
-
-  private String fulfillmentStatus(UUID tenantId, UUID orderId) {
-    TenantContext.set(tenantId, null);
-    try {
-      return orders.findById(orderId).orElseThrow().fulfillmentStatus();
-    } finally {
-      TenantContext.clear();
-    }
   }
 
   private void seedPackProgressRow(UUID tenantId, UUID orderId, UUID skuId, int packedQty) {
