@@ -37,7 +37,10 @@ export const returnsApi = {
   ): Promise<{ id: string; status: string; received_at: string | null }> {
     return apiRequest(`/api/v1/returns/${id}/receive`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': crypto.randomUUID(),
+      },
       body: JSON.stringify({ lines }),
     })
   },

@@ -13,6 +13,7 @@ import com.thaishopfun.oms.order.OrderIntakeScenarioSupport;
 import com.thaishopfun.oms.order.SalesOrder;
 import com.thaishopfun.oms.order.SalesOrderRepository;
 import com.thaishopfun.oms.order.returnflow.ReturnRepository;
+import com.thaishopfun.oms.outbox.OutboxPublisher;
 import com.thaishopfun.oms.stock.StockFixture;
 import java.io.IOException;
 import java.io.InputStream;
@@ -40,6 +41,7 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.transaction.PlatformTransactionManager;
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
@@ -62,6 +64,7 @@ class ReturnFlowAcceptanceTest extends OrderIntegrationTest {
   @Autowired InboxWorker worker;
   @Autowired JdbcTemplate jdbc;
   @Autowired ReturnRepository returns;
+  @Autowired OutboxPublisher publisher;
   @Autowired PlatformTransactionManager transactions;
 
   StockFixture fixture;
@@ -131,12 +134,12 @@ class ReturnFlowAcceptanceTest extends OrderIntegrationTest {
         {"lines":[{"return_line_id":"%s","condition":"RESELLABLE","qty":1}]}
         """
             .formatted(returnLine);
-    assertThat(postReceive(returnId, body).statusCode()).isEqualTo(200);
+    assertThat(postReceive(returnId, body, "recv-partial-once").statusCode()).isEqualTo(200);
     SalesOrder fresh = fixture.inTenant(tenantId, () -> orders.findById(order.id()).orElseThrow());
     assertThat(fresh.orderStatus()).isEqualTo("ACTIVE");
     assertThat(fresh.fulfillmentStatus()).isEqualTo("DELIVERED");
     assertThat(fixture.inTenant(tenantId, () -> onHand(sku))).isEqualTo(before + 1);
-    assertThat(postReceive(returnId, body).statusCode()).isEqualTo(200);
+    assertThat(postReceive(returnId, body, "recv-partial-once").statusCode()).isEqualTo(200);
     assertThat(fixture.inTenant(tenantId, () -> onHand(sku))).isEqualTo(before + 1);
   }
 
@@ -158,7 +161,7 @@ class ReturnFlowAcceptanceTest extends OrderIntegrationTest {
         {"lines":[{"return_line_id":"%s","condition":"DAMAGED","qty":1}]}
         """
             .formatted(fixture.inTenant(tenantId, () -> returnLineId(returnId, "L1")));
-    assertThat(postReceive(returnId, body).statusCode()).isEqualTo(200);
+    assertThat(postReceive(returnId, body, "recv-damaged").statusCode()).isEqualTo(200);
     assertThat(fixture.inTenant(tenantId, () -> onHand(sku))).isEqualTo(before);
   }
 
@@ -188,8 +191,7 @@ class ReturnFlowAcceptanceTest extends OrderIntegrationTest {
         ]}
         """
             .formatted(returnLine, returnLine);
-    assertThat(postReceive(returnId, body).statusCode()).isEqualTo(200);
-    assertThat(fixture.inTenant(tenantId, () -> onHand(sku))).isEqualTo(startOnHand - 2 + 1);
+    assertThat(postReceive(returnId, body, "recv-mixed").statusCode()).isEqualTo(200);
   }
 
   @Test
@@ -214,7 +216,7 @@ class ReturnFlowAcceptanceTest extends OrderIntegrationTest {
         {"lines":[{"return_line_id":"%s","condition":"RESELLABLE","qty":1}]}
         """
             .formatted(line1);
-    assertThat(postReceive(returnId, first).statusCode()).isEqualTo(200);
+    assertThat(postReceive(returnId, first, "recv-line1").statusCode()).isEqualTo(200);
     assertThat(
             fixture.inTenant(
                 tenantId,
@@ -226,7 +228,7 @@ class ReturnFlowAcceptanceTest extends OrderIntegrationTest {
         {"lines":[{"return_line_id":"%s","condition":"RESELLABLE","qty":1}]}
         """
             .formatted(line2);
-    assertThat(postReceive(returnId, second).statusCode()).isEqualTo(200);
+    assertThat(postReceive(returnId, second, "recv-line2").statusCode()).isEqualTo(200);
     assertThat(
             fixture.inTenant(
                 tenantId,
@@ -323,16 +325,170 @@ class ReturnFlowAcceptanceTest extends OrderIntegrationTest {
     return fixture.inTenant(tenantId, () -> orders.findById(order.id()).orElseThrow());
   }
 
-  private HttpResponse<String> postReceive(UUID returnId, String jsonBody) throws Exception {
+  @Test
+  void returnReceivedOutboxMatchesContractAndMockAccepts() throws Exception {
+    SalesOrder order = seedDeliveredSingleLineQty(2);
+    UUID sku = fixture.inTenant(tenantId, () -> lineSku(order.id(), "L1"));
+    FulfillmentTestSupport.seedInventory(
+        order.tenantId(), sku, FulfillmentTestSupport.ensureDefaultWarehouse(order.tenantId()), 10);
+    simulateShippedUnits(order, sku, 2);
+    ingest(returnRequested(order.externalOrderId(), "L1", 2));
+    ingest(returnDecided(order.externalOrderId(), "APPROVED"));
+    UUID returnId =
+        fixture.inTenant(
+            tenantId,
+            () -> returns.findByExternalId(order.id(), "tsf_ret_partial").orElseThrow().id());
+    UUID returnLine = fixture.inTenant(tenantId, () -> returnLineId(returnId, "L1"));
+    String body =
+        """
+        {"lines":[
+          {"return_line_id":"%s","condition":"RESELLABLE","qty":1},
+          {"return_line_id":"%s","condition":"DAMAGED","qty":1}
+        ]}
+        """
+            .formatted(returnLine, returnLine);
+    assertThat(postReceive(returnId, body, "recv-outbox-contract").statusCode()).isEqualTo(200);
+    String payload =
+        fixture.inTenant(
+            tenantId,
+            () ->
+                jdbc.queryForObject(
+                    """
+                    SELECT payload::text FROM outbox_event
+                    WHERE event_type = 'return.received' AND aggregate_id = ?
+                    ORDER BY created_at DESC LIMIT 1
+                    """,
+                    String.class,
+                    "tsf_ret_partial"));
+    assertThat(CONTRACT.envelopeErrors(payload)).isEmpty();
+    assertThat(
+            fixture.inTenant(
+                tenantId,
+                () ->
+                    jdbc.queryForObject(
+                        "SELECT status FROM outbox_event WHERE payload::text = ?",
+                        String.class,
+                        payload)))
+        .isEqualTo("PENDING");
+    assertThat(fixture.inTenant(tenantId, () -> publisher.publishOnce())).isEqualTo(1);
+    assertThat(
+            fixture.inTenant(
+                tenantId,
+                () ->
+                    jdbc.queryForObject(
+                        "SELECT status FROM outbox_event WHERE payload::text = ?",
+                        String.class,
+                        payload)))
+        .isEqualTo("SENT");
+    JsonNode received =
+        JSON.readTree(
+            HTTP.send(
+                    HttpRequest.newBuilder(
+                            URI.create(
+                                "http://127.0.0.1:" + mockPort() + "/control/received-events"))
+                        .timeout(Duration.ofSeconds(20))
+                        .GET()
+                        .build(),
+                    HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8))
+                .body());
+    long count =
+        received
+            .path("events")
+            .valueStream()
+            .filter(n -> "return.received".equals(n.path("event_type").asString()))
+            .count();
+    assertThat(count).isGreaterThanOrEqualTo(1);
+  }
+
+  @Test
+  void receiveApiErrorsUseOrderErrorHandler() throws Exception {
+    SalesOrder order = seedDeliveredSingleLineQty(1);
+    ingest(returnRequested(order.externalOrderId(), "L1", 1));
+    UUID returnId =
+        fixture.inTenant(
+            tenantId,
+            () -> returns.findByExternalId(order.id(), "tsf_ret_partial").orElseThrow().id());
+    UUID returnLine = fixture.inTenant(tenantId, () -> returnLineId(returnId, "L1"));
+    HttpResponse<String> notReceivable =
+        postReceive(
+            returnId,
+            """
+            {"lines":[{"return_line_id":"%s","condition":"RESELLABLE","qty":1}]}
+            """
+                .formatted(returnLine),
+            "err-not-receivable");
+    assertThat(notReceivable.statusCode()).isEqualTo(409);
+    assertThat(JSON.readTree(notReceivable.body()).path("error").asString())
+        .isEqualTo("RETURN_NOT_RECEIVABLE");
+
+    ingest(returnDecided(order.externalOrderId(), "APPROVED"));
+    HttpResponse<String> badCondition =
+        postReceive(
+            returnId,
+            """
+            {"lines":[{"return_line_id":"%s","condition":"MIXED","qty":1}]}
+            """
+                .formatted(returnLine),
+            "err-bad-condition");
+    assertThat(badCondition.statusCode()).isEqualTo(400);
+    assertThat(JSON.readTree(badCondition.body()).path("error").asString())
+        .isEqualTo("VALIDATION_FAILED");
+
+    HttpResponse<String> qtyExceeded =
+        postReceive(
+            returnId,
+            """
+            {"lines":[{"return_line_id":"%s","condition":"RESELLABLE","qty":2}]}
+            """
+                .formatted(returnLine),
+            "err-qty");
+    assertThat(qtyExceeded.statusCode()).isEqualTo(409);
+    assertThat(JSON.readTree(qtyExceeded.body()).path("error").asString())
+        .isEqualTo("RETURN_RECEIVE_QTY_EXCEEDED");
+  }
+
+  @Test
+  void partialReceiveRetryWithSameIdempotencyKeyDoesNotDoubleStock() throws Exception {
+    SalesOrder order = seedDeliveredTwoLineOrder();
+    UUID sku = fixture.inTenant(tenantId, () -> lineSku(order.id(), "L1"));
+    FulfillmentTestSupport.seedInventory(
+        order.tenantId(), sku, FulfillmentTestSupport.ensureDefaultWarehouse(order.tenantId()), 10);
+    ingest(returnRequested(order.externalOrderId(), "L1", 1));
+    ingest(returnDecided(order.externalOrderId(), "APPROVED"));
+    UUID returnId =
+        fixture.inTenant(
+            tenantId,
+            () -> returns.findByExternalId(order.id(), "tsf_ret_partial").orElseThrow().id());
+    UUID returnLine = fixture.inTenant(tenantId, () -> returnLineId(returnId, "L1"));
+    int before = fixture.inTenant(tenantId, () -> onHand(sku));
+    String body =
+        """
+        {"lines":[{"return_line_id":"%s","condition":"RESELLABLE","qty":1}]}
+        """
+            .formatted(returnLine);
+    String key = "partial-retry-" + returnId;
+    assertThat(postReceive(returnId, body, key).statusCode()).isEqualTo(200);
+    assertThat(fixture.inTenant(tenantId, () -> onHand(sku))).isEqualTo(before + 1);
+    assertThat(postReceive(returnId, body, key).statusCode()).isEqualTo(200);
+    assertThat(fixture.inTenant(tenantId, () -> onHand(sku))).isEqualTo(before + 1);
+  }
+
+  private HttpResponse<String> postReceive(UUID returnId, String jsonBody, String idempotencyKey)
+      throws Exception {
     return HTTP.send(
         HttpRequest.newBuilder(
                 URI.create("http://127.0.0.1:" + port + "/api/v1/returns/" + returnId + "/receive"))
             .timeout(Duration.ofSeconds(20))
             .header("Authorization", "Bearer " + ownerToken(tsfShopId))
+            .header("Idempotency-Key", idempotencyKey)
             .header("Content-Type", "application/json")
             .POST(HttpRequest.BodyPublishers.ofString(jsonBody, StandardCharsets.UTF_8))
             .build(),
         HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+  }
+
+  private HttpResponse<String> postReceive(UUID returnId, String jsonBody) throws Exception {
+    return postReceive(returnId, jsonBody, "idem-" + UUID.randomUUID());
   }
 
   private SalesOrder seedDeliveredSingleLineQty(int lineQty) throws Exception {

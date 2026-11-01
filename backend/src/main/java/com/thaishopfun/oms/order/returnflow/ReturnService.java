@@ -8,12 +8,17 @@ import com.thaishopfun.oms.order.web.OrderAudit;
 import com.thaishopfun.oms.order.web.OrderTransactions;
 import com.thaishopfun.oms.outbox.OutboxAppender;
 import com.thaishopfun.oms.outbox.OutboxDraft;
+import com.thaishopfun.oms.stock.IdempotencyConflictException;
 import com.thaishopfun.oms.stock.StockMovements;
 import com.thaishopfun.oms.tenant.TenantContext;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -21,11 +26,14 @@ import java.util.Set;
 import java.util.UUID;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 @Service
 public class ReturnService {
 
   private static final Set<String> CONDITIONS = Set.of("RESELLABLE", "DAMAGED");
+  static final int MAX_CLIENT_IDEMPOTENCY_KEY_LENGTH = 128;
 
   private final OrderAccess access;
   private final OrderTransactions tx;
@@ -36,6 +44,8 @@ public class ReturnService {
   private final OrderAudit audit;
   private final JdbcTemplate jdbc;
   private final Clock clock;
+  private final ReturnReceiveIdempotency idempotency;
+  private final JsonMapper json;
 
   public ReturnService(
       OrderAccess access,
@@ -46,7 +56,9 @@ public class ReturnService {
       OutboxAppender outbox,
       OrderAudit audit,
       JdbcTemplate jdbc,
-      Clock clock) {
+      Clock clock,
+      ReturnReceiveIdempotency idempotency,
+      JsonMapper json) {
     this.access = access;
     this.tx = tx;
     this.orders = orders;
@@ -56,6 +68,8 @@ public class ReturnService {
     this.audit = audit;
     this.jdbc = jdbc;
     this.clock = clock;
+    this.idempotency = idempotency;
+    this.json = json;
   }
 
   public ReturnViews.ReturnDetailView detail(UUID returnId) {
@@ -70,172 +84,248 @@ public class ReturnService {
         });
   }
 
-  public ReturnViews.ReceiveResponseView receive(UUID returnId, ReturnViews.ReceiveBody body) {
+  public ReturnViews.ReceiveResponseView receive(
+      UUID returnId, String idempotencyKeyHeader, ReturnViews.ReceiveBody body) {
     OrderAccess.Actor actor = access.requireOwnerOrAdmin();
     if (body == null || body.lines() == null || body.lines().isEmpty()) {
       throw OrderApiException.fieldValidationFailed("lines", "lines is required");
     }
-    return tx.write(
-        () -> {
-          ReturnRepository.ReturnRequestRow request =
-              returns.findById(returnId).orElseThrow(OrderApiException::notFound);
-          SalesOrder order =
-              orders.findById(request.orderId()).orElseThrow(OrderApiException::notFound);
-          if ("RECEIVED".equals(request.status())) {
-            return new ReturnViews.ReceiveResponseView(
-                request.id(), request.status(), request.receivedAt());
-          }
-          if (!"APPROVED".equals(request.status())) {
-            throw OrderApiException.conflict(
-                "RETURN_NOT_RECEIVABLE", "Return is not approved for receiving");
-          }
-          Map<UUID, ReturnRepository.ReturnLineRow> byId = new LinkedHashMap<>();
-          for (ReturnRepository.ReturnLineRow line : returns.linesForReturn(returnId)) {
-            byId.put(line.id(), line);
-          }
-          Map<UUID, List<ReturnViews.ReceiveLineBody>> grouped = new HashMap<>();
-          for (ReturnViews.ReceiveLineBody input : body.lines()) {
-            if (input.returnLineId() == null) {
-              throw OrderApiException.fieldValidationFailed(
-                  "return_line_id", "return_line_id is required");
-            }
-            String condition = input.condition() == null ? "" : input.condition().trim();
-            if (!CONDITIONS.contains(condition)) {
-              throw OrderApiException.fieldValidationFailed(
-                  "condition", "condition must be RESELLABLE or DAMAGED");
-            }
-            if (input.qty() < 1) {
-              throw OrderApiException.fieldValidationFailed("qty", "qty must be at least 1");
-            }
-            ReturnRepository.ReturnLineRow line = byId.get(input.returnLineId());
-            if (line == null) {
-              throw OrderApiException.invalid("Unknown return line");
-            }
-            grouped.computeIfAbsent(input.returnLineId(), ignored -> new ArrayList<>()).add(input);
-          }
+    if (idempotencyKeyHeader == null || idempotencyKeyHeader.isBlank()) {
+      throw OrderApiException.fieldValidationFailed(
+          "Idempotency-Key", "Idempotency-Key is required");
+    }
+    String clientKey = idempotencyKeyHeader.trim();
+    if (clientKey.length() > MAX_CLIENT_IDEMPOTENCY_KEY_LENGTH) {
+      throw OrderApiException.fieldValidationFailed(
+          "Idempotency-Key", "Idempotency-Key must be at most 128 characters");
+    }
+    String idempotencyKey = returnId + ":" + clientKey;
+    String requestHash = sha256(returnId + "|" + clientKey + "|" + json.writeValueAsString(body));
+    String stockScope = returnId + ":" + clientKey;
 
-          for (Map.Entry<UUID, List<ReturnViews.ReceiveLineBody>> entry : grouped.entrySet()) {
-            ReturnRepository.ReturnLineRow line = byId.get(entry.getKey());
-            int resellable = 0;
-            int damaged = 0;
-            for (ReturnViews.ReceiveLineBody piece : entry.getValue()) {
-              if ("RESELLABLE".equals(piece.condition())) {
-                resellable += piece.qty();
-              } else {
-                damaged += piece.qty();
-              }
-            }
-            int remaining = line.qty() - line.restockedQty() - line.damagedQty();
-            if (resellable + damaged > remaining) {
-              throw OrderApiException.conflict(
-                  "RETURN_RECEIVE_QTY_EXCEEDED",
-                  "Receive qty exceeds remaining units on return line");
-            }
-            if (line.skuId() == null) {
-              throw OrderApiException.conflict("SKU_NOT_MAPPED", "Return line has no mapped SKU");
-            }
-            String chunkKey = idempotencyKey(returnId, line.id(), resellable, damaged, line);
-            stock.receiveReturnUnits(
-                line.id(),
-                line.skuId(),
-                null,
-                resellable,
-                damaged,
-                chunkKey + ":restock",
-                chunkKey + ":writeoff");
-            int nextRestocked = line.restockedQty() + resellable;
-            int nextDamaged = line.damagedQty() + damaged;
-            String lineCondition = null;
-            if (nextRestocked + nextDamaged == line.qty()) {
-              lineCondition = summarizeCondition(nextRestocked, nextDamaged);
-            }
-            returns.updateLineReceiveProgress(line.id(), nextRestocked, nextDamaged, lineCondition);
-            byId.put(
-                line.id(),
-                new ReturnRepository.ReturnLineRow(
-                    line.id(),
-                    line.orderId(),
-                    line.returnId(),
-                    line.orderLineId(),
-                    line.externalLineId(),
-                    line.qty(),
-                    lineCondition,
-                    nextRestocked,
-                    nextDamaged,
-                    line.skuId()));
-          }
+    ReturnReceiveIdempotency.LookupResult existing =
+        tx.read(() -> idempotency.lookup(actor.tenantId(), idempotencyKey, requestHash));
+    ReturnViews.ReceiveResponseView replay = replayIfCompleted(existing);
+    if (replay != null) {
+      return replay;
+    }
+    if (existing.state() == ReturnReceiveIdempotency.LookupState.IN_PROGRESS) {
+      throw OrderApiException.idempotencyInProgress();
+    }
 
-          boolean allComplete =
-              byId.values().stream()
-                  .allMatch(line -> line.restockedQty() + line.damagedQty() == line.qty());
-          if (!allComplete) {
-            return new ReturnViews.ReceiveResponseView(returnId, "APPROVED", null);
-          }
+    boolean claimed =
+        tx.write(() -> idempotency.tryClaim(actor.tenantId(), idempotencyKey, requestHash));
+    if (!claimed) {
+      ReturnReceiveIdempotency.LookupResult raced =
+          tx.read(() -> idempotency.lookup(actor.tenantId(), idempotencyKey, requestHash));
+      replay = replayIfCompleted(raced);
+      if (replay != null) {
+        return replay;
+      }
+      throw OrderApiException.idempotencyInProgress();
+    }
 
-          Instant receivedAt = clock.instant();
-          returns.markReceived(returnId, receivedAt);
-          List<Map<String, Object>> outboxLines = new ArrayList<>();
-          for (ReturnRepository.ReturnLineRow line : byId.values()) {
-            outboxLines.add(
-                Map.of(
-                    "line_id",
-                    line.externalLineId(),
-                    "qty",
-                    line.qty(),
-                    "restocked_qty",
-                    line.restockedQty(),
-                    "damaged_qty",
-                    line.damagedQty(),
-                    "condition",
-                    line.condition()));
-          }
-          long version =
-              orders.findById(order.id()).orElseThrow(OrderApiException::notFound).version();
-          outbox.append(
-              OutboxDraft.of(
-                  "return",
-                  request.externalReturnId(),
-                  "return.received",
-                  Map.of(
-                      "order_id",
-                      order.externalOrderId(),
-                      "return_id",
-                      request.externalReturnId(),
-                      "lines",
-                      outboxLines),
-                  version));
-          audit.writeEntity(
-              actor.tenantId(),
-              actor.userId(),
-              "RETURN_RECEIVED",
-              "return_request",
-              returnId,
-              Map.of("status", request.status()),
-              Map.of("status", "RECEIVED"));
-          return new ReturnViews.ReceiveResponseView(returnId, "RECEIVED", receivedAt);
-        });
+    try {
+      ReturnViews.ReceiveResponseView response =
+          tx.write(() -> doReceive(actor, returnId, body, stockScope));
+      ObjectNode stored = json.valueToTree(response);
+      tx.write(
+          () -> {
+            idempotency.complete(actor.tenantId(), idempotencyKey, 200, stored);
+            return null;
+          });
+      return response;
+    } catch (IdempotencyConflictException ex) {
+      throw ex;
+    } catch (RuntimeException ex) {
+      tx.write(
+          () -> {
+            idempotency.abandon(actor.tenantId(), idempotencyKey);
+            return null;
+          });
+      throw ex;
+    }
   }
 
-  private static String idempotencyKey(
-      UUID returnId,
-      UUID returnLineId,
-      int resellableQty,
-      int damagedQty,
-      ReturnRepository.ReturnLineRow before) {
-    int priorRestocked = before.restockedQty();
-    int priorDamaged = before.damagedQty();
+  private ReturnViews.ReceiveResponseView doReceive(
+      OrderAccess.Actor actor, UUID returnId, ReturnViews.ReceiveBody body, String stockScope) {
+    ReturnRepository.ReturnRequestRow request =
+        returns.findById(returnId).orElseThrow(OrderApiException::notFound);
+    SalesOrder order = orders.findById(request.orderId()).orElseThrow(OrderApiException::notFound);
+    if ("RECEIVED".equals(request.status())) {
+      return new ReturnViews.ReceiveResponseView(
+          request.id(), request.status(), request.receivedAt());
+    }
+    if (!"APPROVED".equals(request.status())) {
+      throw OrderApiException.conflict(
+          "RETURN_NOT_RECEIVABLE", "Return is not approved for receiving");
+    }
+    Map<UUID, ReturnRepository.ReturnLineRow> byId = new LinkedHashMap<>();
+    for (ReturnRepository.ReturnLineRow line : returns.linesForReturn(returnId)) {
+      byId.put(line.id(), line);
+    }
+    Map<UUID, List<ReturnViews.ReceiveLineBody>> grouped = new HashMap<>();
+    for (ReturnViews.ReceiveLineBody input : body.lines()) {
+      if (input.returnLineId() == null) {
+        throw OrderApiException.fieldValidationFailed(
+            "return_line_id", "return_line_id is required");
+      }
+      String condition = input.condition() == null ? "" : input.condition().trim();
+      if (!CONDITIONS.contains(condition)) {
+        throw OrderApiException.fieldValidationFailed(
+            "condition", "condition must be RESELLABLE or DAMAGED");
+      }
+      if (input.qty() < 1) {
+        throw OrderApiException.fieldValidationFailed("qty", "qty must be at least 1");
+      }
+      ReturnRepository.ReturnLineRow line = byId.get(input.returnLineId());
+      if (line == null) {
+        throw OrderApiException.invalid("Unknown return line");
+      }
+      grouped.computeIfAbsent(input.returnLineId(), ignored -> new ArrayList<>()).add(input);
+    }
+
+    for (Map.Entry<UUID, List<ReturnViews.ReceiveLineBody>> entry : grouped.entrySet()) {
+      ReturnRepository.ReturnLineRow line = byId.get(entry.getKey());
+      int resellable = 0;
+      int damaged = 0;
+      for (ReturnViews.ReceiveLineBody piece : entry.getValue()) {
+        if ("RESELLABLE".equals(piece.condition())) {
+          resellable += piece.qty();
+        } else {
+          damaged += piece.qty();
+        }
+      }
+      int remaining = line.qty() - line.restockedQty() - line.damagedQty();
+      if (resellable + damaged > remaining) {
+        throw OrderApiException.conflict(
+            "RETURN_RECEIVE_QTY_EXCEEDED", "Receive qty exceeds remaining units on return line");
+      }
+      if (line.skuId() == null) {
+        throw OrderApiException.conflict("SKU_NOT_MAPPED", "Return line has no mapped SKU");
+      }
+      String chunkKey = stockIdempotencyKey(stockScope, line.id(), resellable, damaged);
+      stock.receiveReturnUnits(
+          line.id(),
+          line.skuId(),
+          null,
+          resellable,
+          damaged,
+          chunkKey + ":restock",
+          chunkKey + ":writeoff");
+      int nextRestocked = line.restockedQty() + resellable;
+      int nextDamaged = line.damagedQty() + damaged;
+      String lineCondition = null;
+      if (nextRestocked + nextDamaged == line.qty()) {
+        lineCondition = summarizeCondition(nextRestocked, nextDamaged);
+      }
+      returns.updateLineReceiveProgress(line.id(), nextRestocked, nextDamaged, lineCondition);
+      byId.put(
+          line.id(),
+          new ReturnRepository.ReturnLineRow(
+              line.id(),
+              line.orderId(),
+              line.returnId(),
+              line.orderLineId(),
+              line.externalLineId(),
+              line.qty(),
+              lineCondition,
+              nextRestocked,
+              nextDamaged,
+              line.skuId()));
+    }
+
+    boolean allComplete =
+        byId.values().stream()
+            .allMatch(line -> line.restockedQty() + line.damagedQty() == line.qty());
+    if (!allComplete) {
+      return new ReturnViews.ReceiveResponseView(returnId, "APPROVED", null);
+    }
+
+    Instant receivedAt = clock.instant();
+    returns.markReceived(returnId, receivedAt);
+    List<Map<String, Object>> outboxLines = contractReceivedLines(byId.values());
+    long version = orders.findById(order.id()).orElseThrow(OrderApiException::notFound).version();
+    outbox.append(
+        OutboxDraft.of(
+            "return",
+            request.externalReturnId(),
+            "return.received",
+            Map.of(
+                "order_id",
+                order.externalOrderId(),
+                "return_id",
+                request.externalReturnId(),
+                "lines",
+                outboxLines),
+            version));
+    audit.writeEntity(
+        actor.tenantId(),
+        actor.userId(),
+        "RETURN_RECEIVED",
+        "return_request",
+        returnId,
+        Map.of("status", request.status()),
+        Map.of("status", "RECEIVED"));
+    return new ReturnViews.ReceiveResponseView(returnId, "RECEIVED", receivedAt);
+  }
+
+  static List<Map<String, Object>> contractReceivedLines(
+      Iterable<ReturnRepository.ReturnLineRow> lines) {
+    List<Map<String, Object>> outboxLines = new ArrayList<>();
+    for (ReturnRepository.ReturnLineRow line : lines) {
+      if (line.restockedQty() > 0) {
+        outboxLines.add(
+            Map.of(
+                "line_id",
+                line.externalLineId(),
+                "qty",
+                line.restockedQty(),
+                "condition",
+                "RESELLABLE"));
+      }
+      if (line.damagedQty() > 0) {
+        outboxLines.add(
+            Map.of(
+                "line_id",
+                line.externalLineId(),
+                "qty",
+                line.damagedQty(),
+                "condition",
+                "DAMAGED"));
+      }
+    }
+    return outboxLines;
+  }
+
+  private ReturnViews.ReceiveResponseView replayIfCompleted(
+      ReturnReceiveIdempotency.LookupResult lookup) {
+    if (lookup.state() != ReturnReceiveIdempotency.LookupState.COMPLETED) {
+      return null;
+    }
+    return json.treeToValue(lookup.stored().body(), ReturnViews.ReceiveResponseView.class);
+  }
+
+  private static String stockIdempotencyKey(
+      String stockScope, UUID returnLineId, int resellableQty, int damagedQty) {
     return "return-receive:"
-        + returnId
+        + stockScope
         + ":"
         + returnLineId
-        + ":"
-        + priorRestocked
-        + "+"
+        + ":r"
         + resellableQty
-        + ":"
-        + priorDamaged
-        + "+"
+        + ":d"
         + damagedQty;
+  }
+
+  private static String sha256(String canonical) {
+    try {
+      byte[] digest =
+          MessageDigest.getInstance("SHA-256").digest(canonical.getBytes(StandardCharsets.UTF_8));
+      return HexFormat.of().formatHex(digest);
+    } catch (NoSuchAlgorithmException ex) {
+      throw new IllegalStateException("SHA-256 is not available", ex);
+    }
   }
 
   private static String summarizeCondition(int restocked, int damaged) {
