@@ -27,7 +27,11 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 @RestControllerAdvice(
-    basePackages = {"com.thaishopfun.oms.order.web", "com.thaishopfun.oms.fulfillment"})
+    basePackages = {
+      "com.thaishopfun.oms.order.web",
+      "com.thaishopfun.oms.order.returnflow",
+      "com.thaishopfun.oms.fulfillment"
+    })
 class OrderErrorHandler {
 
   private static final Logger log = LoggerFactory.getLogger(OrderErrorHandler.class);

@@ -11,6 +11,7 @@ import com.thaishopfun.oms.order.OrderRecipientRepository;
 import com.thaishopfun.oms.order.OrderStatusHistoryRepository;
 import com.thaishopfun.oms.order.SalesOrder;
 import com.thaishopfun.oms.order.SalesOrderRepository;
+import com.thaishopfun.oms.order.returnflow.ReturnRepository;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Instant;
@@ -40,6 +41,7 @@ public class OrderQueryService {
   private final OrderStatusHistoryRepository history;
   private final ChannelAdapterRegistry adapters;
   private final OrderRecipientMaskedReader maskedRecipients;
+  private final ReturnRepository returns;
 
   private static final String BASE_FROM =
       """
@@ -55,7 +57,8 @@ public class OrderQueryService {
       OrderLineRepository lines,
       OrderStatusHistoryRepository history,
       ChannelAdapterRegistry adapters,
-      OrderRecipientMaskedReader maskedRecipients) {
+      OrderRecipientMaskedReader maskedRecipients,
+      ReturnRepository returns) {
     this.jdbc = jdbc;
     this.tx = tx;
     this.orders = orders;
@@ -64,6 +67,7 @@ public class OrderQueryService {
     this.history = history;
     this.adapters = adapters;
     this.maskedRecipients = maskedRecipients;
+    this.returns = returns;
   }
 
   public OrderViews.Page<OrderViews.ListItem> list(
@@ -195,8 +199,24 @@ public class OrderQueryService {
               recipient,
               timeline,
               loadPaymentSnapshot(order.id()),
-              loadRefunds(order.id()));
+              loadRefunds(order.id()),
+              loadReturns(order.id()));
         });
+  }
+
+  private List<OrderViews.ReturnSummaryView> loadReturns(UUID orderId) {
+    return returns.openReturnsForOrder(orderId).stream()
+        .map(
+            row ->
+                new OrderViews.ReturnSummaryView(
+                    row.id(),
+                    row.externalReturnId(),
+                    row.type(),
+                    row.status(),
+                    row.requestedAt(),
+                    row.receivedAt(),
+                    "#/returns/" + row.id()))
+        .toList();
   }
 
   public OrderViews.HoldsView holds() {

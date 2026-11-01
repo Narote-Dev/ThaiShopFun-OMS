@@ -30,7 +30,7 @@ class FlywayV18LabelCacheTest {
           statement.executeQuery(
               "SELECT version FROM flyway_schema_history ORDER BY installed_rank DESC LIMIT 1")) {
         assertThat(rows.next()).isTrue();
-        assertThat(rows.getString(1)).isEqualTo("18");
+        assertThat(rows.getString(1)).isEqualTo("19");
       }
       try (var rows =
           statement.executeQuery(

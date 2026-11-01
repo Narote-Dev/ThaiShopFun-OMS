@@ -503,6 +503,25 @@ export default function OrderDetailPage({ id, me }: { id: string; me: Me }) {
         </section>
       ) : null}
 
+      {order.returns && order.returns.length > 0 ? (
+        <Card className="mt-6">
+          <CardHeader title="คำขอคืนสินค้า" />
+          <CardBody>
+            <ul className="space-y-2 text-[13px]">
+              {order.returns.map((ret) => (
+                <li key={ret.id} className="flex flex-wrap items-center gap-2">
+                  <StatusBadge kind="return" value={ret.status} />
+                  <span>{labelTh(ret.type, 'return_type')}</span>
+                  <a className="text-teal-800 underline" href={ret.receive_url}>
+                    รับของคืน
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </CardBody>
+        </Card>
+      ) : null}
+
       {showCancel ? (
         <Card className="mt-6">
           <CardHeader title="ขอยกเลิกออเดอร์" />
