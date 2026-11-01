@@ -39,6 +39,7 @@ public class ReturnRepository {
       int qty,
       String condition,
       int restockedQty,
+      int damagedQty,
       UUID skuId) {}
 
   public Optional<ReturnRequestRow> findByExternalId(UUID orderId, String externalReturnId) {
@@ -146,7 +147,7 @@ public class ReturnRepository {
         .query(
             """
             SELECT rl.id, rl.order_id, rl.return_id, rl.order_line_id, ol.external_line_id,
-              rl.qty, rl.condition, rl.restocked_qty, ol.sku_id
+              rl.qty, rl.condition, rl.restocked_qty, rl.damaged_qty, ol.sku_id
             FROM return_line rl
             JOIN order_line ol ON ol.tenant_id = rl.tenant_id AND ol.id = rl.order_line_id
             WHERE rl.tenant_id = ? AND rl.return_id = ? AND rl.order_line_id = ?
@@ -181,7 +182,7 @@ public class ReturnRepository {
     return jdbc.query(
         """
         SELECT rl.id, rl.order_id, rl.return_id, rl.order_line_id, ol.external_line_id,
-          rl.qty, rl.condition, rl.restocked_qty, ol.sku_id
+          rl.qty, rl.condition, rl.restocked_qty, rl.damaged_qty, ol.sku_id
         FROM return_line rl
         JOIN order_line ol ON ol.tenant_id = rl.tenant_id AND ol.id = rl.order_line_id
         WHERE rl.tenant_id = ? AND rl.return_id = ?
@@ -216,6 +217,21 @@ public class ReturnRepository {
                 optionalInstant(rs.getTimestamp("received_at"))),
         tenantId,
         orderId);
+  }
+
+  void updateLineReceiveProgress(
+      UUID returnLineId, int restockedQty, int damagedQty, String condition) {
+    jdbc.update(
+        """
+        UPDATE return_line
+        SET restocked_qty = ?, damaged_qty = ?, condition = ?, updated_at = now()
+        WHERE tenant_id = ? AND id = ?
+        """,
+        restockedQty,
+        damagedQty,
+        condition,
+        TenantContext.requireTenantId(),
+        returnLineId);
   }
 
   void updateLineCondition(UUID returnLineId, String condition, int restockedQty) {
@@ -273,6 +289,7 @@ public class ReturnRepository {
         rs.getInt("qty"),
         rs.getString("condition"),
         rs.getInt("restocked_qty"),
+        rs.getInt("damaged_qty"),
         rs.getObject("sku_id", UUID.class));
   }
 

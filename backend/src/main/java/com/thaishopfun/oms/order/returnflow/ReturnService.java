@@ -1,5 +1,6 @@
 package com.thaishopfun.oms.order.returnflow;
 
+import com.thaishopfun.oms.order.OrderStateMachine;
 import com.thaishopfun.oms.order.SalesOrder;
 import com.thaishopfun.oms.order.SalesOrderRepository;
 import com.thaishopfun.oms.order.web.OrderAccess;
@@ -15,6 +16,7 @@ import com.thaishopfun.oms.tenant.TenantContext;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -94,8 +96,7 @@ public class ReturnService {
           for (ReturnRepository.ReturnLineRow line : returns.linesForReturn(returnId)) {
             byId.put(line.id(), line);
           }
-          Instant receivedAt = clock.instant();
-          List<Map<String, Object>> outboxLines = new ArrayList<>();
+          Map<UUID, List<ReturnViews.ReceiveLineBody>> grouped = new HashMap<>();
           for (ReturnViews.ReceiveLineBody input : body.lines()) {
             if (input.returnLineId() == null) {
               throw OrderApiException.fieldValidationFailed(
@@ -106,36 +107,108 @@ public class ReturnService {
               throw OrderApiException.fieldValidationFailed(
                   "condition", "condition must be RESELLABLE or DAMAGED");
             }
+            if (input.qty() < 1) {
+              throw OrderApiException.fieldValidationFailed("qty", "qty must be at least 1");
+            }
             ReturnRepository.ReturnLineRow line = byId.get(input.returnLineId());
             if (line == null) {
               throw OrderApiException.invalid("Unknown return line");
             }
-            if (line.condition() != null) {
-              continue;
+            grouped.computeIfAbsent(input.returnLineId(), ignored -> new ArrayList<>()).add(input);
+          }
+
+          for (Map.Entry<UUID, List<ReturnViews.ReceiveLineBody>> entry : grouped.entrySet()) {
+            ReturnRepository.ReturnLineRow line = byId.get(entry.getKey());
+            int resellable = 0;
+            int damaged = 0;
+            for (ReturnViews.ReceiveLineBody piece : entry.getValue()) {
+              if ("RESELLABLE".equals(piece.condition())) {
+                resellable += piece.qty();
+              } else {
+                damaged += piece.qty();
+              }
+            }
+            int remaining =
+                line.qty() - line.restockedQty() - line.damagedQty();
+            if (resellable + damaged > remaining) {
+              throw OrderApiException.conflict(
+                  "RETURN_RECEIVE_QTY_EXCEEDED",
+                  "Receive qty exceeds remaining units on return line");
             }
             if (line.skuId() == null) {
               throw OrderApiException.conflict("SKU_NOT_MAPPED", "Return line has no mapped SKU");
             }
-            String idempotencyKey = "return-receive:" + returnId + ":" + line.id();
-            if ("RESELLABLE".equals(condition)) {
+            if (resellable > 0) {
               RestockResult restock =
                   stock.restockReturn(
-                      line.id(), line.skuId(), null, line.qty(), idempotencyKey + ":restock");
-              returns.updateLineCondition(line.id(), condition, restock.qty());
-            } else {
+                      line.id(),
+                      line.skuId(),
+                      null,
+                      resellable,
+                      idempotencyKey(returnId, line.id(), "RESELLABLE", resellable, line));
+              if (restock.qty() != resellable) {
+                throw new IllegalStateException("restock qty mismatch");
+              }
+            }
+            if (damaged > 0) {
               WriteOffResult writeOff =
                   stock.writeOffReturn(
-                      line.id(), line.skuId(), null, line.qty(), idempotencyKey + ":writeoff");
-              returns.updateLineCondition(line.id(), condition, 0);
-              if (writeOff.qty() != line.qty()) {
+                      line.id(),
+                      line.skuId(),
+                      null,
+                      damaged,
+                      idempotencyKey(returnId, line.id(), "DAMAGED", damaged, line));
+              if (writeOff.qty() != damaged) {
                 throw new IllegalStateException("write-off qty mismatch");
               }
             }
+            int nextRestocked = line.restockedQty() + resellable;
+            int nextDamaged = line.damagedQty() + damaged;
+            String lineCondition = null;
+            if (nextRestocked + nextDamaged == line.qty()) {
+              lineCondition = summarizeCondition(nextRestocked, nextDamaged);
+            }
+            returns.updateLineReceiveProgress(
+                line.id(), nextRestocked, nextDamaged, lineCondition);
+            byId.put(
+                line.id(),
+                new ReturnRepository.ReturnLineRow(
+                    line.id(),
+                    line.orderId(),
+                    line.returnId(),
+                    line.orderLineId(),
+                    line.externalLineId(),
+                    line.qty(),
+                    lineCondition,
+                    nextRestocked,
+                    nextDamaged,
+                    line.skuId()));
+          }
+
+          boolean allComplete =
+              byId.values().stream()
+                  .allMatch(line -> line.restockedQty() + line.damagedQty() == line.qty());
+          if (!allComplete) {
+            return new ReturnViews.ReceiveResponseView(returnId, "APPROVED", null);
+          }
+
+          Instant receivedAt = clock.instant();
+          returns.markReceived(returnId, receivedAt);
+          List<Map<String, Object>> outboxLines = new ArrayList<>();
+          for (ReturnRepository.ReturnLineRow line : byId.values()) {
             outboxLines.add(
                 Map.of(
-                    "line_id", line.externalLineId(), "qty", line.qty(), "condition", condition));
+                    "line_id",
+                    line.externalLineId(),
+                    "qty",
+                    line.qty(),
+                    "restocked_qty",
+                    line.restockedQty(),
+                    "damaged_qty",
+                    line.damagedQty(),
+                    "condition",
+                    line.condition()));
           }
-          returns.markReceived(returnId, receivedAt);
           long version =
               orders.findById(order.id()).orElseThrow(OrderApiException::notFound).version();
           outbox.append(
@@ -163,6 +236,27 @@ public class ReturnService {
         });
   }
 
+  private static String idempotencyKey(
+      UUID returnId,
+      UUID returnLineId,
+      String condition,
+      int qty,
+      ReturnRepository.ReturnLineRow before) {
+    int prior =
+        "RESELLABLE".equals(condition) ? before.restockedQty() : before.damagedQty();
+    return "return-receive:" + returnId + ":" + returnLineId + ":" + condition + ":" + prior + "+" + qty;
+  }
+
+  private static String summarizeCondition(int restocked, int damaged) {
+    if (restocked > 0 && damaged > 0) {
+      return "MIXED";
+    }
+    if (damaged > 0) {
+      return "DAMAGED";
+    }
+    return "RESELLABLE";
+  }
+
   private ReturnViews.ReturnDetailView toDetail(
       ReturnRepository.ReturnRequestRow request, SalesOrder order) {
     List<ReturnViews.ReturnLineView> lines =
@@ -177,6 +271,7 @@ public class ReturnService {
                         line.qty(),
                         line.condition(),
                         line.restockedQty(),
+                        line.damagedQty(),
                         line.skuId()))
             .toList();
     boolean canReceive = "APPROVED".equals(request.status());

@@ -128,8 +128,9 @@ public class StockMovements {
    * the default warehouse.
    */
   /**
-   * {@code on_hand -= qty} with ledger {@code DAMAGE_WRITE_OFF}, {@code ref_type = return_line}.
-   * Mirrors {@link #restockReturn} for damaged return lines.
+   * Records {@code DAMAGE_WRITE_OFF} on the ledger with {@code delta_on_hand = 0}. Shipped units
+   * already left stock; damaged returns are qty-neutral on {@code on_hand}. {@code ref_type =
+   * return_line}.
    */
   public WriteOffResult writeOffReturn(
       UUID returnLineId, UUID skuId, UUID warehouseId, int qty, String idempotencyKey) {
@@ -475,22 +476,13 @@ public class StockMovements {
     if (locked == null) {
       throw new IllegalStateException("inventory row for write-off is not visible");
     }
-    int delta = -qty;
-    long after = (long) locked.onHand() + delta;
-    if (after < locked.reserved() || after < 0) {
-      throw new StockOperationException(
-          StockError.BELOW_RESERVED, "write-off would take on_hand below reserved");
-    }
-    if (repository.adjustOnHand(Map.of(locked.id(), delta)) != 1) {
-      throw new StockConflictException("write-off updated no inventory row");
-    }
     UUID ledgerId = UuidV7.generate();
     repository.insertLedger(
         tenantId,
         "DAMAGE_WRITE_OFF",
         StockRepository.REF_RETURN_LINE,
         actor(),
-        List.of(new LedgerEntry(ledgerId, skuId, warehouse, delta, 0, returnLineId)));
+        List.of(new LedgerEntry(ledgerId, skuId, warehouse, 0, 0, returnLineId)));
     events.publishEvent(
         new StockChanged(tenantId, Set.of(skuId), repository.bundlesUsing(Set.of(skuId))));
     WriteOffResult result = new WriteOffResult(returnLineId, ledgerId, skuId, warehouse, qty);

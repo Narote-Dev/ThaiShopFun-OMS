@@ -12,6 +12,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
+import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.JsonNode;
 
@@ -94,7 +95,11 @@ public class ReturnIntakeSupport {
                 + qty);
       }
       if (returns.findLine(request.id(), orderLineId).isEmpty()) {
-        returns.insertLine(order.id(), request.id(), orderLineId, qty);
+        try {
+          returns.insertLine(order.id(), request.id(), orderLineId, qty);
+        } catch (DataAccessException ex) {
+          throw mapReturnQtyExceeded(ex);
+        }
       }
     }
     hooks.afterOutbox();
@@ -162,5 +167,16 @@ public class ReturnIntakeSupport {
     }
     String text = value.asString();
     return text.isBlank() ? null : text;
+  }
+
+  private static RuntimeException mapReturnQtyExceeded(DataAccessException ex) {
+    Throwable root = ex.getMostSpecificCause();
+    if (root instanceof java.sql.SQLException sql && "23514".equals(sql.getSQLState())) {
+      String message = sql.getMessage();
+      if (message != null && message.contains("RETURN_QTY_EXCEEDED")) {
+        return new NonRetryableInboxException(message);
+      }
+    }
+    return ex;
   }
 }

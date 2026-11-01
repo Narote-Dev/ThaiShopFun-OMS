@@ -124,12 +124,14 @@ class ReturnFlowAcceptanceTest extends OrderIntegrationTest {
         fixture.inTenant(
             tenantId,
             () -> returns.findByExternalId(order.id(), "tsf_ret_partial").orElseThrow().id());
+    UUID returnLine =
+        fixture.inTenant(tenantId, () -> returnLineId(returnId, "L1"));
     int before = fixture.inTenant(tenantId, () -> onHand(sku));
     String body =
         """
-        {"lines":[{"return_line_id":"%s","condition":"RESELLABLE"}]}
+        {"lines":[{"return_line_id":"%s","condition":"RESELLABLE","qty":1}]}
         """
-            .formatted(fixture.inTenant(tenantId, () -> returnLineId(returnId, "L1")));
+            .formatted(returnLine);
     assertThat(postReceive(returnId, body).statusCode()).isEqualTo(200);
     SalesOrder fresh = fixture.inTenant(tenantId, () -> orders.findById(order.id()).orElseThrow());
     assertThat(fresh.orderStatus()).isEqualTo("ACTIVE");
@@ -140,7 +142,7 @@ class ReturnFlowAcceptanceTest extends OrderIntegrationTest {
   }
 
   @Test
-  void damagedReturnWritesOffWithoutRestock() throws Exception {
+  void damagedReturnDoesNotChangeOnHand() throws Exception {
     SalesOrder order = seedDeliveredTwoLineOrder();
     UUID sku = fixture.inTenant(tenantId, () -> lineSku(order.id(), "L1"));
     FulfillmentTestSupport.seedInventory(
@@ -154,11 +156,108 @@ class ReturnFlowAcceptanceTest extends OrderIntegrationTest {
     int before = fixture.inTenant(tenantId, () -> onHand(sku));
     String body =
         """
-        {"lines":[{"return_line_id":"%s","condition":"DAMAGED"}]}
+        {"lines":[{"return_line_id":"%s","condition":"DAMAGED","qty":1}]}
         """
             .formatted(fixture.inTenant(tenantId, () -> returnLineId(returnId, "L1")));
     assertThat(postReceive(returnId, body).statusCode()).isEqualTo(200);
-    assertThat(fixture.inTenant(tenantId, () -> onHand(sku))).isEqualTo(before - 1);
+    assertThat(fixture.inTenant(tenantId, () -> onHand(sku))).isEqualTo(before);
+  }
+
+  @Test
+  void mixedConditionPerPieceRestocksOnlyResellableUnits() throws Exception {
+    SalesOrder order = seedDeliveredSingleLineQty(2);
+    UUID sku = fixture.inTenant(tenantId, () -> lineSku(order.id(), "L1"));
+    int startOnHand = 10;
+    FulfillmentTestSupport.seedInventory(
+        order.tenantId(), sku, FulfillmentTestSupport.ensureDefaultWarehouse(order.tenantId()), startOnHand);
+    simulateShippedUnits(order, sku, 2);
+    ingest(returnRequested(order.externalOrderId(), "L1", 2));
+    ingest(returnDecided(order.externalOrderId(), "APPROVED"));
+    UUID returnId =
+        fixture.inTenant(
+            tenantId,
+            () -> returns.findByExternalId(order.id(), "tsf_ret_partial").orElseThrow().id());
+    UUID returnLine =
+        fixture.inTenant(tenantId, () -> returnLineId(returnId, "L1"));
+    String body =
+        """
+        {"lines":[
+          {"return_line_id":"%s","condition":"RESELLABLE","qty":1},
+          {"return_line_id":"%s","condition":"DAMAGED","qty":1}
+        ]}
+        """
+            .formatted(returnLine, returnLine);
+    assertThat(postReceive(returnId, body).statusCode()).isEqualTo(200);
+    assertThat(fixture.inTenant(tenantId, () -> onHand(sku))).isEqualTo(startOnHand - 2 + 1);
+  }
+
+  @Test
+  void partialLineReceiveKeepsReturnApprovedUntilAllLinesDone() throws Exception {
+    SalesOrder order = seedDeliveredTwoLineOrder();
+    UUID sku1 = fixture.inTenant(tenantId, () -> lineSku(order.id(), "L1"));
+    UUID sku2 = fixture.inTenant(tenantId, () -> lineSku(order.id(), "L2"));
+    FulfillmentTestSupport.seedInventory(
+        order.tenantId(), sku1, FulfillmentTestSupport.ensureDefaultWarehouse(order.tenantId()), 5);
+    FulfillmentTestSupport.seedInventory(
+        order.tenantId(), sku2, FulfillmentTestSupport.ensureDefaultWarehouse(order.tenantId()), 5);
+    ingest(returnRequestedTwoLines(order.externalOrderId(), 1, 1));
+    ingest(returnDecided(order.externalOrderId(), "APPROVED"));
+    UUID returnId =
+        fixture.inTenant(
+            tenantId,
+            () -> returns.findByExternalId(order.id(), "tsf_ret_partial").orElseThrow().id());
+    UUID line1 = fixture.inTenant(tenantId, () -> returnLineId(returnId, "L1"));
+    UUID line2 = fixture.inTenant(tenantId, () -> returnLineId(returnId, "L2"));
+    String first =
+        """
+        {"lines":[{"return_line_id":"%s","condition":"RESELLABLE","qty":1}]}
+        """
+            .formatted(line1);
+    assertThat(postReceive(returnId, first).statusCode()).isEqualTo(200);
+    assertThat(
+            fixture.inTenant(
+                tenantId,
+                () ->
+                    returns
+                        .findByExternalId(order.id(), "tsf_ret_partial")
+                        .orElseThrow()
+                        .status()))
+        .isEqualTo("APPROVED");
+    String second =
+        """
+        {"lines":[{"return_line_id":"%s","condition":"RESELLABLE","qty":1}]}
+        """
+            .formatted(line2);
+    assertThat(postReceive(returnId, second).statusCode()).isEqualTo(200);
+    assertThat(
+            fixture.inTenant(
+                tenantId,
+                () ->
+                    returns
+                        .findByExternalId(order.id(), "tsf_ret_partial")
+                        .orElseThrow()
+                        .status()))
+        .isEqualTo("RECEIVED");
+  }
+
+  @Test
+  void cumulativeReturnQtyFromTriggerMarksInboxDead() throws Exception {
+    SalesOrder order = seedDeliveredSingleLineQty(2);
+    ingest(returnRequested(order.externalOrderId(), "L1", 1, "ret-a"));
+    ingest(returnDecided(order.externalOrderId(), "APPROVED", "ret-a"));
+    ObjectNode second = returnRequested(order.externalOrderId(), "L1", 2, "ret-b");
+    second.put("event_id", "ret-cum-" + UUID.randomUUID());
+    ingestOnly(second);
+    worker.processAvailable(1);
+    assertThat(
+            fixture.inTenant(
+                tenantId,
+                () ->
+                    jdbc.queryForObject(
+                        "SELECT status FROM inbox_event WHERE event_id = ?",
+                        String.class,
+                        second.path("event_id").asString())))
+        .isEqualTo("DEAD");
   }
 
   @Test
@@ -241,15 +340,96 @@ class ReturnFlowAcceptanceTest extends OrderIntegrationTest {
         HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
   }
 
-  private ObjectNode returnRequested(String externalOrderId, String lineId, int qty)
+  private SalesOrder seedDeliveredSingleLineQty(int lineQty) throws Exception {
+    String external = "RET-ONEQ-" + UUID.randomUUID().toString().substring(0, 8);
+    ingest(
+        OrderIntakeScenarioSupport.orderCreated(
+            JSON,
+            external,
+            tsfShopId,
+            UUID.randomUUID().toString(),
+            "PREPAID",
+            "tsf_sku_7781",
+            lineQty,
+            1));
+    ingest(OrderIntakeScenarioSupport.orderPaid(JSON, external, tsfShopId, 2));
+    SalesOrder order =
+        fixture.inTenant(
+            tenantId, () -> orders.findByExternalId(channelAccountId, external).orElseThrow());
+    fixture.inTenant(
+        tenantId,
+        () -> {
+          jdbc.update(
+              """
+              UPDATE sales_order
+              SET fulfillment_status = 'DELIVERED', payment_status = 'PAID', order_status = 'ACTIVE'
+              WHERE id = ?
+              """,
+              order.id());
+          return null;
+        });
+    return fixture.inTenant(tenantId, () -> orders.findById(order.id()).orElseThrow());
+  }
+
+  private void simulateShippedUnits(SalesOrder order, UUID skuId, int shippedQty) {
+    fixture.inTenant(
+        tenantId,
+        () -> {
+          jdbc.update(
+              """
+              UPDATE inventory
+              SET on_hand = on_hand - ?
+              WHERE tenant_id = ? AND sku_id = ?
+              """,
+              shippedQty,
+              order.tenantId(),
+              skuId);
+          return null;
+        });
+  }
+
+  private ObjectNode returnRequestedTwoLines(String externalOrderId, int qtyL1, int qtyL2)
       throws IOException {
+    return returnRequestedTwoLines(externalOrderId, qtyL1, qtyL2, "tsf_ret_partial");
+  }
+
+  private ObjectNode returnRequestedTwoLines(
+      String externalOrderId, int qtyL1, int qtyL2, String externalReturnId) throws IOException {
     ObjectNode event = loadExample("return.requested.json");
     event.put("event_id", "ret-req-" + UUID.randomUUID());
     event.put("tsf_shop_id", tsfShopId);
-    event.put("aggregate_id", "tsf_ret_partial");
+    event.put("aggregate_id", externalReturnId);
     ObjectNode data = (ObjectNode) event.get("data");
     data.put("order_id", externalOrderId);
-    data.put("return_id", "tsf_ret_partial");
+    data.put("return_id", externalReturnId);
+    ArrayNode lines = JSON.createArrayNode();
+    ObjectNode l1 = JSON.createObjectNode();
+    l1.put("line_id", "L1");
+    l1.put("qty", qtyL1);
+    lines.add(l1);
+    ObjectNode l2 = JSON.createObjectNode();
+    l2.put("line_id", "L2");
+    l2.put("qty", qtyL2);
+    lines.add(l2);
+    data.set("lines", lines);
+    assertThat(CONTRACT.envelopeErrors(JSON.writeValueAsString(event))).isEmpty();
+    return event;
+  }
+
+  private ObjectNode returnRequested(String externalOrderId, String lineId, int qty)
+      throws IOException {
+    return returnRequested(externalOrderId, lineId, qty, "tsf_ret_partial");
+  }
+
+  private ObjectNode returnRequested(
+      String externalOrderId, String lineId, int qty, String externalReturnId) throws IOException {
+    ObjectNode event = loadExample("return.requested.json");
+    event.put("event_id", "ret-req-" + UUID.randomUUID());
+    event.put("tsf_shop_id", tsfShopId);
+    event.put("aggregate_id", externalReturnId);
+    ObjectNode data = (ObjectNode) event.get("data");
+    data.put("order_id", externalOrderId);
+    data.put("return_id", externalReturnId);
     ArrayNode lines = JSON.createArrayNode();
     ObjectNode line = JSON.createObjectNode();
     line.put("line_id", lineId);
@@ -261,13 +441,18 @@ class ReturnFlowAcceptanceTest extends OrderIntegrationTest {
   }
 
   private ObjectNode returnDecided(String externalOrderId, String decision) throws IOException {
+    return returnDecided(externalOrderId, decision, "tsf_ret_partial");
+  }
+
+  private ObjectNode returnDecided(String externalOrderId, String decision, String externalReturnId)
+      throws IOException {
     ObjectNode event = loadExample("return.decided.json");
     event.put("event_id", "ret-dec-" + UUID.randomUUID());
     event.put("tsf_shop_id", tsfShopId);
-    event.put("aggregate_id", "tsf_ret_partial");
+    event.put("aggregate_id", externalReturnId);
     ObjectNode data = (ObjectNode) event.get("data");
     data.put("order_id", externalOrderId);
-    data.put("return_id", "tsf_ret_partial");
+    data.put("return_id", externalReturnId);
     data.put("decision", decision);
     assertThat(CONTRACT.envelopeErrors(JSON.writeValueAsString(event))).isEmpty();
     return event;

@@ -370,8 +370,19 @@ public class OrderIntakeSupport {
         throw ex;
       }
     }
+    SalesOrder afterStock = orders.findById(order.id()).orElseThrow();
+    if ("PACKED".equals(afterStock.fulfillmentStatus())
+        || "PICKING".equals(afterStock.fulfillmentStatus())) {
+      stateMachine.applyFulfillmentStatus(
+          afterStock,
+          "UNFULFILLED",
+          "TSF cancel",
+          "TSF",
+          guard(account, afterStock, List.of()));
+    }
+    SalesOrder toCancel = orders.findById(order.id()).orElseThrow();
     stateMachine.applyOrderStatus(
-        order, "CANCELLED", "TSF cancel", "TSF", guard(account, order, List.of()));
+        toCancel, "CANCELLED", "TSF cancel", "TSF", guard(account, toCancel, List.of()));
     piiLifecycle.onOrderClosed(order.id(), clock.instant());
     bumpExternalVersion(account, order, message);
     hooks.afterOutbox();

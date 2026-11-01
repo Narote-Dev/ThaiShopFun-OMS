@@ -11,12 +11,19 @@ import {
 } from '../ui/DataTable'
 import { PageContent } from '../ui/PageContent'
 import { PageHeader } from '../ui/PageHeader'
+import { Select } from '../ui/Select'
 import { StatusBadge } from '../ui/StatusBadge'
 import { labelTh } from '../ui/labels'
 import { returnsApi, returnsMessage, type ReturnDetail } from './api'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
-type LineDraft = { return_line_id: string; condition: 'RESELLABLE' | 'DAMAGED' | '' }
+type PieceCondition = 'RESELLABLE' | 'DAMAGED' | ''
+
+type LineDraft = { return_line_id: string; pieces: PieceCondition[] }
+
+function emptyPieces(qty: number): PieceCondition[] {
+  return Array.from({ length: qty }, () => '')
+}
 
 export default function ReturnReceivePage({ returnId, me }: { returnId: string; me: Me }) {
   const canReceive = me.role === 'OWNER' || me.role === 'ADMIN'
@@ -35,29 +42,47 @@ export default function ReturnReceivePage({ returnId, me }: { returnId: string; 
         setDrafts(
           loaded.lines.map((line) => ({
             return_line_id: line.return_line_id,
-            condition: (line.condition as LineDraft['condition']) || '',
+            pieces: emptyPieces(line.qty),
           })),
         )
         setError('')
       })
       .catch((err: unknown) => {
-        if (active) setError(returnsMessage(err, 'โหลดคำขอคืนไม่สำเร็จ'))
+        if (active) setError(returnsMessage(err, labelTh('RETURN_LOAD_ERROR')))
       })
     return () => {
       active = false
     }
   }, [returnId])
 
+  const pendingPieces = useMemo(
+    () => drafts.reduce((sum, row) => sum + row.pieces.filter((piece) => piece !== '').length, 0),
+    [drafts],
+  )
+
   async function submitReceive() {
     if (!detail || !canReceive) return
     setBusy(true)
     setError('')
     try {
-      const lines = drafts
-        .filter((row) => row.condition === 'RESELLABLE' || row.condition === 'DAMAGED')
-        .map((row) => ({ return_line_id: row.return_line_id, condition: row.condition }))
+      const grouped = new Map<string, Map<PieceCondition, number>>()
+      for (const row of drafts) {
+        for (const piece of row.pieces) {
+          if (piece !== 'RESELLABLE' && piece !== 'DAMAGED') continue
+          const line = grouped.get(row.return_line_id) ?? new Map<PieceCondition, number>()
+          line.set(piece, (line.get(piece) ?? 0) + 1)
+          grouped.set(row.return_line_id, line)
+        }
+      }
+      const lines = [...grouped.entries()].flatMap(([returnLineId, counts]) =>
+        [...counts.entries()].map(([condition, qty]) => ({
+          return_line_id: returnLineId,
+          condition,
+          qty,
+        })),
+      )
       if (lines.length === 0) {
-        setError('เลือกสภาพสินค้าอย่างน้อยหนึ่งบรรทัด')
+        setError(labelTh('RETURN_RECEIVE_PICK_CONDITION'))
         return
       }
       await returnsApi.receive(returnId, lines)
@@ -66,11 +91,11 @@ export default function ReturnReceivePage({ returnId, me }: { returnId: string; 
       setDrafts(
         refreshed.lines.map((line) => ({
           return_line_id: line.return_line_id,
-          condition: (line.condition as LineDraft['condition']) || '',
+          pieces: emptyPieces(line.qty),
         })),
       )
     } catch (err: unknown) {
-      setError(returnsMessage(err, 'บันทึกรับของคืนไม่สำเร็จ'))
+      setError(returnsMessage(err, labelTh('RETURN_RECEIVE_ERROR')))
     } finally {
       setBusy(false)
     }
@@ -79,11 +104,11 @@ export default function ReturnReceivePage({ returnId, me }: { returnId: string; 
   if (!detail) {
     return (
       <PageContent>
-        <PageHeader title="รับของคืน" />
+        <PageHeader title={labelTh('RETURN_RECEIVE_TITLE')} />
         {error ? (
           <AlertBanner variant="danger" title={error} />
         ) : (
-          <p className="text-[13px] text-stone-600">กำลังโหลด…</p>
+          <p className="text-[13px] text-stone-600">{labelTh('RETURN_LOADING')}</p>
         )}
       </PageContent>
     )
@@ -94,19 +119,19 @@ export default function ReturnReceivePage({ returnId, me }: { returnId: string; 
   return (
     <PageContent>
       <PageHeader
-        title="รับของคืน"
-        subtitle={`ออเดอร์ ${detail.external_order_id} · ${labelTh(detail.type, 'return_type')} · ${labelTh(detail.status, 'return_status')}`}
+        title={labelTh('RETURN_RECEIVE_TITLE')}
+        subtitle={`${labelTh('ORDER_NUMBER')} ${detail.external_order_id} · ${labelTh(detail.type, 'return_type')} · ${labelTh(detail.status, 'return_status')}`}
       />
       {error ? <AlertBanner variant="danger" className="mt-5" title={error} /> : null}
       <Card className="mt-4">
-        <CardHeader title="รายการคืน" />
+        <CardHeader title={labelTh('RETURN_LINES_TITLE')} />
         <CardBody>
-          <DataTable aria-label="รายการคืนสินค้า">
+          <DataTable aria-label={labelTh('RETURN_LINES_TITLE')}>
             <DataTableHead>
               <DataTableRow>
-                <DataTableTh>สินค้า</DataTableTh>
-                <DataTableTh>จำนวน</DataTableTh>
-                <DataTableTh>สภาพเมื่อรับ</DataTableTh>
+                <DataTableTh>{labelTh('PRODUCT')}</DataTableTh>
+                <DataTableTh>{labelTh('QTY')}</DataTableTh>
+                <DataTableTh>{labelTh('RETURN_CONDITION_COLUMN')}</DataTableTh>
               </DataTableRow>
             </DataTableHead>
             <tbody>
@@ -119,26 +144,50 @@ export default function ReturnReceivePage({ returnId, me }: { returnId: string; 
                   <DataTableCell>{line.qty}</DataTableCell>
                   <DataTableCell>
                     {line.condition ? (
-                      <StatusBadge kind="return_condition" value={line.condition} />
+                      <div className="space-y-1">
+                        <StatusBadge kind="return_condition" value={line.condition} />
+                        {line.restocked_qty > 0 ? (
+                          <div className="text-[12px] text-stone-500">
+                            {labelTh('RETURN_RESELLABLE_QTY')}: {line.restocked_qty}
+                          </div>
+                        ) : null}
+                        {line.damaged_qty > 0 ? (
+                          <div className="text-[12px] text-stone-500">
+                            {labelTh('RETURN_DAMAGED_QTY')}: {line.damaged_qty}
+                          </div>
+                        ) : null}
+                      </div>
                     ) : received || !detail.can_receive || !canReceive ? (
                       <span className="text-stone-500">—</span>
                     ) : (
-                      <select
-                        className="rounded border border-stone-300 px-2 py-1 text-[13px]"
-                        value={drafts[index]?.condition ?? ''}
-                        onChange={(event) => {
-                          const value = event.target.value as LineDraft['condition']
-                          setDrafts((prev) =>
-                            prev.map((row, i) =>
-                              i === index ? { ...row, condition: value } : row,
-                            ),
-                          )
-                        }}
-                      >
-                        <option value="">เลือกสภาพ</option>
-                        <option value="RESELLABLE">{labelTh('RESELLABLE')}</option>
-                        <option value="DAMAGED">{labelTh('DAMAGED')}</option>
-                      </select>
+                      <div className="space-y-2">
+                        {Array.from({ length: line.qty }, (_, pieceIndex) => (
+                          <Select
+                            key={`${line.return_line_id}-${pieceIndex}`}
+                            aria-label={`${line.name} ${labelTh('RETURN_PIECE')} ${pieceIndex + 1}`}
+                            value={drafts[index]?.pieces[pieceIndex] ?? ''}
+                            onChange={(event) => {
+                              const value = event.target.value as PieceCondition
+                              setDrafts((prev) =>
+                                prev.map((row, rowIndex) =>
+                                  rowIndex === index
+                                    ? {
+                                        ...row,
+                                        pieces: row.pieces.map((piece, i) =>
+                                          i === pieceIndex ? value : piece,
+                                        ),
+                                      }
+                                    : row,
+                                ),
+                              )
+                            }}
+                          >
+                            <option value="">{labelTh('RETURN_CONDITION_PLACEHOLDER')}</option>
+                            <option value="RESELLABLE">{labelTh('RESELLABLE')}</option>
+                            <option value="DAMAGED">{labelTh('DAMAGED')}</option>
+                          </Select>
+                        ))}
+                      </div>
                     )}
                   </DataTableCell>
                 </DataTableRow>
@@ -148,14 +197,17 @@ export default function ReturnReceivePage({ returnId, me }: { returnId: string; 
         </CardBody>
       </Card>
       {detail.can_receive && canReceive && !received ? (
-        <div className="mt-4">
+        <div className="mt-4 flex flex-wrap items-center gap-3">
           <Button type="button" disabled={busy} onClick={() => void submitReceive()}>
-            ยืนยันรับของคืน
+            {labelTh('RETURN_RECEIVE_CONFIRM')}
           </Button>
+          <span className="text-[12px] text-stone-500">
+            เลือกสภาพแล้ว {pendingPieces} ชิ้น
+          </span>
         </div>
       ) : null}
       {!canReceive ? (
-        <p className="mt-4 text-[13px] text-stone-600">เฉพาะผู้ดูแลร้านจึงจะบันทึกรับของคืนได้</p>
+        <p className="mt-4 text-[13px] text-stone-600">{labelTh('RETURN_RECEIVE_OWNER_ONLY')}</p>
       ) : null}
     </PageContent>
   )

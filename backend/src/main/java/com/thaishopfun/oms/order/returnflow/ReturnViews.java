@@ -26,6 +26,7 @@ public final class ReturnViews {
       int qty,
       String condition,
       @JsonProperty("restocked_qty") int restockedQty,
+      @JsonProperty("damaged_qty") int damagedQty,
       @JsonProperty("sku_id") UUID skuId) {}
 
   public record ReturnDetailView(
@@ -42,7 +43,7 @@ public final class ReturnViews {
       @JsonProperty("can_receive") boolean canReceive) {}
 
   public record ReceiveLineBody(
-      @JsonProperty("return_line_id") UUID returnLineId, String condition) {}
+      @JsonProperty("return_line_id") UUID returnLineId, String condition, int qty) {}
 
   public record ReceiveBody(List<ReceiveLineBody> lines) {}
 

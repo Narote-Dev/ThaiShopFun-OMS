@@ -132,6 +132,7 @@ class CancelPackedUnpackAcceptanceTest extends OrderIntegrationTest {
     SalesOrder fresh =
         fixture.inTenant(shop.tenantId(), () -> orders.findById(order.id()).orElseThrow());
     assertThat(fresh.orderStatus()).isEqualTo("CANCELLED");
+    assertThat(fresh.fulfillmentStatus()).isEqualTo("UNFULFILLED");
     assertThat(countPackProgress(shop.tenantId(), order.id())).isZero();
     assertThat(activePickListMembership(shop.tenantId(), order.id())).isZero();
     assertThat(reserved(shop.tenantId(), sku.skuId())).isZero();

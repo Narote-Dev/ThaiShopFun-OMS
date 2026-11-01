@@ -113,6 +113,7 @@ const RETURN: Record<string, StatusStyle> = {
 const RETURN_CONDITION: Record<string, StatusStyle> = {
   RESELLABLE: { variant: 'success', label: labelTh('RESELLABLE') },
   DAMAGED: { variant: 'danger', label: labelTh('DAMAGED') },
+  MIXED: { variant: 'warning', label: labelTh('MIXED') },
 }
 
 const CARRIER: Record<string, StatusStyle> = {
