@@ -111,6 +111,8 @@ class CancelPackedUnpackAcceptanceTest extends OrderIntegrationTest {
     FulfillmentTestSupport.addLine(order, sku.skuId(), 2);
     FulfillmentTestSupport.seedInventory(shop.tenantId(), sku.skuId(), sku.warehouseId(), 20);
     packToComplete(httpShop, order.id(), sku.skuCode(), 2);
+    assertThat(fulfillmentStatus(shop.tenantId(), order.id())).isEqualTo("PACKED");
+    seedPackProgressRow(shop.tenantId(), order.id(), sku.skuId(), 2);
 
     assertThat(countPackProgress(shop.tenantId(), order.id())).isPositive();
     assertThat(activePickListMembership(shop.tenantId(), order.id())).isEqualTo(1);
@@ -126,6 +128,48 @@ class CancelPackedUnpackAcceptanceTest extends OrderIntegrationTest {
     assertThat(countPackProgress(shop.tenantId(), order.id())).isZero();
     assertThat(activePickListMembership(shop.tenantId(), order.id())).isZero();
     assertThat(reserved(shop.tenantId(), sku.skuId())).isZero();
+  }
+
+  private String fulfillmentStatus(UUID tenantId, UUID orderId) {
+    TenantContext.set(tenantId, null);
+    try {
+      return jdbc.queryForObject(
+          "SELECT fulfillment_status FROM sales_order WHERE tenant_id = ? AND id = ?",
+          String.class,
+          tenantId,
+          orderId);
+    } finally {
+      TenantContext.clear();
+    }
+  }
+
+  private void seedPackProgressRow(UUID tenantId, UUID orderId, UUID skuId, int packedQty) {
+    TenantContext.set(tenantId, null);
+    try {
+      UUID lineId =
+          jdbc.queryForObject(
+              """
+              SELECT id FROM order_line
+              WHERE tenant_id = ? AND order_id = ? AND sku_id = ?
+              LIMIT 1
+              """,
+              UUID.class,
+              tenantId,
+              orderId,
+              skuId);
+      jdbc.update(
+          """
+          INSERT INTO order_pack_progress (tenant_id, order_id, order_line_id, packed_qty)
+          VALUES (?, ?, ?, ?)
+          ON CONFLICT (tenant_id, order_id, order_line_id) DO UPDATE SET packed_qty = EXCLUDED.packed_qty
+          """,
+          tenantId,
+          orderId,
+          lineId,
+          packedQty);
+    } finally {
+      TenantContext.clear();
+    }
   }
 
   private void packToComplete(CatalogHttp.Shop httpShop, UUID orderId, String skuCode, int qty)

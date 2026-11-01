@@ -104,8 +104,8 @@ public final class OrderIntakeScenarioSupport {
     return event;
   }
 
-  public static ObjectNode orderPaid(JsonMapper json, String orderId, String shopId, long aggregateVersion)
-      throws IOException {
+  public static ObjectNode orderPaid(
+      JsonMapper json, String orderId, String shopId, long aggregateVersion) throws IOException {
     ObjectNode event = loadExample(json, "order.paid.json");
     event.put("event_id", "evt-" + java.util.UUID.randomUUID());
     event.put("tsf_shop_id", shopId);

@@ -224,7 +224,7 @@ class ReturnFlowAcceptanceTest extends OrderIntegrationTest {
               order.id());
           return null;
         });
-    return orders.findById(order.id()).orElseThrow();
+    return fixture.inTenant(tenantId, () -> orders.findById(order.id()).orElseThrow());
   }
 
   private HttpResponse<String> postReceive(UUID returnId, String jsonBody) throws Exception {
@@ -328,7 +328,7 @@ class ReturnFlowAcceptanceTest extends OrderIntegrationTest {
 
   private void ingest(ObjectNode event) throws Exception {
     ingestOnly(event);
-    worker.processAvailable(1);
+    assertThat(worker.processAvailable(1)).isEqualTo(1);
   }
 
   private void ingestOnly(ObjectNode event) throws Exception {
