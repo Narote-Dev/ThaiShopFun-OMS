@@ -54,6 +54,7 @@ import tools.jackson.databind.node.ObjectNode;
 class ReturnFlowAcceptanceTest extends OrderIntegrationTest {
 
   private static final String INBOX_SECRET = "dev-inbox-hmac-secret";
+  private static final String OUTBOX_SECRET = "dev-outbox-webhook-secret-local-only";
   private static final JsonMapper JSON = JsonMapper.builder().build();
   private static final ContractValidator CONTRACT = ContractValidator.classpath();
   private static ConfigurableApplicationContext mock;
@@ -86,6 +87,11 @@ class ReturnFlowAcceptanceTest extends OrderIntegrationTest {
     registry.add("oms.inbox.hmac-secrets", () -> INBOX_SECRET);
     registry.add("oms.inbox.worker-enabled", () -> "false");
     registry.add("oms.inbox.jitter-ratio", () -> "0");
+    registry.add("oms.outbox.jitter-ratio", () -> "0");
+    registry.add(
+        "oms.outbox.destination-url",
+        () -> "http://127.0.0.1:" + mockPort() + "/internal/v1/oms-events");
+    registry.add("oms.outbox.webhook-secret", () -> OUTBOX_SECRET);
     registry.add("oms.security.internal-client-ids", () -> "tsf,tsf-checkout");
   }
 
