@@ -9,6 +9,7 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
 
 @Configuration
 @Profile("staging")
@@ -22,7 +23,8 @@ class StagingSecurityConfig {
     if (!base.startsWith("/")) {
       base = "/" + base;
     }
-    http.securityMatcher(base + "/**");
+    // Step 1: Ant-style matcher so OPTIONS preflight matches before MVC maps POST-only handlers.
+    http.securityMatcher(PathPatternRequestMatcher.pathPattern(base + "/**"));
     http.csrf(AbstractHttpConfigurer::disable)
         .sessionManagement(
             session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
