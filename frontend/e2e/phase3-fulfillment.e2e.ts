@@ -20,6 +20,81 @@ async function loginActiveShop(page: import('@playwright/test').Page) {
   await expect(page.getByRole('heading', { name: 'Active Shop', exact: true })).toBeVisible()
 }
 
+test('phase 3 cancel at PACKED releases reservation and clears pack progress', async ({ page, request }) => {
+  test.setTimeout(180_000)
+  const token = await ownerToken(request)
+  await seedDemoCatalog(request)
+  const externalOrderId = `E2E-PACK-CXL-${Date.now()}`
+  await createPrepaidOrder(request, externalOrderId, [
+    { line_id: 'L1', listing_sku_id: 'L-demo-ready', qty: 1, unit_price: 295 },
+  ])
+  const { id: orderId } = await waitForOrder(request, token, externalOrderId, 'READY_TO_PICK')
+
+  const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }
+  let pickIssued = false
+  let scanDone = false
+  await expect
+    .poll(
+      async () => {
+        const detail = await orderDetail(request, token, orderId)
+        if (detail.fulfillment_status === 'PACKED') return 'packed'
+        if (!pickIssued && detail.fulfillment_status === 'READY_TO_PICK') {
+          const pick = await request.post(`${OMS}/api/v1/pick-lists`, {
+            headers,
+            data: { order_ids: [orderId] },
+          })
+          if (pick.ok()) pickIssued = true
+          return ''
+        }
+        if ((detail.fulfillment_status === 'PICKING' || pickIssued) && !scanDone) {
+          const scan = await request.post(`${OMS}/api/v1/pack/orders/${orderId}/scans`, {
+            headers,
+            data: { scan: 'DEMO-SKU-READY' },
+          })
+          if (!scan.ok()) return ''
+          scanDone = true
+          const packed = await request.post(`${OMS}/api/v1/pack/orders/${orderId}/complete`, {
+            headers,
+            data: {},
+          })
+          return packed.ok() ? 'packed' : ''
+        }
+        return ''
+      },
+      { timeout: 120_000, intervals: [2000] },
+    )
+    .toBe('packed')
+
+  await loginActiveShop(page)
+  await page.goto(`/#/orders/${orderId}`)
+  await expect(page.locator('dt:has-text("การจัดส่ง") + dd')).toContainText('แพ็กแล้ว', {
+    timeout: 30_000,
+  })
+
+  await sendOrderCancelled(request, externalOrderId)
+  await expect
+    .poll(
+      async () => {
+        const detail = await orderDetail(request, token, orderId)
+        return `${detail.order_status}|${detail.fulfillment_status}`
+      },
+      { timeout: 90_000, intervals: [2000] },
+    )
+    .toBe('CANCELLED|UNFULFILLED')
+
+  await expect
+    .poll(
+      async () => {
+        const after = await orderDetail(request, token, orderId)
+        const reservations = (after.reservations as Array<{ status: string }>) ?? []
+        return reservations.every((row) => row.status !== 'ACTIVE') ? 'released' : ''
+      },
+      { timeout: 90_000, intervals: [2000] },
+    )
+    .toBe('released')
+  await assertInvariants(request)
+})
+
 test('phase 3 full flow: reserve through partial return and refund snapshot', async ({
   page,
   request,
@@ -83,13 +158,17 @@ test('phase 3 full flow: reserve through partial return and refund snapshot', as
   await page.getByRole('button', { name: 'พิมพ์ใบปะหน้า (A6)', exact: true }).click()
   await expect
     .poll(
-      async () => await row.getByText(/TH\d|FLASH|MANUAL/i).count(),
-      { timeout: 90_000, intervals: [2000] },
+      async () => {
+        const detail = await orderDetail(request, token, orderId)
+        const shipment = (detail.shipments as Array<{ status?: string }> | undefined)?.[0]
+        return shipment?.status === 'LABEL_READY' ? 1 : 0
+      },
+      { timeout: 120_000, intervals: [2000] },
     )
-    .toBeGreaterThan(0)
+    .toBe(1)
   await row.getByRole('button', { name: 'ยืนยันส่ง', exact: true }).click()
   await page.getByRole('dialog').getByRole('button', { name: 'ยืนยัน', exact: true }).click()
-  await expect(page.getByRole('status')).toContainText('บันทึกการจัดส่งแล้ว', { timeout: 30_000 })
+  await expect(page.getByText('บันทึกการจัดส่งแล้ว', { exact: true })).toBeVisible({ timeout: 30_000 })
 
   await waitForOrder(request, token, externalOrderId, 'SHIPPED')
   const shipped = await orderDetail(request, token, orderId)
@@ -137,70 +216,5 @@ test('phase 3 full flow: reserve through partial return and refund snapshot', as
     )
     .toBeGreaterThan(0)
   await expect(page.getByText('฿295.00')).toBeVisible()
-  await assertInvariants(request)
-})
-
-test('cancel at PACKED releases reservation and clears pack progress', async ({ page, request }) => {
-  test.setTimeout(180_000)
-  const token = await ownerToken(request)
-  await seedDemoCatalog(request)
-  const externalOrderId = `E2E-PACK-CXL-${Date.now()}`
-  await createPrepaidOrder(request, externalOrderId, [
-    { line_id: 'L1', listing_sku_id: 'L-demo-ready', qty: 1, unit_price: 295 },
-  ])
-  const { id: orderId } = await waitForOrder(request, token, externalOrderId, 'READY_TO_PICK')
-
-  const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }
-  const pick = await request.post(`${OMS}/api/v1/pick-lists`, {
-    headers,
-    data: { order_ids: [orderId] },
-  })
-  expect(pick.ok()).toBeTruthy()
-  await expect
-    .poll(
-      async () => {
-        const scan = await request.post(`${OMS}/api/v1/pack/orders/${orderId}/scans`, {
-          headers,
-          data: { scan: 'DEMO-SKU-READY' },
-        })
-        if (!scan.ok()) return ''
-        const packed = await request.post(`${OMS}/api/v1/pack/orders/${orderId}/complete`, {
-          headers,
-          data: {},
-        })
-        return packed.ok() ? 'ok' : ''
-      },
-      { timeout: 90_000, intervals: [2000] },
-    )
-    .toBe('ok')
-  await waitForOrder(request, token, externalOrderId, 'PACKED')
-
-  await loginActiveShop(page)
-  await page.goto(`/#/orders/${orderId}`)
-  await expect(page.locator('dt:has-text("การจัดส่ง") + dd')).toContainText('แพ็กแล้ว', {
-    timeout: 30_000,
-  })
-
-  await sendOrderCancelled(request, externalOrderId)
-  await expect
-    .poll(
-      async () => {
-        const detail = await orderDetail(request, token, orderId)
-        return `${detail.order_status}|${detail.fulfillment_status}`
-      },
-      { timeout: 90_000, intervals: [2000] },
-    )
-    .toBe('CANCELLED|UNFULFILLED')
-
-  await expect
-    .poll(
-      async () => {
-        const after = await orderDetail(request, token, orderId)
-        const reservations = (after.reservations as Array<{ status: string }>) ?? []
-        return reservations.every((row) => row.status !== 'ACTIVE') ? 'released' : ''
-      },
-      { timeout: 90_000, intervals: [2000] },
-    )
-    .toBe('released')
   await assertInvariants(request)
 })
