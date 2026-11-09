@@ -115,7 +115,8 @@ public final class StagingTestSupport {
     registry.add("oms.outbox.webhook-secret", () -> "test-outbox-secret-0123456789abcdef");
     registry.add("oms.tsf.base-url", () -> "http://127.0.0.1:9");
     registry.add("oms.tsf.token-uri", () -> "http://127.0.0.1:9/token");
-    registry.add("oms.tsf.client-secret", () -> "staging-test-tsf-secret");
+    registry.add("oms.tsf.client-id", () -> "oms-service");
+    registry.add("oms.tsf.client-secret", () -> "dev-oms-service-secret");
     registry.add("oms.staging.jwt-signing-key-pem", () -> PEM);
     registry.add("oms.staging.jwt-key-id", () -> "staging-test-1");
     registry.add("oms.staging.cors-allowed-origins", () -> "http://localhost");

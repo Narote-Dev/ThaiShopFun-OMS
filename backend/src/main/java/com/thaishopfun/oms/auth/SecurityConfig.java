@@ -29,14 +29,9 @@ public class SecurityConfig {
   @Bean
   @Order(1)
   SecurityFilterChain internalChain(
-      HttpSecurity http,
-      JwtDecoder jwtDecoder,
-      ApiErrors errors,
-      OmsSecurityProperties properties,
-      @Autowired(required = false) @Qualifier("stagingCorsConfigurationSource")
-          CorsConfigurationSource cors)
+      HttpSecurity http, JwtDecoder jwtDecoder, ApiErrors errors, OmsSecurityProperties properties)
       throws Exception {
-    stateless(http, errors, Optional.ofNullable(cors));
+    stateless(http, errors, Optional.empty());
     http.securityMatcher("/internal/**");
     http.authorizeHttpRequests(auth -> auth.anyRequest().authenticated());
     oauth(http, jwtDecoder, errors);
@@ -57,7 +52,7 @@ public class SecurityConfig {
       IdentityProvisioner provisioner,
       TenantSessionService sessions,
       EntitlementGate gate,
-      @Autowired(required = false) @Qualifier("stagingCorsConfigurationSource")
+      @Autowired(required = false) @Qualifier("stagingApiCorsConfigurationSource")
           CorsConfigurationSource cors)
       throws Exception {
     stateless(http, errors, Optional.ofNullable(cors));
@@ -72,13 +67,8 @@ public class SecurityConfig {
 
   @Bean
   @Order(3)
-  SecurityFilterChain publicChain(
-      HttpSecurity http,
-      ApiErrors errors,
-      @Autowired(required = false) @Qualifier("stagingCorsConfigurationSource")
-          CorsConfigurationSource cors)
-      throws Exception {
-    stateless(http, errors, Optional.ofNullable(cors));
+  SecurityFilterChain publicChain(HttpSecurity http, ApiErrors errors) throws Exception {
+    stateless(http, errors, Optional.empty());
     http.securityMatcher("/**");
     http.authorizeHttpRequests(
         auth -> auth.requestMatchers("/actuator/**", "/error").permitAll().anyRequest().denyAll());

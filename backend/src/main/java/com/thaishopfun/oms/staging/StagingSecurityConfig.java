@@ -22,7 +22,7 @@ class StagingSecurityConfig {
       HttpSecurity http,
       ApiErrors errors,
       StagingProperties properties,
-      @Qualifier("stagingCorsConfigurationSource") CorsConfigurationSource cors)
+      @Qualifier("stagingIdpCorsConfigurationSource") CorsConfigurationSource cors)
       throws Exception {
     String base = properties.getIdpBasePath();
     if (!base.startsWith("/")) {

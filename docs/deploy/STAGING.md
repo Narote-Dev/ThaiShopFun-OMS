@@ -94,8 +94,10 @@ Flyway should keep using the **superuser** from `DATABASE_URL` / `FLYWAY_USER` +
 | `OMS_OUTBOX_WEBHOOK_SECRET` | Same as mock `MOCK_OUTBOX_HMAC_SECRET` (comma-separated values must match on both sides) |
 | `TSF_OMS_EVENTS_URL` | `https://<mock-tsf>/internal/v1/oms-events` |
 | `OMS_TSF_BASE_URL` | `https://<mock-tsf>` |
-| `OMS_TSF_TOKEN_URI` | mock token endpoint |
-| `OMS_TSF_CLIENT_SECRET` | mock service client secret |
+| `OMS_TSF_TOKEN_URI` | `https://<mock-tsf>/tsf-idp/token` |
+| `OMS_TSF_CLIENT_ID` | `oms-service` (default; must match mock `oms-service-client-id`) |
+| `OMS_TSF_CLIENT_SECRET` | Must match mock **`MOCK_OMS_SERVICE_CLIENT_SECRET`** (not `MOCK_TSF_CLIENT_SECRET`) |
+| `OMS_TSF_AUDIENCE` | `tsf-internal` (default; required for client-credentials) |
 | `OMS_STAGING_JWT_RSA_PRIVATE_KEY` | PKCS#8 PEM or base64 DER (staging signing key) |
 | `OMS_STAGING_JWT_KEY_ID` | JWKS `kid` (default `staging-oms-1`) |
 | `OMS_STAGING_CORS_ALLOWED_ORIGINS` | Comma-separated Vercel preview + production origins |
@@ -120,6 +122,8 @@ scripts/staging-generate-secrets.sh 'alice-pass' 'bob-pass'   # bcrypt hashes fo
 | `MOCK_OMS_BASE_URL` | Backend public URL |
 | `MOCK_INBOX_HMAC_SECRET` | Matches `OMS_INBOX_HMAC_SECRETS` |
 | `MOCK_OUTBOX_WEBHOOK_SECRET` | Matches `OMS_OUTBOX_WEBHOOK_SECRET` |
+| `MOCK_OMS_SERVICE_CLIENT_SECRET` | Matches `OMS_TSF_CLIENT_SECRET` |
+| `MOCK_TSF_CLIENT_SECRET` | Secret mock uses when calling OMS `/internal/**` (not OMS→mock) |
 | `MOCK_CORS_ALLOWED_ORIGINS` | Vercel origins (if using mock UI helpers) |
 
 ### Vercel (frontend)
