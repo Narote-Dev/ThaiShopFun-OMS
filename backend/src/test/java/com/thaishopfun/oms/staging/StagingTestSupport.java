@@ -2,6 +2,8 @@ package com.thaishopfun.oms.staging;
 
 import com.nimbusds.jose.jwk.JWKSet;
 import com.nimbusds.jose.jwk.RSAKey;
+import com.nimbusds.jose.jwk.gen.RSAKeyGenerator;
+import com.nimbusds.jose.jwk.source.ImmutableJWKSet;
 import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -11,16 +13,27 @@ import java.security.interfaces.RSAPrivateCrtKey;
 import java.security.interfaces.RSAPrivateKey;
 import java.security.spec.PKCS8EncodedKeySpec;
 import java.security.spec.RSAPublicKeySpec;
+import java.time.Instant;
 import java.util.Base64;
+import java.util.List;
 import org.springframework.core.io.ClassPathResource;
+import org.springframework.security.oauth2.jose.jws.SignatureAlgorithm;
+import org.springframework.security.oauth2.jwt.JwsHeader;
+import org.springframework.security.oauth2.jwt.JwtClaimsSet;
+import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
+import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
 import org.springframework.test.context.DynamicPropertyRegistry;
 
 /** JWKS + property wiring for staging integration tests (matches {@code test-signing-key.pem}). */
 public final class StagingTestSupport {
 
   static final String ISSUER = "http://127.0.0.1/staging-idp";
+  static final String SERVICE_ISSUER = "http://127.0.0.1/tsf-idp";
   private static final String PEM;
   private static final String JWKS_URI;
+  private static final String SERVICE_JWKS_URI;
+  private static final RSAKey SERVICE_RSA_KEY;
+  private static final NimbusJwtEncoder SERVICE_ENCODER;
 
   static {
     try {
@@ -52,6 +65,25 @@ public final class StagingTestSupport {
       server.setExecutor(command -> new Thread(command, "staging-test-jwks").start());
       server.start();
       JWKS_URI = "http://127.0.0.1:" + server.getAddress().getPort() + "/jwks";
+
+      SERVICE_RSA_KEY = new RSAKeyGenerator(2048).keyID("mock-tsf-test").generate();
+      SERVICE_ENCODER = new NimbusJwtEncoder(new ImmutableJWKSet<>(new JWKSet(SERVICE_RSA_KEY)));
+      byte[] serviceBody =
+          new JWKSet(SERVICE_RSA_KEY.toPublicJWK()).toString().getBytes(StandardCharsets.UTF_8);
+      HttpServer serviceServer =
+          HttpServer.create(new java.net.InetSocketAddress("127.0.0.1", 0), 0);
+      serviceServer.createContext(
+          "/jwks",
+          exchange -> {
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, serviceBody.length);
+            exchange.getResponseBody().write(serviceBody);
+            exchange.close();
+          });
+      serviceServer.setExecutor(
+          command -> new Thread(command, "staging-test-service-jwks").start());
+      serviceServer.start();
+      SERVICE_JWKS_URI = "http://127.0.0.1:" + serviceServer.getAddress().getPort() + "/jwks";
     } catch (Exception ex) {
       throw new ExceptionInInitializerError(ex);
     }
@@ -66,6 +98,8 @@ public final class StagingTestSupport {
             StandardCharsets.UTF_8);
     registry.add("oms.security.issuer", () -> ISSUER);
     registry.add("oms.security.jwks-uri", () -> JWKS_URI);
+    registry.add("oms.security.service-issuer", () -> SERVICE_ISSUER);
+    registry.add("oms.security.service-jwks-uri", () -> SERVICE_JWKS_URI);
     registry.add("oms.security.audience", () -> "oms");
     registry.add("oms.security.internal-audience", () -> "oms-internal");
     registry.add("oms.security.internal-client-ids", () -> "tsf");
@@ -89,6 +123,45 @@ public final class StagingTestSupport {
     registry.add("oms.staging.demo-seed-on-startup", () -> "false");
     registry.add("oms.staging.login-lockout-threshold", () -> "3");
     registry.add("oms.staging.login-max-attempts", () -> "100");
+  }
+
+  /** Client-credentials style token from the mock TSF issuer. */
+  public static String serviceToken(String clientId) {
+    Instant expiresAt = Instant.now().plusSeconds(600);
+    JwtClaimsSet claims =
+        JwtClaimsSet.builder()
+            .issuer(SERVICE_ISSUER)
+            .audience(List.of("oms-internal"))
+            .subject(clientId)
+            .issuedAt(expiresAt.minusSeconds(30))
+            .expiresAt(expiresAt)
+            .claim("azp", clientId)
+            .build();
+    JwsHeader header =
+        JwsHeader.with(SignatureAlgorithm.RS256)
+            .keyId(SERVICE_RSA_KEY.getKeyID())
+            .type("at+jwt")
+            .build();
+    return SERVICE_ENCODER.encode(JwtEncoderParameters.from(header, claims)).getTokenValue();
+  }
+
+  /** Signed token whose issuer is not in the staging allowlist. */
+  public static String unknownIssuerToken() {
+    Instant expiresAt = Instant.now().plusSeconds(600);
+    JwtClaimsSet claims =
+        JwtClaimsSet.builder()
+            .issuer("https://evil.example/idp")
+            .audience(List.of("oms"))
+            .subject("evil")
+            .issuedAt(expiresAt.minusSeconds(30))
+            .expiresAt(expiresAt)
+            .build();
+    JwsHeader header =
+        JwsHeader.with(SignatureAlgorithm.RS256)
+            .keyId(SERVICE_RSA_KEY.getKeyID())
+            .type("at+jwt")
+            .build();
+    return SERVICE_ENCODER.encode(JwtEncoderParameters.from(header, claims)).getTokenValue();
   }
 
   private static RSAPrivateKey parsePrivateKey(String pem) throws Exception {

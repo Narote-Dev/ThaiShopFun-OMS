@@ -82,6 +82,8 @@ Flyway should keep using the **superuser** from `DATABASE_URL` / `FLYWAY_USER` +
 | `FLYWAY_USER` / `FLYWAY_PASSWORD` | Bootstrap login (often superuser from plugin) |
 | `OMS_JWT_ISSUER` | Public issuer URL, e.g. `https://<backend>/staging-idp` |
 | `OMS_JWKS_URI` | e.g. `https://<backend>/staging-idp/.well-known/jwks.json` |
+| `OMS_SERVICE_JWT_ISSUER` | Mock TSF issuer, e.g. `https://<mock-tsf>/tsf-idp` (client-credentials) |
+| `OMS_SERVICE_JWKS_URI` | e.g. `https://<mock-tsf>/tsf-idp/.well-known/jwks.json` |
 | `OMS_JWT_AUDIENCE` | `oms` |
 | `OMS_JWT_INTERNAL_AUDIENCE` | `oms-internal` |
 | `OMS_SECURITY_INTERNAL_CLIENT_IDS` | e.g. `tsf` (comma-separated) |
@@ -89,7 +91,7 @@ Flyway should keep using the **superuser** from `DATABASE_URL` / `FLYWAY_USER` +
 | `OMS_PII_KEYS` | `kid:base64-32-byte-key` |
 | `OMS_PII_ACTIVE_KEY_ID` | kid |
 | `OMS_PII_HASH_KEY` | base64 ≥ 32 bytes |
-| `OMS_OUTBOX_WEBHOOK_SECRET` | Same as mock outbox secret |
+| `OMS_OUTBOX_WEBHOOK_SECRET` | Same as mock `MOCK_OUTBOX_HMAC_SECRET` (comma-separated values must match on both sides) |
 | `TSF_OMS_EVENTS_URL` | `https://<mock-tsf>/internal/v1/oms-events` |
 | `OMS_TSF_BASE_URL` | `https://<mock-tsf>` |
 | `OMS_TSF_TOKEN_URI` | mock token endpoint |
@@ -156,6 +158,10 @@ There is **no** registration API and **no** HTTP endpoint that lists usernames.
 1. `curl -fsS https://<backend>/actuator/health`
 2. Login from Vercel UI with the username + password Narote issued.
 3. `GET https://<backend>/api/v1/me` with the returned Bearer token.
+
+### Outbox events stuck as DEAD with `http_status=401`
+
+`POST /internal/v1/oms-events` on mock TSF is **HMAC-only** (no Bearer token). A `401` with body `Invalid signature` means `OMS_OUTBOX_WEBHOOK_SECRET` on the backend does not match `MOCK_OUTBOX_HMAC_SECRET` on mock TSF (including order when using comma-separated rotation secrets). Fix the env pair and retry dead events from the admin outbox UI. JWT misconfiguration affects mock→OMS **`/internal/**`** calls and OMS→mock REST with client credentials, not the outbox webhook path.
 
 ## CI
 

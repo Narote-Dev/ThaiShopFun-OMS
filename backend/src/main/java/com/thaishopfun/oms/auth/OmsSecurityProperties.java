@@ -11,6 +11,15 @@ public class OmsSecurityProperties {
   /** Expected {@code iss}. Tokens from any other issuer are rejected. */
   private String issuer = "http://localhost:9/tsf-idp";
 
+  /**
+   * Mock TSF (or TSF) issuer for client-credentials tokens in staging. Blank outside staging dual
+   * issuer mode.
+   */
+  private String serviceIssuer = "";
+
+  /** JWKS for {@link #serviceIssuer}. Used with {@code oms.security.issuer} in staging only. */
+  private String serviceJwksUri = "";
+
   /** User access tokens. {@code aud} must be this value on {@code /api/**}. */
   private String audience = "oms";
 
@@ -46,6 +55,22 @@ public class OmsSecurityProperties {
 
   public void setIssuer(String issuer) {
     this.issuer = issuer;
+  }
+
+  public String getServiceIssuer() {
+    return serviceIssuer;
+  }
+
+  public void setServiceIssuer(String serviceIssuer) {
+    this.serviceIssuer = serviceIssuer == null ? "" : serviceIssuer;
+  }
+
+  public String getServiceJwksUri() {
+    return serviceJwksUri;
+  }
+
+  public void setServiceJwksUri(String serviceJwksUri) {
+    this.serviceJwksUri = serviceJwksUri == null ? "" : serviceJwksUri;
   }
 
   public String getAudience() {

@@ -1,6 +1,7 @@
 package com.thaishopfun.oms.staging;
 
 import com.thaishopfun.oms.auth.ApiErrors;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
@@ -9,6 +10,7 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.web.cors.CorsConfigurationSource;
 
 @Configuration
 @Profile("staging")
@@ -17,15 +19,21 @@ class StagingSecurityConfig {
   @Bean
   @Order(0)
   SecurityFilterChain stagingIdpChain(
-      HttpSecurity http, ApiErrors errors, StagingProperties properties) throws Exception {
+      HttpSecurity http,
+      ApiErrors errors,
+      StagingProperties properties,
+      @Qualifier("stagingCorsConfigurationSource") CorsConfigurationSource cors)
+      throws Exception {
     String base = properties.getIdpBasePath();
     if (!base.startsWith("/")) {
       base = "/" + base;
     }
+    // Step 1: Match staging IdP routes and apply the same CORS source as /api.
     http.securityMatcher(base + "/**");
     http.csrf(AbstractHttpConfigurer::disable)
         .sessionManagement(
             session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+        .cors(c -> c.configurationSource(cors))
         .authorizeHttpRequests(auth -> auth.anyRequest().permitAll())
         .exceptionHandling(
             handler ->

@@ -3,6 +3,8 @@ oms:
   security:
     issuer: ${OMS_JWT_ISSUER}
     jwks-uri: ${OMS_JWKS_URI:${TSF_JWKS_URI}}
+    service-issuer: ${OMS_SERVICE_JWT_ISSUER}
+    service-jwks-uri: ${OMS_SERVICE_JWKS_URI}
     internal-client-ids: ${OMS_SECURITY_INTERNAL_CLIENT_IDS}
     accepted-token-types:
       - at+jwt
