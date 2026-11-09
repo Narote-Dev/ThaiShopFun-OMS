@@ -198,6 +198,20 @@ class ReturnFlowAcceptanceTest extends OrderIntegrationTest {
         """
             .formatted(returnLine, returnLine);
     assertThat(postReceive(returnId, body, "recv-mixed").statusCode()).isEqualTo(200);
+    assertThat(fixture.inTenant(tenantId, () -> onHand(sku))).isEqualTo(startOnHand - 2 + 1);
+    assertThat(
+            fixture.inTenant(
+                tenantId,
+                () ->
+                    jdbc.queryForObject(
+                        """
+                        SELECT delta_on_hand FROM inventory_ledger
+                        WHERE reason = 'DAMAGE_WRITE_OFF'
+                          AND ref_type = 'return_line' AND ref_id = ?
+                        """,
+                        Integer.class,
+                        returnLine)))
+        .isEqualTo(0);
   }
 
   @Test
