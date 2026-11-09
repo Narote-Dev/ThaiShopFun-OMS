@@ -1,31 +1,39 @@
 package com.thaishopfun.oms.staging;
 
+import jakarta.servlet.FilterChain;
+import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import java.io.IOException;
 import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.boot.web.servlet.FilterRegistrationBean;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
 import org.springframework.core.Ordered;
+import org.springframework.core.annotation.Order;
+import org.springframework.stereotype.Component;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
-import org.springframework.web.filter.CorsFilter;
+import org.springframework.web.cors.CorsProcessor;
+import org.springframework.web.cors.CorsUtils;
+import org.springframework.web.cors.DefaultCorsProcessor;
 
 /**
- * Servlet-level CORS for browser routes. Security filter-chain {@link CorsFilter} instances did not
- * emit {@code Access-Control-Allow-Origin} for the staging IdP under Boot 4 + MVC path matchers.
+ * Applies browser CORS for {@code /staging-idp/**} and {@code /api/**} before Spring Security.
+ * Registered as a servlet {@link Component} so MockMvc and embedded Tomcat both see it.
  */
-@Configuration
+@Component
 @Profile("staging")
-class StagingBrowserCorsConfiguration {
+@Order(Ordered.HIGHEST_PRECEDENCE)
+class StagingBrowserCorsFilter extends org.springframework.web.filter.OncePerRequestFilter {
 
-  @Bean
-  FilterRegistrationBean<CorsFilter> stagingBrowserCorsFilter(
+  private final CorsConfigurationSource source;
+  private final CorsProcessor processor = new DefaultCorsProcessor();
+
+  StagingBrowserCorsFilter(
       StagingProperties properties,
       @Qualifier("stagingApiCorsConfiguration") CorsConfiguration api,
       @Qualifier("stagingIdpCorsConfiguration") CorsConfiguration idp) {
     String idpBase = normalizeIdpBase(properties.getIdpBasePath());
-    CorsConfigurationSource source =
+    this.source =
         request -> {
           String path = servletPath(request);
           if (path.startsWith(idpBase)) {
@@ -36,10 +44,24 @@ class StagingBrowserCorsConfiguration {
           }
           return null;
         };
-    FilterRegistrationBean<CorsFilter> registration =
-        new FilterRegistrationBean<>(new CorsFilter(source));
-    registration.setOrder(Ordered.HIGHEST_PRECEDENCE);
-    return registration;
+  }
+
+  @Override
+  protected void doFilterInternal(
+      HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
+      throws ServletException, IOException {
+    CorsConfiguration config = source.getCorsConfiguration(request);
+    if (config == null) {
+      filterChain.doFilter(request, response);
+      return;
+    }
+    boolean valid = processor.processRequest(config, request, response);
+    if (valid && CorsUtils.isPreFlightRequest(request)) {
+      return;
+    }
+    if (valid) {
+      filterChain.doFilter(request, response);
+    }
   }
 
   private static String normalizeIdpBase(String base) {
