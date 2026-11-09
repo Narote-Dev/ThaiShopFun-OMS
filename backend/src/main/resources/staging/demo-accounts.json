@@ -1,0 +1,46 @@
+[
+  {
+    "loginId": "owner-active",
+    "tsfUserId": "owner-active",
+    "email": "owner-active@shop.example",
+    "tsfShopId": "shop_active",
+    "shopName": "Active Shop",
+    "shopRole": "OWNER",
+    "tier": "PRO",
+    "status": "ACTIVE",
+    "entVer": 1
+  },
+  {
+    "loginId": "staff-active",
+    "tsfUserId": "staff-active",
+    "email": "staff@example.test",
+    "tsfShopId": "shop_active",
+    "shopName": "พนักงานร้านสาธิต",
+    "shopRole": "STAFF",
+    "tier": "PRO",
+    "status": "ACTIVE",
+    "entVer": 1
+  },
+  {
+    "loginId": "owner-grace",
+    "tsfUserId": "owner-grace",
+    "email": "owner-grace@shop.example",
+    "tsfShopId": "shop_grace",
+    "shopName": "Grace Shop",
+    "shopRole": "OWNER",
+    "tier": "PRO",
+    "status": "GRACE",
+    "entVer": 1
+  },
+  {
+    "loginId": "owner-bump",
+    "tsfUserId": "owner-bump",
+    "email": "owner-bump@shop.example",
+    "tsfShopId": "shop_bump",
+    "shopName": "Bump Shop",
+    "shopRole": "OWNER",
+    "tier": "PRO",
+    "status": "ACTIVE",
+    "entVer": 1
+  }
+]

@@ -15,6 +15,19 @@ afterEach(() => {
 })
 
 describe('apiRequest', () => {
+  it('prefixes VITE_OMS_API_BASE_URL when set', async () => {
+    vi.stubEnv('VITE_OMS_API_BASE_URL', 'https://api.example.test')
+    const fetchImpl = vi.fn(async () => json(200, { ok: true }))
+    configureApi({
+      getAccessToken: () => 'access-token',
+      fetchImpl,
+    })
+    await apiRequest('/api/v1/me')
+    const url = (fetchImpl.mock.calls as unknown as [RequestInfo | URL, RequestInit?][])[0][0]
+    expect(String(url)).toBe('https://api.example.test/api/v1/me')
+    vi.unstubAllEnvs()
+  })
+
   it('sends the access token and not another bearer', async () => {
     const fetchImpl = vi.fn(async () => json(200, { ok: true }))
     configureApi({

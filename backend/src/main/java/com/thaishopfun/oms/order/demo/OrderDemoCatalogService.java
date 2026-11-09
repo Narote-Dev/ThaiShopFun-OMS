@@ -13,7 +13,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 /** Idempotent catalog rows for mock-tsf demo orders (shop_active). */
 @Service
-@Profile({"local", "e2e", "test"})
+@Profile({"local", "e2e", "test", "staging"})
 public class OrderDemoCatalogService {
 
   private static final String SHOP = "shop_active";

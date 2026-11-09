@@ -1,4 +1,22 @@
-import { getAccessToken, refreshAccessToken } from '../auth/session'
+import { stagingLoginEnabled } from '../auth/stagingSession'
+import * as stagingSession from '../auth/stagingSession'
+import { getAccessToken as oidcGetAccessToken, refreshAccessToken as oidcRefreshAccessToken } from '../auth/session'
+
+function apiUrl(path: string): string {
+  const base = import.meta.env.VITE_OMS_API_BASE_URL?.trim().replace(/\/$/, '') ?? ''
+  if (!base || path.startsWith('http://') || path.startsWith('https://')) {
+    return path
+  }
+  return `${base}${path}`
+}
+
+function getAccessToken(): string | null {
+  return stagingLoginEnabled() ? stagingSession.getAccessToken() : oidcGetAccessToken()
+}
+
+function refreshAccessToken(): Promise<string> {
+  return stagingLoginEnabled() ? stagingSession.refreshAccessToken() : oidcRefreshAccessToken()
+}
 
 export class ApiError extends Error {
   readonly status: number
@@ -95,7 +113,7 @@ async function request<T>(path: string, init: RequestInit, attempt: Attempt): Pr
   if (init.body && !(init.body instanceof FormData) && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json')
   }
-  const response = await deps.fetchImpl(path, { ...init, headers })
+  const response = await deps.fetchImpl(apiUrl(path), { ...init, headers })
   if (response.ok) {
     deps.onSettingUp(false)
     if (response.status === 204) return undefined as T

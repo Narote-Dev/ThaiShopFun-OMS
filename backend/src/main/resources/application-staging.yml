@@ -1,0 +1,39 @@
+# Staging on Railway + mock TSF. Secrets and URLs come from the environment only (no H2, no dev keys here).
+oms:
+  security:
+    issuer: ${OMS_JWT_ISSUER}
+    jwks-uri: ${OMS_JWKS_URI:${TSF_JWKS_URI}}
+    internal-client-ids: ${OMS_SECURITY_INTERNAL_CLIENT_IDS}
+    accepted-token-types:
+      - at+jwt
+      - JWT
+      - ""
+  inbox:
+    hmac-secrets: ${OMS_INBOX_HMAC_SECRETS}
+  pii:
+    keys: ${OMS_PII_KEYS}
+    active-key-id: ${OMS_PII_ACTIVE_KEY_ID}
+    hash-key: ${OMS_PII_HASH_KEY}
+  outbox:
+    destination-url: ${TSF_OMS_EVENTS_URL}
+    webhook-secret: ${OMS_OUTBOX_WEBHOOK_SECRET}
+  tsf:
+    base-url: ${OMS_TSF_BASE_URL}
+    token-uri: ${OMS_TSF_TOKEN_URI}
+    client-id: ${OMS_TSF_CLIENT_ID:oms-service}
+    client-secret: ${OMS_TSF_CLIENT_SECRET}
+    audience: ${OMS_TSF_AUDIENCE:tsf-internal}
+  staging:
+    idp-base-path: ${OMS_STAGING_IDP_PATH:/staging-idp}
+    access-token-seconds: ${OMS_STAGING_ACCESS_TOKEN_SECONDS:3600}
+    jwt-signing-key-pem: ${OMS_STAGING_JWT_RSA_PRIVATE_KEY:}
+    jwt-key-id: ${OMS_STAGING_JWT_KEY_ID:staging-oms-1}
+    demo-password-hash: ${OMS_STAGING_DEMO_PASSWORD_HASH:}
+    demo-accounts: ${OMS_STAGING_DEMO_ACCOUNTS:}
+    demo-seed-on-startup: ${OMS_STAGING_DEMO_SEED_ON_STARTUP:false}
+    admin-seed-demo: ${OMS_STAGING_ADMIN_SEED_DEMO:false}
+    cors-allowed-origins: ${OMS_STAGING_CORS_ALLOWED_ORIGINS:}
+    login-max-attempts: ${OMS_STAGING_LOGIN_MAX_ATTEMPTS:30}
+    login-window-seconds: ${OMS_STAGING_LOGIN_WINDOW_SECONDS:900}
+    login-lockout-threshold: ${OMS_STAGING_LOGIN_LOCKOUT_THRESHOLD:5}
+    login-lockout-seconds: ${OMS_STAGING_LOGIN_LOCKOUT_SECONDS:900}

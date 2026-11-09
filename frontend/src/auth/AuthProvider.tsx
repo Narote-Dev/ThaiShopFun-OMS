@@ -3,6 +3,13 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { apiRequest, ApiError, configureApi } from '../api/client'
 import { safeReturn } from '../routing/hash'
 import { AuthContext, type Gate, type Me } from './AuthContext'
+import {
+  stagingBootSession,
+  stagingLoginEnabled,
+  stagingLogout,
+  getSessionDisplayName as stagingDisplayName,
+  setStagingSessionListener,
+} from './stagingSession'
 import { bootSession, getSessionDisplayName, logout, resumeLogin, setSessionListener, startLogin } from './session'
 
 const READ_ONLY = 'ร้านค้านี้อ่านได้อย่างเดียวจนกว่าจะต่ออายุสมาชิก'
@@ -20,12 +27,15 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
   const [userDisplayName, setUserDisplayName] = useState<string | null>(null)
 
   useEffect(() => {
-    setSessionListener({
-      loginRequired: () => {
-        setMe(null)
-        setStatus('anonymous')
-      },
-    })
+    const loginRequired = () => {
+      setMe(null)
+      setStatus('anonymous')
+    }
+    if (stagingLoginEnabled()) {
+      setStagingSessionListener({ loginRequired })
+    } else {
+      setSessionListener({ loginRequired })
+    }
     configureApi({
       onPaywall: () => {
         setMe(null)
@@ -55,9 +65,9 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let cancelled = false
     void (async () => {
-      const result = await bootSession()
+      const result = stagingLoginEnabled() ? await stagingBootSession() : await bootSession()
       if (cancelled) return
-      if (result.kind === 'redirecting') return
+      if (!stagingLoginEnabled() && result.kind === 'redirecting') return
       if (result.kind === 'anonymous') {
         setSignInError(result.error ? messageTh(result.error, 'เข้าสู่ระบบไม่สำเร็จ') : null)
         setStatus('anonymous')
@@ -76,7 +86,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
       const profile = await apiRequest<Me>('/api/v1/me')
       if (isCancelled()) return
       setMe(profile)
-      const name = await getSessionDisplayName()
+      const name = stagingLoginEnabled() ? await stagingDisplayName() : await getSessionDisplayName()
       setUserDisplayName(name)
       setGate('ready')
       setSetupFailed(false)
@@ -112,8 +122,15 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
     })
   }
 
+  function completeStagingLogin() {
+    setSignInError(null)
+    setStatus('signed-in')
+    void loadProfile()
+  }
+
   function signOut() {
-    void logout().finally(() => {
+    const out = stagingLoginEnabled() ? stagingLogout() : logout()
+    void out.finally(() => {
       setMe(null)
       setGate('loading')
       setReadOnlyNotice(null)
@@ -151,6 +168,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
         signIn,
         signOut,
         retrySetup,
+        completeStagingLogin,
       }}
     >
       {children}

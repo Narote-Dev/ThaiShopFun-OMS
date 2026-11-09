@@ -2,10 +2,10 @@ import { defineRailway, github, postgres, project, service } from "railway/iac";
 
 const repo = "Narote-Dev/thaishopfun-oms";
 
-// Staging project. Apply once with `railway config apply` after `railway login`
-// and `railway link`. Pushes to main then auto-deploy through the GitHub source.
-// Region: set the Railway project to Southeast Asia (Singapore) in the dashboard.
-// Do not commit secrets. Database credentials come from the Postgres service.
+// Staging trial project (low cost): one Postgres + backend + mock-tsf. SPA on Vercel.
+// Apply once with `railway config apply` after `railway login` and `railway link`.
+// Per-service Docker settings are mirrored in backend/railway.json and mock-tsf/railway.json
+// (Railway config as code: https://docs.railway.com/reference/config-as-code).
 export default defineRailway(() => {
   const db = postgres("Postgres");
 
@@ -14,21 +14,25 @@ export default defineRailway(() => {
     healthcheck: "/actuator/health",
     healthcheckTimeout: 120,
     env: {
+      SPRING_PROFILES_ACTIVE: "staging",
       DATABASE_URL: db.env.DATABASE_URL,
-      DATABASE_USERNAME: db.env.PGUSER,
-      DATABASE_PASSWORD: db.env.PGPASSWORD,
+      // Set DATABASE_PASSWORD in the dashboard after ALTER ROLE oms_app (docs/deploy/STAGING.md).
+      DATABASE_USERNAME: "oms_app",
+      FLYWAY_USER: db.env.PGUSER,
+      FLYWAY_PASSWORD: db.env.PGPASSWORD,
     },
   });
 
-  const frontend = service("frontend", {
-    source: github(repo, { branch: "main", rootDirectory: "frontend" }),
-    healthcheck: "/",
+  const mockTsf = service("mock-tsf", {
+    source: github(repo, { branch: "main", rootDirectory: "." }),
+    healthcheck: "/actuator/health",
+    healthcheckTimeout: 120,
     env: {
-      VITE_OMS_API_BASE_URL: backend.env.RAILWAY_PUBLIC_DOMAIN,
+      PORT: "8090",
     },
   });
 
-  return project("thaishopfun-oms", {
-    resources: [db, backend, frontend],
+  return project("thaishopfun-oms-staging", {
+    resources: [db, backend, mockTsf],
   });
 });

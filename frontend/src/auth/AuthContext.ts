@@ -30,6 +30,7 @@ export type AuthContextValue = {
   signIn: () => void
   signOut: () => void
   retrySetup: () => void
+  completeStagingLogin: () => void
 }
 
 export const AuthContext = createContext<AuthContextValue | null>(null)
