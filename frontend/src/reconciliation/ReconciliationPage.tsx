@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { reconciliationApi, type ReconciliationIssue } from './api'
 import { AlertBanner } from '../ui/Alert'
-import { Badge } from '../ui/Badge'
+import { StatusBadge } from '../ui/StatusBadge'
 import { Button } from '../ui/Button'
 import { DataTable, DataTableCell, DataTableHead, DataTableRow, DataTableTh, EmptyState } from '../ui/DataTable'
 import { formatBangkokDateTime } from '../ui/format'
@@ -88,11 +88,11 @@ export default function ReconciliationPage({ canRun }: { canRun: boolean }) {
         }
       />
       <div className="flex flex-wrap gap-3">
-        <Select aria-label={labelTh('DRIFT_STATUS')} value={status} onChange={(e) => {
+        <Select aria-label={labelTh('RECONCILIATION_STATUS_FILTER')} value={status} onChange={(e) => {
           setLoading(true)
           setStatus(e.target.value)
         }}>
-          <option value="">{labelTh('DRIFT_ALL')}</option>
+          <option value="">{labelTh('RECONCILIATION_STATUS_ALL')}</option>
           {['OPEN', 'ACK', 'RESOLVED'].map((value) => (
             <option key={value} value={value}>
               {labelTh(value)}
@@ -136,8 +136,14 @@ export default function ReconciliationPage({ canRun }: { canRun: boolean }) {
         <DataTable aria-label={labelTh('RECONCILIATION')}>
           <DataTableHead>
             <DataTableRow>
-              {['DRIFT_STATUS', 'RECONCILIATION_RULE', 'ORDER_NUMBER', 'DRIFT_CREATED', 'DRIFT_UPDATED', 'SHIP_ACTIONS'].map(
-                (key) => (
+              {[
+                'RECONCILIATION_COL_STATUS',
+                'RECONCILIATION_RULE',
+                'ORDER_NUMBER',
+                'RECONCILIATION_COL_CREATED',
+                'RECONCILIATION_COL_UPDATED',
+                'RECONCILIATION_COL_ACTIONS',
+              ].map((key) => (
                   <DataTableTh key={key}>{labelTh(key)}</DataTableTh>
                 ),
               )}
@@ -147,13 +153,7 @@ export default function ReconciliationPage({ canRun }: { canRun: boolean }) {
             {issues.map((issue) => (
               <DataTableRow key={issue.id}>
                 <DataTableCell>
-                  <Badge
-                    variant={
-                      issue.status === 'RESOLVED' ? 'success' : issue.status === 'ACK' ? 'info' : 'warning'
-                    }
-                  >
-                    {labelTh(issue.status)}
-                  </Badge>
+                  <StatusBadge value={issue.status} kind="reconciliation_issue" />
                 </DataTableCell>
                 <DataTableCell>{labelTh(issue.rule)}</DataTableCell>
                 <DataTableCell mono>

@@ -33,9 +33,10 @@ public class ReconciliationIssueRepository {
         jdbc.update(
             """
             UPDATE reconciliation_issue
-            SET details = ?::jsonb, updated_at = now()
+            SET run_id = ?, details = ?::jsonb, updated_at = now()
             WHERE tenant_id = ? AND rule = ? AND order_id = ? AND status <> 'RESOLVED'
             """,
+            runId,
             details,
             tenantId,
             rule,

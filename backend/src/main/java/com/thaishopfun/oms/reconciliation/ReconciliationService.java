@@ -290,23 +290,27 @@ public class ReconciliationService {
     if (!Set.of("ACK", "RESOLVED").contains(next)) {
       throw new ListingApiException(422, "VALIDATION_FAILED", "status is invalid");
     }
-    int updated = issues.updateStatus(issueId, next);
-    if (updated == 0) {
-      throw new ListingApiException(404, "NOT_FOUND", "issue not found");
-    }
-    UUID tenantId = TenantContext.requireTenantId();
-    ObjectNode after = json.createObjectNode();
-    after.put("status", next);
-    jdbc.update(
-        """
-        INSERT INTO audit_log (id, tenant_id, actor_type, actor_id, action, entity_type, entity_id, "after")
-        VALUES (?, ?, 'USER', ?, 'RECONCILIATION_ISSUE_STATUS', 'reconciliation_issue', ?, ?::jsonb)
-        """,
-        UuidV7.generate(),
-        tenantId,
-        TenantContext.requireUserId().toString(),
-        issueId,
-        json.writeValueAsString(after));
+    tx.execute(
+        status -> {
+          int updated = issues.updateStatus(issueId, next);
+          if (updated == 0) {
+            throw new ListingApiException(404, "NOT_FOUND", "issue not found");
+          }
+          UUID tenantId = TenantContext.requireTenantId();
+          ObjectNode after = json.createObjectNode();
+          after.put("status", next);
+          jdbc.update(
+              """
+              INSERT INTO audit_log (id, tenant_id, actor_type, actor_id, action, entity_type, entity_id, "after")
+              VALUES (?, ?, 'USER', ?, 'RECONCILIATION_ISSUE_STATUS', 'reconciliation_issue', ?, ?::jsonb)
+              """,
+              UuidV7.generate(),
+              tenantId,
+              TenantContext.requireUserId().toString(),
+              issueId,
+              json.writeValueAsString(after));
+          return null;
+        });
   }
 
   private <T> T inTenant(UUID tenant, Supplier<T> work) {

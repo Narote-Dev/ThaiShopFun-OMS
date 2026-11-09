@@ -212,5 +212,19 @@ class ReconciliationAcceptanceTest extends StockTestBase {
                         Long.class,
                         ReconciliationRules.SHIP_BY_LATE)))
         .isEqualTo(1);
+    UUID lateIssueRun =
+        fixture.inTenant(
+            shop.tenant(),
+            () ->
+                jdbc.queryForObject(
+                    """
+                    SELECT run_id FROM reconciliation_issue
+                    WHERE rule = ? AND order_id = (
+                      SELECT id FROM sales_order WHERE external_order_id = 'LATE'
+                    )
+                    """,
+                    UUID.class,
+                    ReconciliationRules.SHIP_BY_LATE));
+    assertThat(lateIssueRun).isEqualTo(second.run_id());
   }
 }
