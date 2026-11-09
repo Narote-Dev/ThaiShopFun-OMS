@@ -28,6 +28,7 @@ class StagingDemoAccountRegistry {
           jsonMapper.readValue(
               properties.getDemoAccounts(), new TypeReference<List<StagingDemoAccount>>() {});
     }
+    StagingDemoPasswordPolicy.validate(accounts);
     Map<String, StagingDemoAccount> index = new LinkedHashMap<>();
     for (StagingDemoAccount account : accounts) {
       if (account.passwordHash() == null || account.passwordHash().isBlank()) {

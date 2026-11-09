@@ -59,12 +59,22 @@ class StagingIdpController {
       throws Exception {
     String loginId = body == null ? null : body.loginId();
     String clientIp = StagingClientIp.resolve(request);
-    String throttleKey = StagingClientIp.throttleKey(clientIp, loginId);
-    // Step 1: Rate limit and lockout per client address and username (no self-signup).
-    StagingLoginThrottler.Result throttle = throttler.check(throttleKey);
-    if (!throttle.permitted()) {
-      errors.write(request, response, 429, "TOO_MANY_REQUESTS", throttle.message());
+    String ipKey = StagingLoginThrottleKeys.forIp(clientIp);
+    // Step 1: Optional IP window; lockout and failure counting are per login id only (XFF cannot
+    // reset).
+    StagingLoginThrottler.Result ipThrottle = throttler.check(ipKey);
+    if (!ipThrottle.permitted()) {
+      errors.write(request, response, 429, "TOO_MANY_REQUESTS", ipThrottle.message());
       return ResponseEntity.status(429).build();
+    }
+    String loginKey =
+        loginId == null || loginId.isBlank() ? null : StagingLoginThrottleKeys.forLogin(loginId);
+    if (loginKey != null) {
+      StagingLoginThrottler.Result loginThrottle = throttler.check(loginKey);
+      if (!loginThrottle.permitted()) {
+        errors.write(request, response, 429, "TOO_MANY_REQUESTS", loginThrottle.message());
+        return ResponseEntity.status(429).build();
+      }
     }
     if (body == null
         || loginId == null
@@ -77,13 +87,19 @@ class StagingIdpController {
     var accountOpt = accounts.find(loginId);
     if (accountOpt.isEmpty()
         || !passwordEncoder.matches(body.password(), accountOpt.get().passwordHash())) {
-      throttler.recordFailure(throttleKey);
+      throttler.recordFailure(ipKey);
+      if (loginKey != null) {
+        throttler.recordFailure(loginKey);
+      }
       errors.write(request, response, 401, "UNAUTHORIZED", "ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง");
       return ResponseEntity.status(401).build();
     }
     // Step 2: Mint an access token with section 4.1 claims for the demo tenant.
     StagingDemoAccount account = accountOpt.get();
-    throttler.recordSuccess(throttleKey);
+    throttler.recordSuccess(ipKey);
+    if (loginKey != null) {
+      throttler.recordSuccess(loginKey);
+    }
     Instant membershipExpiry =
         "GRACE".equals(account.status())
             ? Instant.now().plus(30, ChronoUnit.DAYS).truncatedTo(ChronoUnit.SECONDS)

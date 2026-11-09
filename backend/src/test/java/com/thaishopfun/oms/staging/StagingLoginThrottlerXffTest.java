@@ -21,7 +21,7 @@ class StagingLoginThrottlerXffTest {
   }
 
   @Test
-  void lockoutStaysOnRealIpWhenXForwardedForChanges() {
+  void loginLockoutIgnoresDifferentIpBuckets() {
     StagingProperties properties = new StagingProperties();
     properties.setLoginLockoutThreshold(2);
     properties.setLoginLockoutSeconds(300);
@@ -29,12 +29,15 @@ class StagingLoginThrottlerXffTest {
     properties.setLoginWindowSeconds(900);
     MutableClock clock = new MutableClock(Instant.parse("2026-01-01T00:00:00Z"));
     StagingLoginThrottler throttler = new StagingLoginThrottler(properties, clock);
-    String throttleKey = StagingClientIp.throttleKey("203.0.113.10", "owner-active");
-    throttler.recordFailure(throttleKey);
-    throttler.recordFailure(throttleKey);
-    assertThat(throttler.check(throttleKey).locked()).isTrue();
-    String spoofedKey = StagingClientIp.throttleKey("198.51.100.99", "owner-active");
-    assertThat(throttler.check(spoofedKey).permitted()).isTrue();
+    String loginKey = StagingLoginThrottleKeys.forLogin("owner-active");
+    throttler.recordFailure(loginKey);
+    throttler.recordFailure(loginKey);
+    assertThat(throttler.check(loginKey).locked()).isTrue();
+    assertThat(throttler.check(StagingLoginThrottleKeys.forIp("203.0.113.10")).permitted())
+        .isTrue();
+    assertThat(throttler.check(StagingLoginThrottleKeys.forIp("198.51.100.99")).permitted())
+        .isTrue();
+    assertThat(throttler.check(loginKey).locked()).isTrue();
   }
 
   @Test
@@ -46,9 +49,8 @@ class StagingLoginThrottlerXffTest {
     properties.setLoginWindowSeconds(900);
     StagingLoginThrottler throttler =
         new StagingLoginThrottler(properties, Clock.fixed(Instant.EPOCH, ZoneOffset.UTC));
-    String ip = "203.0.113.10";
-    String userA = StagingClientIp.throttleKey(ip, "owner-active");
-    String userB = StagingClientIp.throttleKey(ip, "staff-active");
+    String userA = StagingLoginThrottleKeys.forLogin("owner-active");
+    String userB = StagingLoginThrottleKeys.forLogin("staff-active");
     throttler.recordFailure(userA);
     throttler.recordFailure(userA);
     assertThat(throttler.check(userA).locked()).isTrue();

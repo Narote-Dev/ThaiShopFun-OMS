@@ -41,7 +41,7 @@ Official references:
 2. **Backend**: `/api/**` and `/internal/**` require a valid JWT. Public endpoints under staging profile:
    - `GET /actuator/health` (and other exposed actuator routes in `application.yml`)
    - `GET /staging-idp/.well-known/jwks.json`, `POST /staging-idp/login` only — **no registration**, **no public demo-account list**
-3. **Login protection**: rate limit + lockout per **client IP and login id** (`StagingLoginThrottler`). Client IP uses the servlet remote address; put Railway behind a trusted proxy and set `server.forward-headers-strategy: framework` so Spring resolves the real client — **do not** trust spoofed `X-Forwarded-For` in application code.
+3. **Login protection**: lockout and failed-login counting are keyed **only by `login_id`** (`StagingLoginThrottler`), so a spoofed `X-Forwarded-For` cannot reset lockout even when `server.forward-headers-strategy: framework` rewrites `getRemoteAddr()`. A separate optional per-IP sliding window may still apply; it does not clear login lockout.
 4. **Noindex**: `X-Robots-Tag` on API responses (staging profile) + meta `robots` + Vercel `headers` in `frontend/vercel.json`.
 5. **Optional later**: Vercel **Password Protection** on Pro adds a second gate; still keep demo login + JWT.
 
@@ -130,7 +130,7 @@ scripts/staging-generate-secrets.sh 'alice-pass' 'bob-pass'   # bcrypt hashes fo
 
 ## Demo users (no self-signup)
 
-Accounts live in `backend/src/main/resources/staging/demo-accounts.json` with **per-user `password_hash`** (bcrypt). The committed file uses a placeholder hash only — production staging must set unique hashes via **`OMS_STAGING_DEMO_ACCOUNTS`** or an unreleased override. Share **username + plaintext password** only out-of-band with each trial user.
+Accounts live in `backend/src/main/resources/staging/demo-accounts.json` with **per-user `password_hash`** (bcrypt). The committed file is **structure only**: every row shares a documented placeholder bcrypt (`CHANGE-ME-staging`). The **staging profile refuses to start** if any loaded account uses that placeholder or if two accounts share the same `password_hash`. Real trials must set **`OMS_STAGING_DEMO_ACCOUNTS`** (or another override) with **unique bcrypt per user**. Share **username + plaintext password** only out-of-band with each trial user.
 
 To add/remove users:
 
