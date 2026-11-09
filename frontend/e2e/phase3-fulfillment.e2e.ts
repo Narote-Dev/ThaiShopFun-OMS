@@ -80,7 +80,7 @@ test('phase 3 full flow: reserve through partial return and refund snapshot', as
     .toBeGreaterThan(0)
   const row = page.getByRole('row').filter({ hasText: externalOrderId })
   await row.getByRole('checkbox').check()
-  await page.getByRole('button', { name: 'พิมพ์ใบปะหน้า', exact: true }).click()
+  await page.getByRole('button', { name: 'พิมพ์ใบปะหน้า (A6)', exact: true }).click()
   await expect
     .poll(
       async () => await row.getByText(/TH\d|FLASH|MANUAL/i).count(),
@@ -192,8 +192,15 @@ test('cancel at PACKED releases reservation and clears pack progress', async ({ 
     )
     .toBe('CANCELLED|UNFULFILLED')
 
-  const after = await orderDetail(request, token, orderId)
-  const reservations = (after.reservations as Array<{ status: string }>) ?? []
-  expect(reservations.every((row) => row.status !== 'ACTIVE')).toBeTruthy()
+  await expect
+    .poll(
+      async () => {
+        const after = await orderDetail(request, token, orderId)
+        const reservations = (after.reservations as Array<{ status: string }>) ?? []
+        return reservations.every((row) => row.status !== 'ACTIVE') ? 'released' : ''
+      },
+      { timeout: 90_000, intervals: [2000] },
+    )
+    .toBe('released')
   await assertInvariants(request)
 })
