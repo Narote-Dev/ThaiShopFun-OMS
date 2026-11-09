@@ -47,7 +47,8 @@ class ReconciliationPatchApiTest extends OrderIntegrationTest {
       statement.executeUpdate();
     }
 
-    assertThat(http.post("/api/v1/reconciliation/runs", shopA.owner(), null).status()).isEqualTo(200);
+    assertThat(http.post("/api/v1/reconciliation/runs", shopA.owner(), null).status())
+        .isEqualTo(200);
 
     CatalogHttp.Result list =
         http.get("/api/v1/reconciliation/issues?status=OPEN&rule=SHIP_BY_LATE", shopA.owner());
@@ -81,7 +82,9 @@ class ReconciliationPatchApiTest extends OrderIntegrationTest {
                 .status())
         .isEqualTo(200);
     assertThat(
-            http.get("/api/v1/reconciliation/issues?status=RESOLVED&rule=SHIP_BY_LATE", shopA.owner())
+            http.get(
+                    "/api/v1/reconciliation/issues?status=RESOLVED&rule=SHIP_BY_LATE",
+                    shopA.owner())
                 .body()
                 .path("items")
                 .get(0)
