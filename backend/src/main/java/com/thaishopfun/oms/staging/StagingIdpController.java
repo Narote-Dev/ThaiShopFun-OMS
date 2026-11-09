@@ -1,5 +1,6 @@
 package com.thaishopfun.oms.staging;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.thaishopfun.oms.auth.ApiErrors;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -8,6 +9,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import org.springframework.context.annotation.Profile;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -15,9 +17,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.context.annotation.Profile;
 import org.springframework.web.bind.annotation.RestController;
-import com.fasterxml.jackson.annotation.JsonProperty;
 
 @RestController
 @Profile("staging")
@@ -92,7 +92,7 @@ class StagingIdpController {
       errors.write(request, response, 400, "INVALID_REQUEST", "login_id and password are required");
       return ResponseEntity.badRequest().build();
     }
-  var accountOpt = accounts.find(body.loginId());
+    var accountOpt = accounts.find(body.loginId());
     if (!passwordEncoder.matches(body.password(), hash) || accountOpt.isEmpty()) {
       throttler.recordFailure(clientKey);
       errors.write(request, response, 401, "UNAUTHORIZED", "ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง");

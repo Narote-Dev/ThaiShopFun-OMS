@@ -1,13 +1,13 @@
 package com.thaishopfun.oms.staging;
 
+import org.springframework.boot.ApplicationArguments;
+import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Profile;
-import org.springframework.stereotype.Component;
-import org.springframework.boot.ApplicationArguments;
-import org.springframework.boot.ApplicationRunner;
 import org.springframework.core.annotation.Order;
+import org.springframework.stereotype.Component;
 
 /** One-shot admin CLI: seed demo data and exit (used from Railway shell or CI smoke). */
 @Component

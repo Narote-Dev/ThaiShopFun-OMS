@@ -2,11 +2,11 @@ package com.thaishopfun.oms.staging;
 
 import com.nimbusds.jose.jwk.JWKSet;
 import com.nimbusds.jose.jwk.RSAKey;
-import java.security.interfaces.RSAPublicKey;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyFactory;
 import java.security.interfaces.RSAPrivateCrtKey;
 import java.security.interfaces.RSAPrivateKey;
+import java.security.interfaces.RSAPublicKey;
 import java.security.spec.PKCS8EncodedKeySpec;
 import java.security.spec.RSAPublicKeySpec;
 import java.util.Base64;
@@ -21,7 +21,7 @@ class StagingSigningKeys {
   private final RSAKey key;
 
   StagingSigningKeys(StagingProperties properties) {
-  // Step 1: Require an explicit signing key. Staging must not mint tokens with an ephemeral key.
+    // Step 1: Require an explicit signing key. Staging must not mint tokens with an ephemeral key.
     String pem = properties.getJwtSigningKeyPem();
     if (pem == null || pem.isBlank()) {
       throw new IllegalStateException(
@@ -34,9 +34,11 @@ class StagingSigningKeys {
       if (privateKey instanceof RSAPrivateCrtKey crt) {
         publicKey =
             (RSAPublicKey)
-                keyFactory.generatePublic(new RSAPublicKeySpec(crt.getModulus(), crt.getPublicExponent()));
+                keyFactory.generatePublic(
+                    new RSAPublicKeySpec(crt.getModulus(), crt.getPublicExponent()));
       } else {
-        throw new IllegalStateException("OMS_STAGING_JWT_RSA_PRIVATE_KEY must be an RSA CRT private key");
+        throw new IllegalStateException(
+            "OMS_STAGING_JWT_RSA_PRIVATE_KEY must be an RSA CRT private key");
       }
       this.key =
           new RSAKey.Builder(publicKey)

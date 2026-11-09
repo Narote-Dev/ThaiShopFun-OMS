@@ -16,8 +16,8 @@ class StagingSecurityConfig {
 
   @Bean
   @Order(0)
-  SecurityFilterChain stagingIdpChain(HttpSecurity http, ApiErrors errors, StagingProperties properties)
-      throws Exception {
+  SecurityFilterChain stagingIdpChain(
+      HttpSecurity http, ApiErrors errors, StagingProperties properties) throws Exception {
     String base = properties.getIdpBasePath();
     if (!base.startsWith("/")) {
       base = "/" + base;

@@ -98,7 +98,8 @@ public class SecurityConfig {
   @Bean
   @Order(3)
   SecurityFilterChain publicChain(
-      HttpSecurity http, ApiErrors errors, Optional<CorsConfigurationSource> cors) throws Exception {
+      HttpSecurity http, ApiErrors errors, Optional<CorsConfigurationSource> cors)
+      throws Exception {
     stateless(http, errors, cors);
     http.securityMatcher("/**");
     http.authorizeHttpRequests(
@@ -107,7 +108,8 @@ public class SecurityConfig {
   }
 
   private static void stateless(
-      HttpSecurity http, ApiErrors errors, Optional<CorsConfigurationSource> cors) throws Exception {
+      HttpSecurity http, ApiErrors errors, Optional<CorsConfigurationSource> cors)
+      throws Exception {
     http.csrf(AbstractHttpConfigurer::disable)
         .sessionManagement(
             session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))

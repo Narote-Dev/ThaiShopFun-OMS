@@ -6,8 +6,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import org.springframework.core.io.ClassPathResource;
 import org.springframework.context.annotation.Profile;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Component;
 import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.json.JsonMapper;
@@ -18,12 +18,14 @@ class StagingDemoAccountRegistry {
 
   private final Map<String, StagingDemoAccount> byLoginId;
 
-  StagingDemoAccountRegistry(StagingProperties properties, JsonMapper jsonMapper) throws IOException {
-  // Step 1: Start from the committed account list (no passwords). Env JSON overrides when set.
+  StagingDemoAccountRegistry(StagingProperties properties, JsonMapper jsonMapper)
+      throws IOException {
+    // Step 1: Start from the committed account list (no passwords). Env JSON overrides when set.
     List<StagingDemoAccount> accounts = loadClasspath(jsonMapper);
     if (properties.getDemoAccounts() != null && !properties.getDemoAccounts().isBlank()) {
       accounts =
-          jsonMapper.readValue(properties.getDemoAccounts(), new TypeReference<List<StagingDemoAccount>>() {});
+          jsonMapper.readValue(
+              properties.getDemoAccounts(), new TypeReference<List<StagingDemoAccount>>() {});
     }
     Map<String, StagingDemoAccount> index = new LinkedHashMap<>();
     for (StagingDemoAccount account : accounts) {

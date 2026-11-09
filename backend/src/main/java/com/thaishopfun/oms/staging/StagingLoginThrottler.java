@@ -5,11 +5,10 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
 /** In-memory login rate limiting and lockout for the staging demo IdP (single small instance). */
-import org.springframework.context.annotation.Profile;
-
 @Component
 @Profile("staging")
 class StagingLoginThrottler {
@@ -38,7 +37,8 @@ class StagingLoginThrottler {
       return Result.lock("ลองเข้าสู่ระบบบ่อยเกินไป กรุณารอสักครู่แล้วลองใหม่");
     }
     if (state.windowStarted == null
-        || Duration.between(state.windowStarted, now).getSeconds() > properties.getLoginWindowSeconds()) {
+        || Duration.between(state.windowStarted, now).getSeconds()
+            > properties.getLoginWindowSeconds()) {
       attempts.remove(clientKey);
       return Result.permit();
     }
@@ -58,7 +58,8 @@ class StagingLoginThrottler {
             return state;
           }
           if (state.windowStarted == null
-              || Duration.between(state.windowStarted, now).getSeconds() > properties.getLoginWindowSeconds()) {
+              || Duration.between(state.windowStarted, now).getSeconds()
+                  > properties.getLoginWindowSeconds()) {
             state.windowStarted = now;
             state.attemptsInWindow = 0;
             state.consecutiveFailures = 0;
