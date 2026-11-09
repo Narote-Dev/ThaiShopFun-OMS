@@ -7,9 +7,9 @@ import com.thaishopfun.oms.order.ChannelAccountLookup.TsfAccount;
 import com.thaishopfun.oms.order.OrderOptimisticLockException;
 import com.thaishopfun.oms.order.OrderStateException;
 import com.thaishopfun.oms.order.OrderStateMachine;
+import com.thaishopfun.oms.order.OrderStateMachine.GuardContext;
 import com.thaishopfun.oms.order.SalesOrder;
 import com.thaishopfun.oms.order.SalesOrderRepository;
-import com.thaishopfun.oms.order.OrderStateMachine.GuardContext;
 import java.sql.Timestamp;
 import java.time.Clock;
 import java.time.Instant;
@@ -44,7 +44,7 @@ public class ShipmentIntakeSupport {
 
   @Transactional
   public void handle(InboxMessage message) {
-  // Step 1: Resolve tenant channel and lock the order row.
+    // Step 1: Resolve tenant channel and lock the order row.
     TsfAccount account = requireTsfAccount(message);
     JsonNode data = message.payload().path("data");
     String externalOrderId = requiredText(data, "order_id");
@@ -127,8 +127,13 @@ public class ShipmentIntakeSupport {
 
   private static String mapShipmentStatus(String tsfStatus) {
     return switch (tsfStatus) {
-      case "LABEL_READY", "PENDING", "SHIPPED", "IN_TRANSIT", "DELIVERED", "FAILED",
-              "RETURNED_TO_SENDER" ->
+      case "LABEL_READY",
+          "PENDING",
+          "SHIPPED",
+          "IN_TRANSIT",
+          "DELIVERED",
+          "FAILED",
+          "RETURNED_TO_SENDER" ->
           tsfStatus;
       default -> throw new NonRetryableInboxException("unknown shipment status: " + tsfStatus);
     };

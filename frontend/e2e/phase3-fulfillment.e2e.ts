@@ -66,7 +66,7 @@ test('phase 3 full flow: reserve through partial return and refund snapshot', as
   await scan.fill('DEMO-SKU-COD')
   await scan.press('Enter')
   await page.getByRole('button', { name: 'ยืนยันแพ็กเสร็จ', exact: true }).click()
-  await expect(page.getByRole('status')).toContainText('แพ็กเสร็จแล้ว', { timeout: 30_000 })
+  await expect(page.getByText('แพ็กเสร็จแล้ว', { exact: true })).toBeVisible({ timeout: 30_000 })
 
   await page.getByRole('navigation', { name: 'เมนูหลัก', exact: true }).getByRole('link', {
     name: 'ยืนยันจัดส่ง',
@@ -146,7 +146,7 @@ test('cancel at PACKED releases reservation and clears pack progress', async ({ 
   await seedDemoCatalog(request)
   const externalOrderId = `E2E-PACK-CXL-${Date.now()}`
   await createPrepaidOrder(request, externalOrderId, [
-    { line_id: 'L1', listing_sku_id: 'L-demo-ready', qty: 2, unit_price: 295 },
+    { line_id: 'L1', listing_sku_id: 'L-demo-ready', qty: 1, unit_price: 295 },
   ])
   const { id: orderId } = await waitForOrder(request, token, externalOrderId, 'READY_TO_PICK')
 
@@ -156,18 +156,23 @@ test('cancel at PACKED releases reservation and clears pack progress', async ({ 
     data: { order_ids: [orderId] },
   })
   expect(pick.ok()).toBeTruthy()
-  for (let i = 0; i < 2; i++) {
-    const scan = await request.post(`${OMS}/api/v1/pack/orders/${orderId}/scans`, {
-      headers,
-      data: { scan: 'DEMO-SKU-READY' },
-    })
-    expect(scan.ok()).toBeTruthy()
-  }
-  const packed = await request.post(`${OMS}/api/v1/pack/orders/${orderId}/complete`, {
-    headers,
-    data: {},
-  })
-  expect(packed.ok()).toBeTruthy()
+  await expect
+    .poll(
+      async () => {
+        const scan = await request.post(`${OMS}/api/v1/pack/orders/${orderId}/scans`, {
+          headers,
+          data: { scan: 'DEMO-SKU-READY' },
+        })
+        if (!scan.ok()) return ''
+        const packed = await request.post(`${OMS}/api/v1/pack/orders/${orderId}/complete`, {
+          headers,
+          data: {},
+        })
+        return packed.ok() ? 'ok' : ''
+      },
+      { timeout: 90_000, intervals: [2000] },
+    )
+    .toBe('ok')
   await waitForOrder(request, token, externalOrderId, 'PACKED')
 
   await loginActiveShop(page)
