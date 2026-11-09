@@ -3,9 +3,9 @@ package com.thaishopfun.oms.reconciliation;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -37,8 +37,7 @@ public class ReconciliationJob {
     if (!properties.isEnabled()) return;
     var tenants =
         jdbc.query(
-            "SELECT id FROM list_active_tenant_ids()",
-            (rs, n) -> rs.getObject("id", UUID.class));
+            "SELECT id FROM list_active_tenant_ids()", (rs, n) -> rs.getObject("id", UUID.class));
     for (UUID tenant : tenants) {
       try {
         service.run(tenant, "SCHEDULED");

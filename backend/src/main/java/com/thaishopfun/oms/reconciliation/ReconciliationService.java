@@ -113,18 +113,20 @@ public class ReconciliationService {
           row.put("code", violation.code());
           row.put(
               "entity_ids",
-              violation.entityIds().stream().map(UUID::toString).reduce((a, b) -> a + "," + b).orElse(""));
+              violation.entityIds().stream()
+                  .map(UUID::toString)
+                  .reduce((a, b) -> a + "," + b)
+                  .orElse(""));
         }
-        meters
-            .counter(ALERT_METRIC, List.of(Tag.of("code", violation.code())))
-            .increment();
+        meters.counter(ALERT_METRIC, List.of(Tag.of("code", violation.code()))).increment();
         meters
             .counter(
                 com.thaishopfun.oms.invariant.InvariantJob.VIOLATIONS_METRIC,
                 List.of(Tag.of("code", violation.code())))
             .increment();
       }
-      issues.upsertOpenShop(runId, ReconciliationRules.INVARIANT_VIOLATION, json.writeValueAsString(details));
+      issues.upsertOpenShop(
+          runId, ReconciliationRules.INVARIANT_VIOLATION, json.writeValueAsString(details));
       counts.put(ReconciliationRules.INVARIANT_VIOLATION, 1);
       total += 1;
     }
@@ -154,7 +156,9 @@ public class ReconciliationService {
         json.writeValueAsString(after));
     for (var entry : counts.entrySet()) {
       if (entry.getValue() > 0) {
-        meters.counter(RUN_METRIC, List.of(Tag.of("rule", entry.getKey()))).increment(entry.getValue());
+        meters
+            .counter(RUN_METRIC, List.of(Tag.of("rule", entry.getKey())))
+            .increment(entry.getValue());
       }
     }
     return new Result(runId, total, counts);
@@ -269,7 +273,9 @@ public class ReconciliationService {
                 row.put("status", rs.getString("status"));
                 row.put(
                     "order_id",
-                    rs.getObject("order_id") == null ? null : rs.getObject("order_id", UUID.class).toString());
+                    rs.getObject("order_id") == null
+                        ? null
+                        : rs.getObject("order_id", UUID.class).toString());
                 row.put("external_order_id", rs.getString("external_order_id"));
                 row.put("details", json.readTree(rs.getString("details")));
                 row.put("created_at", rs.getObject("created_at", OffsetDateTime.class));

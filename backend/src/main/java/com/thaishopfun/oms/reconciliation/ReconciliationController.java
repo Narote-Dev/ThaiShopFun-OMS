@@ -22,8 +22,7 @@ public class ReconciliationController {
 
   @GetMapping("/issues")
   public Map<String, Object> issues(
-      @RequestParam(required = false) String status,
-      @RequestParam(required = false) String rule) {
+      @RequestParam(required = false) String status, @RequestParam(required = false) String rule) {
     if (status != null && !Set.of("OPEN", "ACK", "RESOLVED").contains(status)) {
       throw new ListingApiException(422, "VALIDATION_FAILED", "status is invalid");
     }

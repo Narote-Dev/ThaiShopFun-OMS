@@ -121,7 +121,9 @@ public class ReconciliationIssueRepository {
       return;
     }
     String placeholders =
-        stillOpenOrderIds.stream().map(ignored -> "?").collect(java.util.stream.Collectors.joining(","));
+        stillOpenOrderIds.stream()
+            .map(ignored -> "?")
+            .collect(java.util.stream.Collectors.joining(","));
     Object[] params = new Object[3 + stillOpenOrderIds.size()];
     params[0] = runId;
     params[1] = tenantId;

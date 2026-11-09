@@ -13,12 +13,12 @@ import com.thaishopfun.oms.stock.StockFixture;
 import com.thaishopfun.oms.stock.StockTestBase;
 import com.thaishopfun.oms.stockpush.StockPushService;
 import java.math.BigDecimal;
-import java.util.HashMap;
-import java.util.Map;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -119,10 +119,10 @@ class ReconciliationAcceptanceTest extends StockTestBase {
     seedOrder(shop, account, "LATE", "ACTIVE", "PAID", "PACKED", past, null);
     seedOrder(shop, account, "UNPAID", "ACTIVE", "PENDING", "SHIPPED", null, null);
     seedOrder(shop, account, "PAID-CANCEL", "CANCELLED", "PAID", "UNFULFILLED", null, null);
-    seedOrder(
-        shop, account, "COD", "ACTIVE", "COD_PENDING", "DELIVERED", null, oldDelivered);
+    seedOrder(shop, account, "COD", "ACTIVE", "COD_PENDING", "DELIVERED", null, oldDelivered);
 
-    UUID refundOrder = seedOrder(shop, account, "RETURN", "ACTIVE", "PAID", "DELIVERED", null, null);
+    UUID refundOrder =
+        seedOrder(shop, account, "RETURN", "ACTIVE", "PAID", "DELIVERED", null, null);
     UUID returnId = UuidV7.generate();
     fixture.runInTenant(
         shop.tenant(),
