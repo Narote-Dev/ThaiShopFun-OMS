@@ -194,6 +194,8 @@ test('phase 3 full flow: reserve through partial return and refund snapshot', as
   await page.goto(`/#/orders/${orderId}`)
   await expect(page.getByRole('heading', { name: `ออเดอร์ ${externalOrderId}`, exact: true })).toBeVisible()
   await expect(page.getByText('คืนเงินบางส่วน', { exact: true }).first()).toBeVisible()
-  await expect(page.getByText('฿295.00')).toBeVisible()
+  await expect(
+    page.getByRole('table', { name: 'รายการคืนเงิน' }).getByRole('cell', { name: '฿295.00' }),
+  ).toBeVisible()
   await assertInvariants(request)
 })

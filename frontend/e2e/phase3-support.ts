@@ -30,8 +30,9 @@ export async function assertInvariants(request: APIRequestContext): Promise<void
   const response = await request.post(`${OMS}/control/demo/invariants-check`)
   expect(response.ok()).toBeTruthy()
   const body = await response.json()
-  expect(body.status, JSON.stringify(body.violations ?? [])).toBe('OK')
-  expect(body.violations).toEqual([])
+  expect(body.status, `violations=${body.violations} checkFailed=${body.checkFailed}`).toBe('OK')
+  expect(body.violations).toBe(0)
+  expect(body.checkFailed ?? 0).toBe(0)
 }
 
 type OrderLine = { line_id: string; listing_sku_id: string; qty: number; unit_price?: number }
