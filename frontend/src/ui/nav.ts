@@ -6,6 +6,7 @@ import {
   LayoutDashboard,
   Package,
   PauseCircle,
+  Scale,
   ShoppingBag,
   Store,
   Upload,
@@ -65,6 +66,12 @@ export function buildNavSections(me: Me): NavSection[] {
           labelTh: labelTh('STOCK_DRIFT'),
           ariaLabel: labelTh('STOCK_DRIFT'),
           icon: Store,
+        },
+        {
+          href: '#/reconciliation',
+          labelTh: labelTh('RECONCILIATION'),
+          ariaLabel: labelTh('RECONCILIATION'),
+          icon: Scale,
         },
         {
           href: '#/channel/listings',
@@ -145,6 +152,7 @@ export function breadcrumbParts(route: string): string[] {
   if (/^#\/orders\/[0-9a-f-]{36}$/.test(base)) return ['ออเดอร์', 'รายละเอียด']
   if (base.startsWith('#/orders')) return ['ออเดอร์']
   if (base === '#/channel/stock-drift') return [labelTh('STOCK_DRIFT')]
+  if (base === '#/reconciliation') return [labelTh('RECONCILIATION')]
   if (base.startsWith('#/channel/listings')) return ['รายการขาย']
   if (base.startsWith('#/catalog/products')) return ['สินค้า']
   if (base.startsWith('#/catalog/skus')) return ['รหัสสินค้า']

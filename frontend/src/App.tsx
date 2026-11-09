@@ -24,6 +24,7 @@ import HoldQueuePage from './orders/HoldQueuePage'
 import OrderDetailPage from './orders/OrderDetailPage'
 import OrdersListPage from './orders/OrdersListPage'
 import StockDriftPage from './stockdrift/StockDriftPage'
+import ReconciliationPage from './reconciliation/ReconciliationPage'
 import ListingsPage from './channel/listings/ListingsPage'
 import PickListsPage from './fulfillment/PickListsPage'
 import PackPage from './fulfillment/PackPage'
@@ -55,6 +56,7 @@ function page(route: string, me: Me): ReactNode {
   const pack = PACK_ROUTE.exec(route.split('?')[0])
   if (pack) return <PackPage key={pack[1]} orderId={pack[1]} />
   if (route === '#/channel/stock-drift') return <StockDriftPage canRun={canWrite} />
+  if (route === '#/reconciliation') return <ReconciliationPage canRun={canWrite} />
   if (route === '#/admin/outbox') return <OutboxAdminPage readOnly={readOnly} />
   if (route === '#/') return <DashboardPage name={me.tenant.name} />
   if (route === '#/stock/documents') return <StockDocumentsPage access={stockAccess(me)} />
