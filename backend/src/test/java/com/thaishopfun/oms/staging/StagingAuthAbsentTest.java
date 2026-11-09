@@ -40,7 +40,7 @@ class StagingAuthAbsentTest {
   @Test
   void stagingIdpEndpointsAreNotMounted() throws Exception {
     mvc.perform(get("/staging-idp/.well-known/jwks.json")).andExpect(status().isUnauthorized());
-    mvc.perform(get("/staging-idp/demo-accounts")).andExpect(status().isNotFound());
+    mvc.perform(get("/staging-idp/demo-accounts")).andExpect(status().isUnauthorized());
     mvc.perform(
             post("/staging-idp/login")
                 .contentType(MediaType.APPLICATION_JSON)

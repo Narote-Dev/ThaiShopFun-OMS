@@ -3,6 +3,8 @@ package com.thaishopfun.oms.auth;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -60,9 +62,10 @@ public class SecurityConfig {
       JwtDecoder jwtDecoder,
       ApiErrors errors,
       OmsSecurityProperties properties,
-      Optional<CorsConfigurationSource> cors)
+      @Autowired(required = false) @Qualifier("stagingCorsConfigurationSource")
+          CorsConfigurationSource cors)
       throws Exception {
-    stateless(http, errors, cors);
+    stateless(http, errors, Optional.ofNullable(cors));
     http.securityMatcher("/internal/**");
     http.authorizeHttpRequests(auth -> auth.anyRequest().authenticated());
     oauth(http, jwtDecoder, errors);
@@ -83,9 +86,10 @@ public class SecurityConfig {
       IdentityProvisioner provisioner,
       TenantSessionService sessions,
       EntitlementGate gate,
-      Optional<CorsConfigurationSource> cors)
+      @Autowired(required = false) @Qualifier("stagingCorsConfigurationSource")
+          CorsConfigurationSource cors)
       throws Exception {
-    stateless(http, errors, cors);
+    stateless(http, errors, Optional.ofNullable(cors));
     http.securityMatcher("/api/**");
     http.authorizeHttpRequests(auth -> auth.anyRequest().authenticated());
     oauth(http, jwtDecoder, errors);
@@ -98,9 +102,12 @@ public class SecurityConfig {
   @Bean
   @Order(3)
   SecurityFilterChain publicChain(
-      HttpSecurity http, ApiErrors errors, Optional<CorsConfigurationSource> cors)
+      HttpSecurity http,
+      ApiErrors errors,
+      @Autowired(required = false) @Qualifier("stagingCorsConfigurationSource")
+          CorsConfigurationSource cors)
       throws Exception {
-    stateless(http, errors, cors);
+    stateless(http, errors, Optional.ofNullable(cors));
     http.securityMatcher("/**");
     http.authorizeHttpRequests(
         auth -> auth.requestMatchers("/actuator/**", "/error").permitAll().anyRequest().denyAll());
