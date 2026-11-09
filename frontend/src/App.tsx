@@ -12,6 +12,8 @@ import OutboxAdminPage from './outbox/OutboxAdminPage'
 import AppLayout from './shell/AppLayout'
 import DashboardPage from './shell/DashboardPage'
 import LoginPage from './shell/LoginPage'
+import StagingLoginPage from './shell/StagingLoginPage'
+import { stagingLoginEnabled } from './auth/stagingSession'
 import Paywall from './shell/Paywall'
 import RequireSession from './shell/RequireSession'
 import SettingUp from './shell/SettingUp'
@@ -146,8 +148,13 @@ function Shell() {
       </AppLayout>
     )
   }
+  const loginFallback = stagingLoginEnabled() ? (
+    <StagingLoginPage error={auth.signInError} onSignedIn={auth.completeStagingLogin} />
+  ) : (
+    <LoginPage error={auth.signInError} onSignIn={auth.signIn} />
+  )
   return (
-    <RequireSession signedIn={signedIn} fallback={<LoginPage error={auth.signInError} onSignIn={auth.signIn} />}>
+    <RequireSession signedIn={signedIn} fallback={loginFallback}>
       {body}
     </RequireSession>
   )

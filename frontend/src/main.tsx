@@ -9,6 +9,14 @@ import { createRoot } from 'react-dom/client'
 import App from './App.tsx'
 import { ToastProvider } from './ui/Toast.tsx'
 import './index.css'
+import { stagingLoginEnabled } from './auth/stagingSession'
+
+if (stagingLoginEnabled()) {
+  const meta = document.createElement('meta')
+  meta.name = 'robots'
+  meta.content = 'noindex, nofollow, noarchive'
+  document.head.appendChild(meta)
+}
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

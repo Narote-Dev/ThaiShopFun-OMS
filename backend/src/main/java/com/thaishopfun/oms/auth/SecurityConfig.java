@@ -2,6 +2,9 @@ package com.thaishopfun.oms.auth;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -21,6 +24,7 @@ import org.springframework.security.oauth2.jwt.JwtValidators;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.oauth2.server.resource.web.authentication.BearerTokenAuthenticationFilter;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.web.cors.CorsConfigurationSource;
 
 @Configuration
 @EnableConfigurationProperties(OmsSecurityProperties.class)
@@ -54,9 +58,14 @@ public class SecurityConfig {
   @Bean
   @Order(1)
   SecurityFilterChain internalChain(
-      HttpSecurity http, JwtDecoder jwtDecoder, ApiErrors errors, OmsSecurityProperties properties)
+      HttpSecurity http,
+      JwtDecoder jwtDecoder,
+      ApiErrors errors,
+      OmsSecurityProperties properties,
+      @Autowired(required = false) @Qualifier("stagingCorsConfigurationSource")
+          CorsConfigurationSource cors)
       throws Exception {
-    stateless(http, errors);
+    stateless(http, errors, Optional.ofNullable(cors));
     http.securityMatcher("/internal/**");
     http.authorizeHttpRequests(auth -> auth.anyRequest().authenticated());
     oauth(http, jwtDecoder, errors);
@@ -76,9 +85,11 @@ public class SecurityConfig {
       OmsSecurityProperties properties,
       IdentityProvisioner provisioner,
       TenantSessionService sessions,
-      EntitlementGate gate)
+      EntitlementGate gate,
+      @Autowired(required = false) @Qualifier("stagingCorsConfigurationSource")
+          CorsConfigurationSource cors)
       throws Exception {
-    stateless(http, errors);
+    stateless(http, errors, Optional.ofNullable(cors));
     http.securityMatcher("/api/**");
     http.authorizeHttpRequests(auth -> auth.anyRequest().authenticated());
     oauth(http, jwtDecoder, errors);
@@ -90,15 +101,22 @@ public class SecurityConfig {
 
   @Bean
   @Order(3)
-  SecurityFilterChain publicChain(HttpSecurity http, ApiErrors errors) throws Exception {
-    stateless(http, errors);
+  SecurityFilterChain publicChain(
+      HttpSecurity http,
+      ApiErrors errors,
+      @Autowired(required = false) @Qualifier("stagingCorsConfigurationSource")
+          CorsConfigurationSource cors)
+      throws Exception {
+    stateless(http, errors, Optional.ofNullable(cors));
     http.securityMatcher("/**");
     http.authorizeHttpRequests(
         auth -> auth.requestMatchers("/actuator/**", "/error").permitAll().anyRequest().denyAll());
     return http.build();
   }
 
-  private static void stateless(HttpSecurity http, ApiErrors errors) throws Exception {
+  private static void stateless(
+      HttpSecurity http, ApiErrors errors, Optional<CorsConfigurationSource> cors)
+      throws Exception {
     http.csrf(AbstractHttpConfigurer::disable)
         .sessionManagement(
             session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
@@ -107,6 +125,9 @@ public class SecurityConfig {
                 handler
                     .authenticationEntryPoint(errors::unauthorized)
                     .accessDeniedHandler(errors::forbidden));
+    if (cors.isPresent()) {
+      http.cors(c -> c.configurationSource(cors.get()));
+    }
   }
 
   private static void oauth(HttpSecurity http, JwtDecoder jwtDecoder, ApiErrors errors)

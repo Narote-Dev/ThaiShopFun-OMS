@@ -1,0 +1,14 @@
+[
+  {
+    "loginId": "owner-active",
+    "tsfUserId": "owner-active",
+    "email": "owner-active@shop.example",
+    "tsfShopId": "shop_active",
+    "shopName": "Active Shop",
+    "shopRole": "OWNER",
+    "tier": "PRO",
+    "status": "ACTIVE",
+    "entVer": 1,
+    "password_hash": "$2a$10$vk7wLbE/.Fnsh2TbKduwmOXcGfASY8MsYdd.bfaZHwDCfhdIIU6i."
+  }
+]

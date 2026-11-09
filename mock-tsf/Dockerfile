@@ -17,4 +17,6 @@ COPY --from=build --chown=mock:mock /src/mock-tsf/target/mock-tsf-exec.jar /app/
 USER mock
 EXPOSE 8090
 ENV PORT=8090
-ENTRYPOINT ["java", "-Dspring.profiles.active=local,e2e", "-jar", "/app/mock-tsf.jar"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
+  CMD curl -fsS "http://127.0.0.1:${PORT}/actuator/health" || exit 1
+ENTRYPOINT ["java", "-jar", "/app/mock-tsf.jar"]
