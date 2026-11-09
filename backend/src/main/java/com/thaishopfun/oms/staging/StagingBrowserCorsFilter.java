@@ -5,63 +5,54 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
-import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.context.annotation.Profile;
-import org.springframework.core.Ordered;
-import org.springframework.core.annotation.Order;
-import org.springframework.stereotype.Component;
-import org.springframework.web.cors.CorsConfiguration;
-import org.springframework.web.cors.CorsConfigurationSource;
-import org.springframework.web.cors.CorsProcessor;
+import java.util.List;
+import org.springframework.http.HttpHeaders;
 import org.springframework.web.cors.CorsUtils;
-import org.springframework.web.cors.DefaultCorsProcessor;
+import org.springframework.web.filter.OncePerRequestFilter;
 
-/**
- * Applies browser CORS for {@code /staging-idp/**} and {@code /api/**} before Spring Security.
- * Registered as a servlet {@link Component} so MockMvc and embedded Tomcat both see it.
- */
-@Component
-@Profile("staging")
-@Order(Ordered.HIGHEST_PRECEDENCE)
-class StagingBrowserCorsFilter extends org.springframework.web.filter.OncePerRequestFilter {
+/** Browser CORS for staging IdP and API routes (runs ahead of Spring Security). */
+final class StagingBrowserCorsFilter extends OncePerRequestFilter {
 
-  private final CorsConfigurationSource source;
-  private final CorsProcessor processor = new DefaultCorsProcessor();
+  private final String idpBase;
+  private final List<String> allowedOrigins;
 
-  StagingBrowserCorsFilter(
-      StagingProperties properties,
-      @Qualifier("stagingApiCorsConfiguration") CorsConfiguration api,
-      @Qualifier("stagingIdpCorsConfiguration") CorsConfiguration idp) {
-    String idpBase = normalizeIdpBase(properties.getIdpBasePath());
-    this.source =
-        request -> {
-          String path = servletPath(request);
-          if (path.startsWith(idpBase)) {
-            return StagingCorsConfiguration.fresh(idp);
-          }
-          if (path.startsWith("/api/")) {
-            return StagingCorsConfiguration.fresh(api);
-          }
-          return null;
-        };
+  StagingBrowserCorsFilter(StagingProperties properties) {
+    this.idpBase = normalizeIdpBase(properties.getIdpBasePath());
+    this.allowedOrigins = properties.corsOrigins();
+    if (allowedOrigins.isEmpty()) {
+      throw new IllegalStateException("OMS_STAGING_CORS_ALLOWED_ORIGINS is required in staging");
+    }
   }
 
   @Override
   protected void doFilterInternal(
       HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
       throws ServletException, IOException {
-    CorsConfiguration config = source.getCorsConfiguration(request);
-    if (config == null) {
+    String path = servletPath(request);
+    if (!path.startsWith(idpBase) && !path.startsWith("/api/")) {
       filterChain.doFilter(request, response);
       return;
     }
-    boolean valid = processor.processRequest(config, request, response);
-    if (valid && CorsUtils.isPreFlightRequest(request)) {
+    String origin = request.getHeader(HttpHeaders.ORIGIN);
+    boolean allowed = origin != null && allowedOrigins.contains(origin);
+    if (allowed) {
+      response.setHeader(HttpHeaders.ACCESS_CONTROL_ALLOW_ORIGIN, origin);
+      response.addHeader(HttpHeaders.VARY, HttpHeaders.ORIGIN);
+    }
+    if (CorsUtils.isPreFlightRequest(request)) {
+      if (allowed) {
+        response.setHeader(
+            HttpHeaders.ACCESS_CONTROL_ALLOW_METHODS, "GET,POST,PUT,PATCH,DELETE,OPTIONS");
+        response.setHeader(
+            HttpHeaders.ACCESS_CONTROL_ALLOW_HEADERS, "Authorization, Content-Type, Accept");
+        response.setHeader(HttpHeaders.ACCESS_CONTROL_MAX_AGE, "3600");
+        response.setStatus(HttpServletResponse.SC_OK);
+      } else {
+        response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+      }
       return;
     }
-    if (valid) {
-      filterChain.doFilter(request, response);
-    }
+    filterChain.doFilter(request, response);
   }
 
   private static String normalizeIdpBase(String base) {
