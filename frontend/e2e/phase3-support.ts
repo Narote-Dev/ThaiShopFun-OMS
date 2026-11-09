@@ -34,82 +34,89 @@ export async function createPrepaidOrder(
   lines: OrderLine[],
   totals?: { subtotal: number; shipping_fee: number; discount: number; grand_total: number },
 ): Promise<void> {
-  const checkoutId = `e2e-co-${externalOrderId}`
-  const reservationResponse = await request.post(`${MOCK}/control/checkout/reservations`, {
-    data: {
-      checkout_id: checkoutId,
-      tsf_shop_id: 'shop_active',
-      items: lines.map((line) => ({ listing_sku_id: line.listing_sku_id, qty: line.qty })),
-    },
-  })
-  expect(reservationResponse.ok()).toBeTruthy()
-  const reservationPayload = await reservationResponse.json()
-  expect(reservationPayload.oms_status).toBe(201)
-  const reservationBody = JSON.parse(reservationPayload.oms_body as string) as {
-    reservation_id: string
-  }
-
-  await request.post(`${MOCK}/control/orders/register`, {
-    data: { shop_id: 'shop_active', order_id: externalOrderId, status: 'ACTIVE' },
-  })
-
-  const now = new Date().toISOString()
-  const money = totals ?? { subtotal: 590, shipping_fee: 40, discount: 50, grand_total: 580 }
-  const created = {
-    event: {
-      event_id: `e2e-created-${externalOrderId}`,
-      event_type: 'order.created',
-      schema_version: 1,
-      occurred_at: now,
-      tsf_shop_id: 'shop_active',
-      aggregate_id: externalOrderId,
-      aggregate_version: 1,
-      data: {
-        order_id: externalOrderId,
-        reservation_id: reservationBody.reservation_id,
-        payment_method: 'PREPAID',
-        payment_expires_at: new Date(Date.now() + 3_600_000).toISOString(),
-        currency: 'THB',
-        totals: money,
-        recipient: {
-          name: 'E2E Buyer',
-          phone: '0812345678',
-          address: {
-            line1: '1 E2E Road',
-            district: 'Chatuchak',
-            province: 'Bangkok',
-            postcode: '10900',
+  await expect
+    .poll(
+      async () => {
+        const checkoutId = `e2e-co-${externalOrderId}`
+        const reservationResponse = await request.post(`${MOCK}/control/checkout/reservations`, {
+          data: {
+            checkout_id: checkoutId,
+            tsf_shop_id: 'shop_active',
+            items: lines.map((line) => ({ listing_sku_id: line.listing_sku_id, qty: line.qty })),
           },
-        },
-        ship_by: new Date(Date.now() + 86_400_000).toISOString(),
-        lines: lines.map((line) => ({
-          line_id: line.line_id,
-          listing_sku_id: line.listing_sku_id,
-          seller_sku: 'DEMO-SKU-READY',
-          name: 'E2E item',
-          qty: line.qty,
-          unit_price: line.unit_price ?? 295,
-        })),
-      },
-    },
-  }
-  const createdResponse = await request.post(`${MOCK}/control/events/send`, { data: created })
-  expect(createdResponse.ok()).toBeTruthy()
+        })
+        if (!reservationResponse.ok()) return ''
+        const reservationPayload = await reservationResponse.json()
+        if (reservationPayload.oms_status !== 201) return ''
+        const reservationBody = JSON.parse(reservationPayload.oms_body as string) as {
+          reservation_id: string
+        }
 
-  const paid = {
-    event: {
-      event_id: `e2e-paid-${externalOrderId}`,
-      event_type: 'order.paid',
-      schema_version: 1,
-      occurred_at: now,
-      tsf_shop_id: 'shop_active',
-      aggregate_id: externalOrderId,
-      aggregate_version: 2,
-      data: { order_id: externalOrderId, payment_method: 'PREPAID' },
-    },
-  }
-  const paidResponse = await request.post(`${MOCK}/control/events/send`, { data: paid })
-  expect(paidResponse.ok()).toBeTruthy()
+        await request.post(`${MOCK}/control/orders/register`, {
+          data: { shop_id: 'shop_active', order_id: externalOrderId, status: 'ACTIVE' },
+        })
+
+        const now = new Date().toISOString()
+        const money = totals ?? { subtotal: 590, shipping_fee: 40, discount: 50, grand_total: 580 }
+        const created = {
+          event: {
+            event_id: `e2e-created-${externalOrderId}`,
+            event_type: 'order.created',
+            schema_version: 1,
+            occurred_at: now,
+            tsf_shop_id: 'shop_active',
+            aggregate_id: externalOrderId,
+            aggregate_version: 1,
+            data: {
+              order_id: externalOrderId,
+              reservation_id: reservationBody.reservation_id,
+              payment_method: 'PREPAID',
+              payment_expires_at: new Date(Date.now() + 3_600_000).toISOString(),
+              currency: 'THB',
+              totals: money,
+              recipient: {
+                name: 'E2E Buyer',
+                phone: '0812345678',
+                address: {
+                  line1: '1 E2E Road',
+                  district: 'Chatuchak',
+                  province: 'Bangkok',
+                  postcode: '10900',
+                },
+              },
+              ship_by: new Date(Date.now() + 86_400_000).toISOString(),
+              lines: lines.map((line) => ({
+                line_id: line.line_id,
+                listing_sku_id: line.listing_sku_id,
+                seller_sku: 'DEMO-SKU-READY',
+                name: 'E2E item',
+                qty: line.qty,
+                unit_price: line.unit_price ?? 295,
+              })),
+            },
+          },
+        }
+        const createdResponse = await request.post(`${MOCK}/control/events/send`, { data: created })
+        if (!createdResponse.ok()) return ''
+
+        const paid = {
+          event: {
+            event_id: `e2e-paid-${externalOrderId}`,
+            event_type: 'order.paid',
+            schema_version: 1,
+            occurred_at: now,
+            tsf_shop_id: 'shop_active',
+            aggregate_id: externalOrderId,
+            aggregate_version: 2,
+            data: { order_id: externalOrderId, payment_method: 'PREPAID' },
+          },
+        }
+        const paidResponse = await request.post(`${MOCK}/control/events/send`, { data: paid })
+        return paidResponse.ok() ? 'ok' : ''
+      },
+      { timeout: 120_000, intervals: [2000] },
+    )
+    .toBe('ok')
 }
 
 export async function waitForOrder(
@@ -156,7 +163,7 @@ export async function sendShipmentDelivered(
       occurred_at: new Date().toISOString(),
       tsf_shop_id: 'shop_active',
       aggregate_id: externalOrderId,
-      aggregate_version: 10,
+      aggregate_version: 3,
       data: { order_id: externalOrderId, status: 'DELIVERED', tracking_no: trackingNo },
     },
   }
@@ -232,7 +239,7 @@ export async function sendOrderCancelled(request: APIRequestContext, externalOrd
       occurred_at: new Date().toISOString(),
       tsf_shop_id: 'shop_active',
       aggregate_id: externalOrderId,
-      aggregate_version: 20,
+      aggregate_version: 3,
       data: { order_id: externalOrderId },
     },
   }
