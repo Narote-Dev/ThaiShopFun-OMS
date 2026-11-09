@@ -13,6 +13,7 @@ import {
   sendReturnRequested,
   sendShipmentDelivered,
   waitForOrder,
+  waitForPaymentStatus,
   waitForReturnApproved,
 } from './phase3-support'
 
@@ -189,14 +190,10 @@ test('phase 3 full flow: reserve through partial return and refund snapshot', as
   await expect(page.getByRole('heading', { name: 'รับของคืน', exact: true })).toBeVisible()
 
   await sendRefundSucceeded(request, externalOrderId, refundId, returnId, 295)
+  await waitForPaymentStatus(request, token, orderId, 'PARTIALLY_REFUNDED')
   await page.goto(`/#/orders/${orderId}`)
   await expect(page.getByRole('heading', { name: `ออเดอร์ ${externalOrderId}`, exact: true })).toBeVisible()
-  await expect
-    .poll(
-      async () => await page.getByText('คืนเงินบางส่วน', { exact: true }).count(),
-      { timeout: 90_000, intervals: [2000] },
-    )
-    .toBeGreaterThan(0)
+  await expect(page.getByText('คืนเงินบางส่วน', { exact: true }).first()).toBeVisible()
   await expect(page.getByText('฿295.00')).toBeVisible()
   await assertInvariants(request)
 })

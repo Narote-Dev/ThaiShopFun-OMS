@@ -244,31 +244,48 @@ export async function driveOrderCancelled(
   externalOrderId: string,
   orderId: string,
 ): Promise<void> {
-  let version = 3
+  let attempt = 0
   await expect
     .poll(
       async () => {
         const detail = await orderDetail(request, token, orderId)
         if (detail.order_status === 'CANCELLED') return 'cancelled'
+        attempt += 1
         const body = {
           event: {
-            event_id: `e2e-cancel-${externalOrderId}-v${version}`,
+            event_id: `e2e-cancel-${externalOrderId}-${attempt}`,
             event_type: 'order.cancelled',
             schema_version: 1,
             occurred_at: new Date().toISOString(),
             tsf_shop_id: 'shop_active',
             aggregate_id: externalOrderId,
-            aggregate_version: version,
-            data: { order_id: externalOrderId },
+            aggregate_version: 3,
+            data: { order_id: externalOrderId, reason: 'E2E_CANCEL' },
           },
         }
         await request.post(`${MOCK}/control/events/send`, { data: body })
-        version += 1
         return ''
       },
       { timeout: 90_000, intervals: [2000] },
     )
     .toBe('cancelled')
+}
+
+export async function waitForPaymentStatus(
+  request: APIRequestContext,
+  token: string,
+  orderId: string,
+  status: string,
+): Promise<void> {
+  await expect
+    .poll(
+      async () => {
+        const detail = await orderDetail(request, token, orderId)
+        return detail.payment_status === status ? status : ''
+      },
+      { timeout: 90_000, intervals: [2000] },
+    )
+    .toBe(status)
 }
 
 export async function waitForReturnApproved(
