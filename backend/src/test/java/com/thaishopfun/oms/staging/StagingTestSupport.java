@@ -66,8 +66,22 @@ public final class StagingTestSupport {
             StandardCharsets.UTF_8);
     registry.add("oms.security.issuer", () -> ISSUER);
     registry.add("oms.security.jwks-uri", () -> JWKS_URI);
+    registry.add("oms.security.audience", () -> "oms");
+    registry.add("oms.security.internal-audience", () -> "oms-internal");
     registry.add("oms.security.internal-client-ids", () -> "tsf");
     registry.add("oms.inbox.hmac-secrets", () -> "test-inbox-hmac");
+    registry.add("oms.inbox.worker-enabled", () -> "false");
+    // application-staging.yml requires env placeholders; keep test-only values from
+    // application-test.yml.
+    registry.add("oms.pii.keys", () -> "test1:dGVzdC1vbmx5LXBpaS1rZXktMS1ub3QtYS1zZWNyZXQ=");
+    registry.add("oms.pii.active-key-id", () -> "test1");
+    registry.add("oms.pii.hash-key", () -> "dGVzdC1vbmx5LXBpaS1obWFjLW5vdC1hLXNlY3JldCE=");
+    registry.add("oms.outbox.publisher-enabled", () -> "false");
+    registry.add("oms.outbox.destination-url", () -> "http://127.0.0.1:9/unused");
+    registry.add("oms.outbox.webhook-secret", () -> "test-outbox-secret-0123456789abcdef");
+    registry.add("oms.tsf.base-url", () -> "http://127.0.0.1:9");
+    registry.add("oms.tsf.token-uri", () -> "http://127.0.0.1:9/token");
+    registry.add("oms.tsf.client-secret", () -> "staging-test-tsf-secret");
     registry.add("oms.staging.jwt-signing-key-pem", () -> PEM);
     registry.add("oms.staging.jwt-key-id", () -> "staging-test-1");
     registry.add("oms.staging.cors-allowed-origins", () -> "http://localhost");
