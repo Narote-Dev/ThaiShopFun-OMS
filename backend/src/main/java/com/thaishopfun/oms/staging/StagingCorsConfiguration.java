@@ -48,7 +48,6 @@ class StagingCorsConfiguration {
     }
     CorsConfiguration config = new CorsConfiguration();
     config.setAllowedOrigins(origins);
-    config.setAllowedOriginPatterns(origins);
     config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
     config.setAllowedHeaders(List.of("Authorization", "Content-Type", "Accept"));
     config.setExposedHeaders(List.of("Retry-After"));
@@ -57,10 +56,13 @@ class StagingCorsConfiguration {
     return config;
   }
 
+  static CorsConfiguration fresh(CorsConfiguration source) {
+    return copy(source);
+  }
+
   private static CorsConfiguration copy(CorsConfiguration source) {
     CorsConfiguration copy = new CorsConfiguration();
     copy.setAllowedOrigins(source.getAllowedOrigins());
-    copy.setAllowedOriginPatterns(source.getAllowedOriginPatterns());
     copy.setAllowedMethods(source.getAllowedMethods());
     copy.setAllowedHeaders(source.getAllowedHeaders());
     copy.setExposedHeaders(source.getExposedHeaders());

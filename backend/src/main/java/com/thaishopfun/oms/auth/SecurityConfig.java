@@ -1,8 +1,6 @@
 package com.thaishopfun.oms.auth;
 
 import java.util.Optional;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -51,11 +49,9 @@ public class SecurityConfig {
       OmsSecurityProperties properties,
       IdentityProvisioner provisioner,
       TenantSessionService sessions,
-      EntitlementGate gate,
-      @Autowired(required = false) @Qualifier("stagingApiCorsConfigurationSource")
-          CorsConfigurationSource cors)
+      EntitlementGate gate)
       throws Exception {
-    stateless(http, errors, Optional.ofNullable(cors));
+    stateless(http, errors, Optional.empty());
     http.securityMatcher("/api/**");
     http.authorizeHttpRequests(auth -> auth.anyRequest().authenticated());
     oauth(http, jwtDecoder, errors);
