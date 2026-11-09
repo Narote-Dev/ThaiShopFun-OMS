@@ -22,7 +22,11 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 @RestControllerAdvice(
-    basePackages = {"com.thaishopfun.oms.listing", "com.thaishopfun.oms.stockdrift"})
+    basePackages = {
+      "com.thaishopfun.oms.listing",
+      "com.thaishopfun.oms.stockdrift",
+      "com.thaishopfun.oms.reconciliation"
+    })
 class ListingErrorHandler {
 
   private static final Logger log = LoggerFactory.getLogger(ListingErrorHandler.class);

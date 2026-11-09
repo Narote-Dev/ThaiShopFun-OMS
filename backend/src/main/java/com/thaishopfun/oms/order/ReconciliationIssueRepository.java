@@ -4,6 +4,7 @@ import com.thaishopfun.oms.auth.UuidV7;
 import com.thaishopfun.oms.tenant.TenantContext;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
+import java.util.List;
 import java.util.UUID;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -32,9 +33,10 @@ public class ReconciliationIssueRepository {
         jdbc.update(
             """
             UPDATE reconciliation_issue
-            SET details = ?::jsonb, updated_at = now()
+            SET run_id = ?, details = ?::jsonb, updated_at = now()
             WHERE tenant_id = ? AND rule = ? AND order_id = ? AND status <> 'RESOLVED'
             """,
+            runId,
             details,
             tenantId,
             rule,
@@ -63,6 +65,97 @@ public class ReconciliationIssueRepository {
    * {@value MAX_EVENTS} most recently appended (highest merge ordinal); {@code details.count}
    * remains the full distinct total.
    */
+  /** One open shop-level issue per (tenant, rule) with {@code order_id} null. */
+  public void upsertOpenShop(UUID runId, String rule, String detailsJson) {
+    UUID tenantId = TenantContext.requireTenantId();
+    String details = detailsJson == null ? "{}" : detailsJson;
+    int updated =
+        jdbc.update(
+            """
+            UPDATE reconciliation_issue
+            SET run_id = ?, details = ?::jsonb, updated_at = now()
+            WHERE tenant_id = ? AND rule = ? AND order_id IS NULL AND status <> 'RESOLVED'
+            """,
+            runId,
+            details,
+            tenantId,
+            rule);
+    if (updated == 0) {
+      jdbc.update(
+          """
+          INSERT INTO reconciliation_issue (id, tenant_id, run_id, rule, order_id, details, status)
+          VALUES (?, ?, ?, ?, NULL, ?::jsonb, 'OPEN')
+          """,
+          UuidV7.generate(),
+          tenantId,
+          runId,
+          rule,
+          details);
+    }
+  }
+
+  public int updateStatus(UUID issueId, String status) {
+    UUID tenantId = TenantContext.requireTenantId();
+    return jdbc.update(
+        """
+        UPDATE reconciliation_issue
+        SET status = ?, updated_at = now()
+        WHERE tenant_id = ? AND id = ? AND status <> 'RESOLVED'
+        """,
+        status,
+        tenantId,
+        issueId);
+  }
+
+  public void resolveRuleExcept(UUID runId, String rule, List<UUID> stillOpenOrderIds) {
+    UUID tenantId = TenantContext.requireTenantId();
+    if (stillOpenOrderIds.isEmpty()) {
+      jdbc.update(
+          """
+          UPDATE reconciliation_issue
+          SET status = 'RESOLVED', run_id = ?, updated_at = now()
+          WHERE tenant_id = ? AND rule = ? AND order_id IS NOT NULL AND status <> 'RESOLVED'
+          """,
+          runId,
+          tenantId,
+          rule);
+      return;
+    }
+    String placeholders =
+        stillOpenOrderIds.stream()
+            .map(ignored -> "?")
+            .collect(java.util.stream.Collectors.joining(","));
+    Object[] params = new Object[3 + stillOpenOrderIds.size()];
+    params[0] = runId;
+    params[1] = tenantId;
+    params[2] = rule;
+    for (int i = 0; i < stillOpenOrderIds.size(); i++) {
+      params[3 + i] = stillOpenOrderIds.get(i);
+    }
+    jdbc.update(
+        """
+        UPDATE reconciliation_issue
+        SET status = 'RESOLVED', run_id = ?, updated_at = now()
+        WHERE tenant_id = ? AND rule = ? AND order_id IS NOT NULL AND status <> 'RESOLVED'
+          AND order_id NOT IN ("""
+            + placeholders
+            + ")",
+        params);
+  }
+
+  public void resolveShopRule(UUID runId, String rule) {
+    UUID tenantId = TenantContext.requireTenantId();
+    jdbc.update(
+        """
+        UPDATE reconciliation_issue
+        SET status = 'RESOLVED', run_id = ?, updated_at = now()
+        WHERE tenant_id = ? AND rule = ? AND order_id IS NULL AND status <> 'RESOLVED'
+        """,
+        runId,
+        tenantId,
+        rule);
+  }
+
   public void upsertOpenWithoutOrder(UUID inboxEventId, String rule, String externalOrderId) {
     UUID tenantId = TenantContext.requireTenantId();
     jdbc.execute(

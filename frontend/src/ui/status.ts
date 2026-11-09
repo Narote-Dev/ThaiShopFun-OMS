@@ -16,6 +16,7 @@ export type StatusKind =
   | 'generic'
   | 'return'
   | 'return_condition'
+  | 'reconciliation_issue'
 
 export type StatusVariant =
   | 'success'
@@ -122,6 +123,12 @@ const CARRIER: Record<string, StatusStyle> = {
   MANUAL: { variant: 'muted', label: labelTh('CARRIER_MANUAL') },
 }
 
+const RECONCILIATION_ISSUE: Record<string, StatusStyle> = {
+  OPEN: { variant: 'warning', label: labelTh('OPEN') },
+  ACK: { variant: 'info', label: labelTh('ACK') },
+  RESOLVED: { variant: 'success', label: labelTh('RESOLVED') },
+}
+
 export function resolveStatus(value: string, kind: StatusKind = 'generic'): StatusStyle {
   const key = value.trim()
   if (!key) return { variant: 'muted', label: '—' }
@@ -140,6 +147,7 @@ export function resolveStatus(value: string, kind: StatusKind = 'generic'): Stat
     carrier: CARRIER,
     return: RETURN,
     return_condition: RETURN_CONDITION,
+    reconciliation_issue: RECONCILIATION_ISSUE,
     generic: undefined,
   }
   const map = maps[kind]
@@ -187,4 +195,8 @@ export const ALL_STATUS_VALUES: { kind: StatusKind; value: string }[] = [
   ...Object.keys(OUTBOX).map((value) => ({ kind: 'outbox' as const, value })),
   ...Object.keys(SHIPMENT).map((value) => ({ kind: 'shipment' as const, value })),
   ...Object.keys(CARRIER).map((value) => ({ kind: 'carrier' as const, value })),
+  ...Object.keys(RECONCILIATION_ISSUE).map((value) => ({
+    kind: 'reconciliation_issue' as const,
+    value,
+  })),
 ]

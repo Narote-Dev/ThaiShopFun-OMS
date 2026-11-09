@@ -83,6 +83,10 @@ oms:
     enabled: ${OMS_INVARIANT_ENABLED:true}
     cron: ${OMS_INVARIANT_CRON:0 30 2 * * *}
     zone: ${OMS_INVARIANT_ZONE:Asia/Bangkok}
+  reconciliation:
+    enabled: ${OMS_RECONCILIATION_ENABLED:true}
+    cron: ${OMS_RECONCILIATION_CRON:0 0 2 * * *}
+    zone: ${OMS_RECONCILIATION_ZONE:Asia/Bangkok}
   order:
     unpaid-hold-grace: 10m
     backfill:

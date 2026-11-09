@@ -125,6 +125,10 @@ public final class CatalogHttp {
     return send(json(builder(path, token), "POST", body));
   }
 
+  public Result patch(String path, String token, Object body) {
+    return send(json(builder(path, token), "PATCH", body));
+  }
+
   public Result postWithIdempotencyKey(String path, String token, String idempotencyKey) {
     return send(json(builder(path, token).header("Idempotency-Key", idempotencyKey), "POST", ""));
   }

@@ -39,6 +39,8 @@ oms:
       enabled: false
   invariant:
     enabled: false
+  reconciliation:
+    enabled: false
   inbox:
     # All test contexts share the queue, including contexts retained in Spring's cache.
     worker-enabled: false

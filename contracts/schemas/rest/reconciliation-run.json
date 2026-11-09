@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["run_id", "issues_found", "by_rule"],
+  "properties": {
+    "run_id": { "type": "string", "format": "uuid" },
+    "issues_found": { "type": "integer", "minimum": 0 },
+    "by_rule": {
+      "type": "object",
+      "additionalProperties": { "type": "integer", "minimum": 0 }
+    }
+  }
+}
