@@ -3,15 +3,17 @@ import {
   OMS,
   assertInvariants,
   createPrepaidOrder,
+  driveOrderCancelled,
   orderDetail,
   ownerToken,
+  receiveReturnResellable,
   seedDemoCatalog,
-  sendOrderCancelled,
   sendRefundSucceeded,
   sendReturnDecided,
   sendReturnRequested,
   sendShipmentDelivered,
   waitForOrder,
+  waitForReturnApproved,
 } from './phase3-support'
 
 async function loginActiveShop(page: import('@playwright/test').Page) {
@@ -71,16 +73,9 @@ test('phase 3 cancel at PACKED releases reservation and clears pack progress', a
     timeout: 30_000,
   })
 
-  await sendOrderCancelled(request, externalOrderId)
-  await expect
-    .poll(
-      async () => {
-        const detail = await orderDetail(request, token, orderId)
-        return `${detail.order_status}|${detail.fulfillment_status}`
-      },
-      { timeout: 90_000, intervals: [2000] },
-    )
-    .toBe('CANCELLED|UNFULFILLED')
+  await driveOrderCancelled(request, token, externalOrderId, orderId)
+  const cancelled = await orderDetail(request, token, orderId)
+  expect(`${cancelled.order_status}|${cancelled.fulfillment_status}`).toBe('CANCELLED|UNFULFILLED')
 
   await expect
     .poll(
@@ -99,7 +94,7 @@ test('phase 3 full flow: reserve through partial return and refund snapshot', as
   page,
   request,
 }) => {
-  test.setTimeout(300_000)
+  test.setTimeout(240_000)
   const token = await ownerToken(request)
   await seedDemoCatalog(request)
   const externalOrderId = `E2E-FLOW-${Date.now()}`
@@ -179,27 +174,8 @@ test('phase 3 full flow: reserve through partial return and refund snapshot', as
 
   await sendReturnRequested(request, externalOrderId, returnId, 'L1', 1)
   await sendReturnDecided(request, externalOrderId, returnId)
-  await expect
-    .poll(
-      async () => {
-        const detail = await orderDetail(request, token, orderId)
-        const returns = detail.returns as Array<{ id: string; receive_url?: string }> | undefined
-        return returns?.find((row) => row.receive_url)?.receive_url ?? ''
-      },
-      { timeout: 90_000, intervals: [2000] },
-    )
-    .toMatch(/#\/returns\//)
-
-  const detailBeforeReturn = await orderDetail(request, token, orderId)
-  const receiveUrl = (detailBeforeReturn.returns as Array<{ receive_url: string }>)[0].receive_url
-  await page.goto(receiveUrl)
-  await expect(page.getByRole('heading', { name: 'รับของคืน', exact: true })).toBeVisible()
-  await page
-    .getByRole('row')
-    .filter({ hasText: 'E2E item' })
-    .getByRole('combobox')
-    .selectOption('RESELLABLE')
-  await page.getByRole('button', { name: 'ยืนยันรับคืน', exact: true }).click()
+  const omsReturnId = await waitForReturnApproved(request, token, orderId)
+  await receiveReturnResellable(request, token, omsReturnId)
   await expect
     .poll(
       async () => {
@@ -209,6 +185,8 @@ test('phase 3 full flow: reserve through partial return and refund snapshot', as
       { timeout: 60_000, intervals: [2000] },
     )
     .toMatch(/RECEIVED|CLOSED/)
+  await page.goto(`/#/returns/${omsReturnId}`)
+  await expect(page.getByRole('heading', { name: 'รับของคืน', exact: true })).toBeVisible()
 
   await sendRefundSucceeded(request, externalOrderId, refundId, returnId, 295)
   await page.goto(`/#/orders/${orderId}`)

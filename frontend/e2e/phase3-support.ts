@@ -238,28 +238,75 @@ export async function sendRefundSucceeded(
   expect(response.ok()).toBeTruthy()
 }
 
-export async function sendOrderCancelled(request: APIRequestContext, externalOrderId: string): Promise<void> {
+export async function driveOrderCancelled(
+  request: APIRequestContext,
+  token: string,
+  externalOrderId: string,
+  orderId: string,
+): Promise<void> {
+  let version = 3
   await expect
     .poll(
       async () => {
+        const detail = await orderDetail(request, token, orderId)
+        if (detail.order_status === 'CANCELLED') return 'cancelled'
         const body = {
           event: {
-            event_id: `e2e-cancel-${externalOrderId}`,
+            event_id: `e2e-cancel-${externalOrderId}-v${version}`,
             event_type: 'order.cancelled',
             schema_version: 1,
             occurred_at: new Date().toISOString(),
             tsf_shop_id: 'shop_active',
             aggregate_id: externalOrderId,
-            aggregate_version: 3,
+            aggregate_version: version,
             data: { order_id: externalOrderId },
           },
         }
-        const response = await request.post(`${MOCK}/control/events/send`, { data: body })
-        return response.ok() ? 'sent' : ''
+        await request.post(`${MOCK}/control/events/send`, { data: body })
+        version += 1
+        return ''
       },
-      { timeout: 60_000, intervals: [2000] },
+      { timeout: 90_000, intervals: [2000] },
     )
-    .toBe('sent')
+    .toBe('cancelled')
+}
+
+export async function waitForReturnApproved(
+  request: APIRequestContext,
+  token: string,
+  orderId: string,
+): Promise<string> {
+  let returnId = ''
+  await expect
+    .poll(
+      async () => {
+        const detail = await orderDetail(request, token, orderId)
+        const returns = detail.returns as Array<{ id: string; status: string }> | undefined
+        const row = returns?.find((item) => item.status === 'APPROVED')
+        if (!row) return ''
+        returnId = row.id
+        return 'approved'
+      },
+      { timeout: 90_000, intervals: [2000] },
+    )
+    .toBe('approved')
+  return returnId
+}
+
+export async function receiveReturnResellable(
+  request: APIRequestContext,
+  token: string,
+  returnId: string,
+): Promise<void> {
+  const headers = { Authorization: `Bearer ${token}` }
+  const detail = await request.get(`${OMS}/api/v1/returns/${returnId}`, { headers })
+  expect(detail.ok()).toBeTruthy()
+  const line = ((await detail.json()) as { lines: Array<{ return_line_id: string; qty: number }> }).lines[0]
+  const response = await request.post(`${OMS}/api/v1/returns/${returnId}/receive`, {
+    headers: { ...headers, 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() },
+    data: { lines: [{ return_line_id: line.return_line_id, condition: 'RESELLABLE', qty: 1 }] },
+  })
+  expect(response.ok()).toBeTruthy()
 }
 
 export async function orderDetail(
