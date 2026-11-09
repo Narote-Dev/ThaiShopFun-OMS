@@ -1,6 +1,7 @@
 package com.thaishopfun.oms.staging;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonProperty;
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 record StagingDemoAccount(
@@ -12,4 +13,5 @@ record StagingDemoAccount(
     String shopRole,
     String tier,
     String status,
-    long entVer) {}
+    long entVer,
+    @JsonProperty("password_hash") String passwordHash) {}

@@ -1,24 +1,50 @@
 package com.thaishopfun.oms.staging;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.thaishopfun.oms.auth.AuthTestSupport;
 import org.junit.jupiter.api.Test;
-import org.springframework.context.annotation.Profile;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.context.ApplicationContext;
+import org.springframework.http.MediaType;
+import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.web.servlet.MockMvc;
 
+@SpringBootTest
+@AutoConfigureMockMvc
+@ActiveProfiles("test")
 class StagingAuthAbsentTest {
 
-  @Test
-  void stagingAuthConfigurationIsGuardedByStagingProfile() {
-    Profile profile = StagingAuthConfiguration.class.getAnnotation(Profile.class);
-    assertThat(profile).isNotNull();
-    assertThat(profile.value()).containsExactly("staging");
+  @Autowired ApplicationContext context;
+
+  @Autowired MockMvc mvc;
+
+  @DynamicPropertySource
+  static void properties(DynamicPropertyRegistry registry) {
+    AuthTestSupport.register(registry);
   }
 
   @Test
-  void stagingIdpControllerIsGuardedByStagingProfile() throws Exception {
-    Class<?> controller = Class.forName("com.thaishopfun.oms.staging.StagingIdpController");
-    Profile profile = controller.getAnnotation(Profile.class);
-    assertThat(profile).isNotNull();
-    assertThat(profile.value()).containsExactly("staging");
+  void stagingBeansAbsentOutsideStagingProfile() {
+    assertThat(context.getBeansOfType(StagingAuthConfiguration.class)).isEmpty();
+    assertThat(context.getBeansOfType(StagingLoginThrottler.class)).isEmpty();
+  }
+
+  @Test
+  void stagingIdpEndpointsAreNotMounted() throws Exception {
+    mvc.perform(get("/staging-idp/.well-known/jwks.json")).andExpect(status().isForbidden());
+    mvc.perform(get("/staging-idp/demo-accounts")).andExpect(status().isNotFound());
+    mvc.perform(
+            post("/staging-idp/login")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"login_id\":\"x\",\"password\":\"y\"}"))
+        .andExpect(status().isForbidden());
   }
 }

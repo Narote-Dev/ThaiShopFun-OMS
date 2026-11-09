@@ -17,18 +17,14 @@ class StagingLoginThrottler {
   private final Clock clock;
   private final Map<String, AttemptState> attempts = new ConcurrentHashMap<>();
 
-  StagingLoginThrottler(StagingProperties properties) {
-    this(properties, Clock.systemUTC());
-  }
-
   StagingLoginThrottler(StagingProperties properties, Clock clock) {
     this.properties = properties;
     this.clock = clock;
   }
 
   /** Returns empty when allowed; otherwise a human-readable Thai lockout message. */
-  Result check(String clientKey) {
-    AttemptState state = attempts.get(clientKey);
+  Result check(String throttleKey) {
+    AttemptState state = attempts.get(throttleKey);
     Instant now = clock.instant();
     if (state == null) {
       return Result.permit();
@@ -39,7 +35,7 @@ class StagingLoginThrottler {
     if (state.windowStarted == null
         || Duration.between(state.windowStarted, now).getSeconds()
             > properties.getLoginWindowSeconds()) {
-      attempts.remove(clientKey);
+      attempts.remove(throttleKey);
       return Result.permit();
     }
     if (state.attemptsInWindow >= properties.getLoginMaxAttempts()) {
@@ -48,10 +44,10 @@ class StagingLoginThrottler {
     return Result.permit();
   }
 
-  void recordFailure(String clientKey) {
+  void recordFailure(String throttleKey) {
     Instant now = clock.instant();
     attempts.compute(
-        clientKey,
+        throttleKey,
         (key, existing) -> {
           AttemptState state = existing == null ? new AttemptState() : existing;
           if (state.lockedUntil != null && now.isBefore(state.lockedUntil)) {
@@ -75,8 +71,8 @@ class StagingLoginThrottler {
         });
   }
 
-  void recordSuccess(String clientKey) {
-    attempts.remove(clientKey);
+  void recordSuccess(String throttleKey) {
+    attempts.remove(throttleKey);
   }
 
   record Result(boolean permitted, boolean locked, String message) {

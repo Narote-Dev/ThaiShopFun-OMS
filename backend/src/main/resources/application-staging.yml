@@ -28,7 +28,6 @@ oms:
     access-token-seconds: ${OMS_STAGING_ACCESS_TOKEN_SECONDS:3600}
     jwt-signing-key-pem: ${OMS_STAGING_JWT_RSA_PRIVATE_KEY:}
     jwt-key-id: ${OMS_STAGING_JWT_KEY_ID:staging-oms-1}
-    demo-password-hash: ${OMS_STAGING_DEMO_PASSWORD_HASH:}
     demo-accounts: ${OMS_STAGING_DEMO_ACCOUNTS:}
     demo-seed-on-startup: ${OMS_STAGING_DEMO_SEED_ON_STARTUP:false}
     admin-seed-demo: ${OMS_STAGING_ADMIN_SEED_DEMO:false}

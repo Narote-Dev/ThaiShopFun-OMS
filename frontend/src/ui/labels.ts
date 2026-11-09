@@ -269,7 +269,16 @@ const LABELS: Record<string, string> = {
   'must be a whole number': 'ต้องเป็นจำนวนเต็ม',
   'must be true or false': 'ต้องระบุค่าจริงหรือเท็จ',
   'header row is required': 'ต้องมีแถวหัวตาราง',
-  'the file has no data rows': 'ไฟล์ไม่มีแถวข้อมูล'
+  'the file has no data rows': 'ไฟล์ไม่มีแถวข้อมูล',
+  STAGING_BRAND: 'ThaiShopFun OMS',
+  STAGING_LOGIN_TITLE: 'เข้าสู่ระบบทดลอง',
+  STAGING_LOGIN_HINT:
+    'ใช้ชื่อผู้ใช้และรหัสผ่านที่ Narote แจกให้เท่านั้น หน้านี้ไม่แสดงรายชื่อบัญชี และไม่มีการลงทะเบียนอัตโนมัติ',
+  STAGING_LOGIN_ID: 'ชื่อผู้ใช้ทดลอง',
+  STAGING_LOGIN_PASSWORD: 'รหัสผ่าน',
+  STAGING_LOGIN_SUBMIT: 'เข้าสู่ระบบ',
+  STAGING_LOGIN_SUBMITTING: 'กำลังเข้าสู่ระบบ…',
+  STAGING_LOGIN_ERROR: 'เข้าสู่ระบบไม่สำเร็จ',
 }
 
 const RETURN_STATUS: Record<string, string> = {

@@ -1,5 +1,6 @@
 package com.thaishopfun.oms.staging;
 
+import java.time.Clock;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -19,5 +20,10 @@ public class StagingAuthConfiguration {
   @Bean
   PasswordEncoder stagingPasswordEncoder() {
     return new BCryptPasswordEncoder();
+  }
+
+  @Bean
+  Clock stagingClock() {
+    return Clock.systemUTC();
   }
 }

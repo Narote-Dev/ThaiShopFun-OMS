@@ -9,7 +9,6 @@ public class StagingProperties {
 
   private String idpBasePath = "/staging-idp";
   private long accessTokenSeconds = 3600;
-  private String demoPasswordHash = "";
   private String demoAccounts = "";
   private boolean demoSeedOnStartup = false;
   private boolean adminSeedDemo = false;
@@ -35,14 +34,6 @@ public class StagingProperties {
 
   public void setAccessTokenSeconds(long accessTokenSeconds) {
     this.accessTokenSeconds = accessTokenSeconds;
-  }
-
-  public String getDemoPasswordHash() {
-    return demoPasswordHash;
-  }
-
-  public void setDemoPasswordHash(String demoPasswordHash) {
-    this.demoPasswordHash = demoPasswordHash;
   }
 
   public String getDemoAccounts() {

@@ -1,13 +1,23 @@
 # Staging deployment (Railway + Vercel)
 
-Trial hosting for **ThaiShopFun OMS** with **mock TSF only** (no real TSF, no real customer data). Narote’s current target is **low cost**: one small Railway replica per app service, Vercel **Hobby** for the SPA.
+Trial hosting for **ThaiShopFun OMS** (`Narote-Dev/ThaiShopFun-OMS`) with **mock TSF only** (no real TSF, no real customer data). Narote’s current target is **low cost**: one small Railway replica per app service, Vercel **Hobby** for the SPA.
 
 Official references:
 
-- Railway config as code: [Config as code](https://docs.railway.com/reference/config-as-code) (`$schema`: `https://railway.com/railway.schema.json`)
-- Railway health checks: `deploy.healthcheckPath` / `deploy.healthcheckTimeout` in the same doc
+- Railway IaC (primary): [Manage projects with code](https://docs.railway.com/reference/developing-with-code) and the workspace file **`.railway/railway.ts`** (`railway apply` from repo root — see `.railway/README.md`).
+- Legacy [config as code](https://docs.railway.com/guides/config-as-code) (`backend/railway.json`, `mock-tsf/railway.json`) remains for dashboards and `$schema` healthcheck metadata; Railway documents migration toward code-first IaC before **2026-12-01** (see [config-as-code deprecation notice](https://docs.railway.com/guides/config-as-code)).
+- Railway health checks: `deploy.healthcheckPath` / `deploy.healthcheckTimeout` in [config reference](https://docs.railway.com/reference/config-as-code).
 - Vercel SPA rewrites: [Rewrites](https://vercel.com/docs/project-configuration#rewrites)
 - Vercel Password Protection is **Pro/Enterprise only** ([Password protection](https://vercel.com/docs/security/deployment-protection#password-protection)) — **not** available on Hobby. **Do not rely on it.** The OMS **staging demo login** is the access gate.
+
+### Canonical Railway config in this repo
+
+| Purpose | Canonical | Legacy / auxiliary |
+|---------|-----------|-------------------|
+| Whole staging project (services, env wiring) | **`.railway/railway.ts`** | — |
+| Backend service JSON snapshot | `backend/railway.json` | Used by Railway UI import; keep in sync with `railway.ts` |
+| Mock TSF service JSON snapshot | `mock-tsf/railway.json` | Root directory = **repo root** (Dockerfile needs `contracts/`) |
+| Frontend | **Vercel only** (`frontend/vercel.json`) | `frontend/railway.toml` removed — do not host SPA on Railway for staging |
 
 ## Architecture
 
@@ -27,11 +37,11 @@ Official references:
 
 ## Access control (no Vercel gate)
 
-1. **Frontend**: every screen sits behind `RequireSession`; staging uses the **demo login form** (`VITE_OMS_STAGING_LOGIN=true`), not TSF OIDC redirect.
-2. **Backend**: `/api/**` and `/internal/**` require a valid JWT. Public endpoints:
+1. **Frontend**: every screen sits behind `RequireSession`; staging uses the **demo login form** (`VITE_OMS_STAGING_LOGIN=true`), not TSF OIDC redirect. Usernames are shared out-of-band only (no account listing API).
+2. **Backend**: `/api/**` and `/internal/**` require a valid JWT. Public endpoints under staging profile:
    - `GET /actuator/health` (and other exposed actuator routes in `application.yml`)
-   - `GET|POST` under **`/staging-idp/**`** (JWKS, demo account list, login only — **no registration**)
-3. **Login protection**: rate limit + IP lockout (`StagingLoginThrottler`) on `POST …/login`.
+   - `GET /staging-idp/.well-known/jwks.json`, `POST /staging-idp/login` only — **no registration**, **no public demo-account list**
+3. **Login protection**: rate limit + lockout per **client IP and login id** (`StagingLoginThrottler`). Client IP uses the servlet remote address; put Railway behind a trusted proxy and set `server.forward-headers-strategy: framework` so Spring resolves the real client — **do not** trust spoofed `X-Forwarded-For` in application code.
 4. **Noindex**: `X-Robots-Tag` on API responses (staging profile) + meta `robots` + Vercel `headers` in `frontend/vercel.json`.
 5. **Optional later**: Vercel **Password Protection** on Pro adds a second gate; still keep demo login + JWT.
 
@@ -39,15 +49,8 @@ Official references:
 
 ### 1. Railway project
 
-Use `.railway/railway.ts` **or** per-service config files (legacy [config as code](https://docs.railway.com/guides/config-as-code), supported until **2026-12-01**):
-
-| Service | Config file path in repo | Root directory |
-|---------|---------------------------|----------------|
-| `backend` | `/backend/railway.json` | `backend` |
-| `mock-tsf` | `/mock-tsf/railway.json` | **repository root** (Dockerfile needs `contracts/`) |
-| `frontend` (optional on Railway) | `/frontend/railway.toml` | `frontend` — **prefer Vercel** for the SPA |
-
-`railway config apply` (see `.railway/README.md`) after `railway login` / `railway link`.
+1. Prefer **`railway apply`** with **`.railway/railway.ts`** after `railway login` / `railway link` (see `.railway/README.md`).
+2. Optionally import or mirror **`backend/railway.json`** and **`mock-tsf/railway.json`** for healthcheck paths in the Railway UI.
 
 ### 2. Postgres bootstrap (`oms_app`)
 
@@ -93,22 +96,17 @@ Flyway should keep using the **superuser** from `DATABASE_URL` / `FLYWAY_USER` +
 | `OMS_TSF_CLIENT_SECRET` | mock service client secret |
 | `OMS_STAGING_JWT_RSA_PRIVATE_KEY` | PKCS#8 PEM or base64 DER (staging signing key) |
 | `OMS_STAGING_JWT_KEY_ID` | JWKS `kid` (default `staging-oms-1`) |
-| `OMS_STAGING_DEMO_PASSWORD_HASH` | BCrypt hash of shared demo password (generate off-repo) |
 | `OMS_STAGING_CORS_ALLOWED_ORIGINS` | Comma-separated Vercel preview + production origins |
 | `OMS_STAGING_DEMO_SEED_ON_STARTUP` | `true` to run demo catalog seed on boot |
-| `OMS_STAGING_DEMO_ACCOUNTS` | Optional JSON array overriding `staging/demo-accounts.json` |
+| `OMS_STAGING_DEMO_ACCOUNTS` | Optional JSON array overriding `staging/demo-accounts.json` (each row: `login_id`, `tenant`, `password_hash` — bcrypt, **no plaintext**) |
 | `OMS_STAGING_ADMIN_SEED_DEMO` | `true` = seed once and **exit** (one-off job) |
 
-Generate demo password hash (example):
+Generate signing key, kid, and bcrypt hashes (off-repo; never commit plaintext passwords):
 
 ```bash
-python3 -c "import bcrypt; print(bcrypt.hashpw(b'your-demo-password', bcrypt.gensalt()).decode())"
-```
-
-Generate RSA key (example):
-
-```bash
-openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 | openssl pkcs8 -topk8 -nocrypt
+chmod +x scripts/staging-generate-secrets.sh
+scripts/staging-generate-secrets.sh                    # RSA PEM + kid hint
+scripts/staging-generate-secrets.sh 'alice-pass' 'bob-pass'   # bcrypt hashes for JSON
 ```
 
 ### Mock TSF
@@ -132,13 +130,14 @@ openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 | openssl pkcs8 -to
 
 ## Demo users (no self-signup)
 
-Accounts are defined in `backend/src/main/resources/staging/demo-accounts.json` (no passwords in git). To **add/remove** users:
+Accounts live in `backend/src/main/resources/staging/demo-accounts.json` with **per-user `password_hash`** (bcrypt). The committed file uses a placeholder hash only — production staging must set unique hashes via **`OMS_STAGING_DEMO_ACCOUNTS`** or an unreleased override. Share **username + plaintext password** only out-of-band with each trial user.
 
-1. Edit the JSON **or** set `OMS_STAGING_DEMO_ACCOUNTS` to a full JSON array.
+To add/remove users:
+
+1. Edit the JSON **or** set `OMS_STAGING_DEMO_ACCOUNTS` to a full JSON array (`login_id`, `tenant`, `password_hash`).
 2. Redeploy backend (or restart).
-3. Share the same **shared demo password** (hash in `OMS_STAGING_DEMO_PASSWORD_HASH`) out-of-band with trial users.
 
-There is **no** registration API.
+There is **no** registration API and **no** HTTP endpoint that lists usernames.
 
 ## Reset demo data
 
@@ -155,7 +154,7 @@ There is **no** registration API.
 ## Smoke test
 
 1. `curl -fsS https://<backend>/actuator/health`
-2. Login from Vercel UI with a demo account + shared password.
+2. Login from Vercel UI with the username + password Narote issued.
 3. `GET https://<backend>/api/v1/me` with the returned Bearer token.
 
 ## CI

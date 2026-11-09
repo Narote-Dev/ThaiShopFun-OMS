@@ -20,7 +20,8 @@ class StagingDemoAccountRegistry {
 
   StagingDemoAccountRegistry(StagingProperties properties, JsonMapper jsonMapper)
       throws IOException {
-    // Step 1: Start from the committed account list (no passwords). Env JSON overrides when set.
+    // Step 1: Classpath seed lists accounts; env JSON overrides when set. Each row needs bcrypt
+    // hash only.
     List<StagingDemoAccount> accounts = loadClasspath(jsonMapper);
     if (properties.getDemoAccounts() != null && !properties.getDemoAccounts().isBlank()) {
       accounts =
@@ -29,6 +30,12 @@ class StagingDemoAccountRegistry {
     }
     Map<String, StagingDemoAccount> index = new LinkedHashMap<>();
     for (StagingDemoAccount account : accounts) {
+      if (account.passwordHash() == null || account.passwordHash().isBlank()) {
+        throw new IllegalStateException(
+            "staging demo account "
+                + account.loginId()
+                + " is missing password_hash (bcrypt per person)");
+      }
       index.put(account.loginId().trim(), account);
     }
     this.byLoginId = Map.copyOf(index);

@@ -8,7 +8,8 @@
     "shopRole": "OWNER",
     "tier": "PRO",
     "status": "ACTIVE",
-    "entVer": 1
+    "entVer": 1,
+    "password_hash": "$2a$10$YwmX1NsLKBYnSs6S/OUvMOZLVWCHuBFwQsNkh1aY4lRqEluzUCuR."
   },
   {
     "loginId": "staff-active",
@@ -19,7 +20,8 @@
     "shopRole": "STAFF",
     "tier": "PRO",
     "status": "ACTIVE",
-    "entVer": 1
+    "entVer": 1,
+    "password_hash": "$2a$10$YwmX1NsLKBYnSs6S/OUvMOZLVWCHuBFwQsNkh1aY4lRqEluzUCuR."
   },
   {
     "loginId": "owner-grace",
@@ -30,7 +32,8 @@
     "shopRole": "OWNER",
     "tier": "PRO",
     "status": "GRACE",
-    "entVer": 1
+    "entVer": 1,
+    "password_hash": "$2a$10$YwmX1NsLKBYnSs6S/OUvMOZLVWCHuBFwQsNkh1aY4lRqEluzUCuR."
   },
   {
     "loginId": "owner-bump",
@@ -41,6 +44,7 @@
     "shopRole": "OWNER",
     "tier": "PRO",
     "status": "ACTIVE",
-    "entVer": 1
+    "entVer": 1,
+    "password_hash": "$2a$10$YwmX1NsLKBYnSs6S/OUvMOZLVWCHuBFwQsNkh1aY4lRqEluzUCuR."
   }
 ]

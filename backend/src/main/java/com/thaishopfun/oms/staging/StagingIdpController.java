@@ -7,7 +7,6 @@ import jakarta.servlet.http.HttpServletResponse;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 import org.springframework.context.annotation.Profile;
 import org.springframework.http.MediaType;
@@ -54,53 +53,37 @@ class StagingIdpController {
     return ResponseEntity.ok().contentType(MediaType.APPLICATION_JSON).body(keys.jwksJson());
   }
 
-  @GetMapping(value = "/demo-accounts", produces = MediaType.APPLICATION_JSON_VALUE)
-  public List<Map<String, String>> demoAccounts() {
-    return accounts.list().stream()
-        .map(
-            account -> {
-              Map<String, String> row = new LinkedHashMap<>();
-              row.put("login_id", account.loginId());
-              row.put("shop_name", account.shopName());
-              row.put("shop_role", account.shopRole());
-              return row;
-            })
-        .toList();
-  }
-
   @PostMapping(value = "/login", consumes = MediaType.APPLICATION_JSON_VALUE)
   public ResponseEntity<Map<String, Object>> login(
       @RequestBody LoginRequest body, HttpServletRequest request, HttpServletResponse response)
       throws Exception {
-    // Step 1: Rate limit and lockout per client IP before checking credentials.
-    String clientKey = StagingClientIp.resolve(request);
-    StagingLoginThrottler.Result throttle = throttler.check(clientKey);
+    String loginId = body == null ? null : body.loginId();
+    String clientIp = StagingClientIp.resolve(request);
+    String throttleKey = StagingClientIp.throttleKey(clientIp, loginId);
+    // Step 1: Rate limit and lockout per client address and username (no self-signup).
+    StagingLoginThrottler.Result throttle = throttler.check(throttleKey);
     if (!throttle.permitted()) {
       errors.write(request, response, 429, "TOO_MANY_REQUESTS", throttle.message());
       return ResponseEntity.status(429).build();
     }
-    // Step 2: Shared demo password hash from env only — no committed passwords, no self-signup.
-    String hash = properties.getDemoPasswordHash();
-    if (hash == null || hash.isBlank()) {
-      throw new IllegalStateException("OMS_STAGING_DEMO_PASSWORD_HASH is required in staging");
-    }
     if (body == null
-        || body.loginId() == null
-        || body.loginId().isBlank()
+        || loginId == null
+        || loginId.isBlank()
         || body.password() == null
         || body.password().isBlank()) {
       errors.write(request, response, 400, "INVALID_REQUEST", "login_id and password are required");
       return ResponseEntity.badRequest().build();
     }
-    var accountOpt = accounts.find(body.loginId());
-    if (!passwordEncoder.matches(body.password(), hash) || accountOpt.isEmpty()) {
-      throttler.recordFailure(clientKey);
+    var accountOpt = accounts.find(loginId);
+    if (accountOpt.isEmpty()
+        || !passwordEncoder.matches(body.password(), accountOpt.get().passwordHash())) {
+      throttler.recordFailure(throttleKey);
       errors.write(request, response, 401, "UNAUTHORIZED", "ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง");
       return ResponseEntity.status(401).build();
     }
-    // Step 3: Map login id to demo tenant claims and mint an access token.
+    // Step 2: Mint an access token with section 4.1 claims for the demo tenant.
     StagingDemoAccount account = accountOpt.get();
-    throttler.recordSuccess(clientKey);
+    throttler.recordSuccess(throttleKey);
     Instant membershipExpiry =
         "GRACE".equals(account.status())
             ? Instant.now().plus(30, ChronoUnit.DAYS).truncatedTo(ChronoUnit.SECONDS)

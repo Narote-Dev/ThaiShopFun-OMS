@@ -1,6 +1,6 @@
 import { defineRailway, github, postgres, project, service } from "railway/iac";
 
-const repo = "Narote-Dev/thaishopfun-oms";
+const repo = "Narote-Dev/ThaiShopFun-OMS";
 
 // Staging trial project (low cost): one Postgres + backend + mock-tsf. SPA on Vercel.
 // Apply once with `railway config apply` after `railway login` and `railway link`.

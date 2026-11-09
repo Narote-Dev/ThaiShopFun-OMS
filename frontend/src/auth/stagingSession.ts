@@ -79,16 +79,6 @@ export async function stagingLogin(loginId: string, password: string): Promise<v
   sessionStorage.setItem(EXPIRES_KEY, String(Date.now() + expiresIn * 1000))
 }
 
-export async function fetchStagingDemoAccounts(): Promise<
-  { login_id: string; shop_name: string; shop_role: string }[]
-> {
-  const base = stagingApiBase()
-  const url = `${base}${stagingIdpPath()}/demo-accounts`
-  const response = await fetch(url, { headers: { Accept: 'application/json' } })
-  if (!response.ok) return []
-  return (await response.json()) as { login_id: string; shop_name: string; shop_role: string }[]
-}
-
 export async function refreshAccessToken(): Promise<string> {
   listener.loginRequired()
   throw new Error('กรุณาเข้าสู่ระบบอีกครั้ง')
