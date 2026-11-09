@@ -161,3 +161,5 @@ There is **no** registration API.
 ## CI
 
 This repo does **not** auto-deploy staging from this PR. Merge and Narote apply Railway/Vercel when ready.
+
+GitHub Actions validates the branch on each PR update; no staging CD is wired in this workflow.
