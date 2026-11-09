@@ -26,9 +26,11 @@ class ReconciliationPatchApiTest extends OrderIntegrationTest {
     OrderFixture.shopFor(shopB);
 
     UUID orderId = UuidV7.generate();
+    UUID runId = UuidV7.generate();
+    UUID issueId = UuidV7.generate();
     Instant pastShipBy = Instant.now().minus(2, ChronoUnit.DAYS);
     try (var admin = AuthTestSupport.admin();
-        var statement =
+        var order =
             admin.prepareStatement(
                 """
                 INSERT INTO sales_order (
@@ -37,16 +39,35 @@ class ReconciliationPatchApiTest extends OrderIntegrationTest {
                   discount, grand_total, ordered_at, updated_at, ship_by, version
                 ) VALUES (?, ?, ?, 'API-LATE', 'ACTIVE', 'PAID', 'PACKED', 'NONE', 'PREPAID', 'THB',
                   100, 0, 0, 100, now(), now(), ?, 0)
+                """);
+        var run =
+            admin.prepareStatement(
+                """
+                INSERT INTO reconciliation_run (id, tenant_id, trigger, started_at, finished_at, issues_found)
+                VALUES (?, ?, 'MANUAL', now(), now(), 1)
+                """);
+        var issue =
+            admin.prepareStatement(
+                """
+                INSERT INTO reconciliation_issue (id, tenant_id, run_id, rule, order_id, details, status)
+                VALUES (?, ?, ?, 'SHIP_BY_LATE', ?, '{}'::jsonb, 'OPEN')
                 """)) {
-      statement.setObject(1, orderId);
-      statement.setObject(2, ctxA.tenantId());
-      statement.setObject(3, ctxA.channelAccountId());
-      statement.setTimestamp(4, Timestamp.from(pastShipBy));
-      statement.executeUpdate();
-    }
+      order.setObject(1, orderId);
+      order.setObject(2, ctxA.tenantId());
+      order.setObject(3, ctxA.channelAccountId());
+      order.setTimestamp(4, Timestamp.from(pastShipBy));
+      order.executeUpdate();
 
-    assertThat(http.post("/api/v1/reconciliation/runs", shopA.owner(), null).status())
-        .isEqualTo(200);
+      run.setObject(1, runId);
+      run.setObject(2, ctxA.tenantId());
+      run.executeUpdate();
+
+      issue.setObject(1, issueId);
+      issue.setObject(2, ctxA.tenantId());
+      issue.setObject(3, runId);
+      issue.setObject(4, orderId);
+      issue.executeUpdate();
+    }
 
     CatalogHttp.Result list =
         http.get("/api/v1/reconciliation/issues?status=OPEN&rule=SHIP_BY_LATE", shopA.owner());
@@ -54,7 +75,8 @@ class ReconciliationPatchApiTest extends OrderIntegrationTest {
     JsonNode items = list.body().path("items");
     assertThat(items.isArray()).isTrue();
     assertThat(items.size()).isGreaterThanOrEqualTo(1);
-    String issueId = items.get(0).path("id").asString();
+    String listedId = items.get(0).path("id").asString();
+    assertThat(listedId).isEqualTo(issueId.toString());
 
     assertThat(
             http.patch(
@@ -92,7 +114,7 @@ class ReconciliationPatchApiTest extends OrderIntegrationTest {
 
     assertThat(
             http.patch(
-                    "/api/v1/reconciliation/issues/" + issueId,
+                    "/api/v1/reconciliation/issues/" + listedId,
                     shopB.owner(),
                     Map.of("status", "ACK"))
                 .status())
