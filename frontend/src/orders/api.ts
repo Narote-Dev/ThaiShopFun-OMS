@@ -96,6 +96,15 @@ export type OrderDetail = {
     observed_at: string
   } | null
   refunds?: { id: string; status: string; amount: string; currency: string; observed_at: string }[]
+  returns?: {
+    id: string
+    external_return_id: string
+    type: string
+    status: string
+    requested_at: string
+    received_at: string | null
+    receive_url: string
+  }[]
   timeline: TimelineEntry[]
 }
 

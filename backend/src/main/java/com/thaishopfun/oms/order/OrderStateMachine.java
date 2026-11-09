@@ -291,8 +291,8 @@ public class OrderStateMachine {
         Map.of(
             "UNFULFILLED", Set.of("READY_TO_PICK"),
             "READY_TO_PICK", Set.of("PICKING"),
-            "PICKING", Set.of("PACKED"),
-            "PACKED", Set.of("READY_TO_PICK", "SHIPPED"),
+            "PICKING", Set.of("PACKED", "UNFULFILLED"),
+            "PACKED", Set.of("READY_TO_PICK", "SHIPPED", "UNFULFILLED"),
             "SHIPPED", Set.of("DELIVERED"));
     Set<String> holdValues = ALLOWED.get("HOLD");
     Map<String, Set<String>> hold = new HashMap<>();

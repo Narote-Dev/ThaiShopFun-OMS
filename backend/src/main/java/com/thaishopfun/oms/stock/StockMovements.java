@@ -49,6 +49,8 @@ public class StockMovements {
   static final String SCOPE_POST = "stock.document.post";
   static final String SCOPE_VOID = "stock.document.void";
   static final String SCOPE_RESTOCK = "stock.return.restock";
+  static final String SCOPE_RETURN_WRITE_OFF = "stock.return.writeoff";
+  static final String SCOPE_RETURN_RECEIVE = "stock.return.receive";
   static final String SCOPE_PREPARE = "stock.document.prepare";
 
   public static final int MAX_LINES = 500;
@@ -126,6 +128,35 @@ public class StockMovements {
    * one engine write. {@code returnLineId} is opaque here (no foreign key). A null warehouse means
    * the default warehouse.
    */
+  /**
+   * Records {@code DAMAGE_WRITE_OFF} on the ledger with {@code delta_on_hand = 0}. Shipped units
+   * already left stock; damaged returns are qty-neutral on {@code on_hand}. {@code ref_type =
+   * return_line}.
+   */
+  public WriteOffResult writeOffReturn(
+      UUID returnLineId, UUID skuId, UUID warehouseId, int qty, String idempotencyKey) {
+    if (returnLineId == null || skuId == null) {
+      throw new IllegalArgumentException("returnLineId and skuId are required");
+    }
+    if (qty < 1 || qty > MAX_QTY) {
+      throw new IllegalArgumentException("qty must be between 1 and " + MAX_QTY);
+    }
+    String key = StockIdempotency.requireKey(idempotencyKey);
+    String hash =
+        StockIdempotency.sha256(
+            "writeoff|"
+                + returnLineId
+                + "|"
+                + skuId
+                + "|"
+                + (warehouseId == null ? "default" : warehouseId)
+                + "|"
+                + qty);
+    return transactions.write(
+        SCOPE_RETURN_WRITE_OFF,
+        () -> doWriteOffReturn(returnLineId, skuId, warehouseId, qty, key, hash));
+  }
+
   public RestockResult restockReturn(
       UUID returnLineId, UUID skuId, UUID warehouseId, int qty, String idempotencyKey) {
     // Step 1: Caller bugs, before any transaction.
@@ -151,7 +182,64 @@ public class StockMovements {
         SCOPE_RESTOCK, () -> doRestock(returnLineId, skuId, warehouseId, qty, key, hash));
   }
 
-  // ---- post --------------------------------------------------------------------------------
+  /**
+   * Applies resellable restock and/or qty-neutral damaged ledger in one engine write (T20 receive).
+   */
+  public ReturnReceiveMovement receiveReturnUnits(
+      UUID returnLineId,
+      UUID skuId,
+      UUID warehouseId,
+      int resellableQty,
+      int damagedQty,
+      String restockIdempotencyKey,
+      String writeOffIdempotencyKey) {
+    if (returnLineId == null || skuId == null) {
+      throw new IllegalArgumentException("returnLineId and skuId are required");
+    }
+    if (resellableQty < 0 || damagedQty < 0 || resellableQty + damagedQty < 1) {
+      throw new IllegalArgumentException("receive qty must be positive");
+    }
+    if (resellableQty > MAX_QTY || damagedQty > MAX_QTY) {
+      throw new IllegalArgumentException("qty must be at most " + MAX_QTY);
+    }
+    return transactions.write(
+        SCOPE_RETURN_RECEIVE,
+        () -> {
+          RestockResult restock = null;
+          if (resellableQty > 0) {
+            String key = StockIdempotency.requireKey(restockIdempotencyKey);
+            String hash =
+                StockIdempotency.sha256(
+                    "restock|"
+                        + returnLineId
+                        + "|"
+                        + skuId
+                        + "|"
+                        + (warehouseId == null ? "default" : warehouseId)
+                        + "|"
+                        + resellableQty);
+            restock = doRestock(returnLineId, skuId, warehouseId, resellableQty, key, hash);
+          }
+          WriteOffResult writeOff = null;
+          if (damagedQty > 0) {
+            String key = StockIdempotency.requireKey(writeOffIdempotencyKey);
+            String hash =
+                StockIdempotency.sha256(
+                    "writeoff|"
+                        + returnLineId
+                        + "|"
+                        + skuId
+                        + "|"
+                        + (warehouseId == null ? "default" : warehouseId)
+                        + "|"
+                        + damagedQty);
+            writeOff = doWriteOffReturn(returnLineId, skuId, warehouseId, damagedQty, key, hash);
+          }
+          return new ReturnReceiveMovement(restock, writeOff);
+        });
+  }
+
+  public record ReturnReceiveMovement(RestockResult restock, WriteOffResult writeOff) {}
 
   private DocumentMovement doPost(UUID documentId, Consumer<DocumentMovement> hook) {
     UUID tenantId = TenantContext.requireTenantId();
@@ -415,7 +503,50 @@ public class StockMovements {
     return result;
   }
 
-  // ---- restock -----------------------------------------------------------------------------
+  // ---- restock / return write-off ----------------------------------------------------------
+
+  private WriteOffResult doWriteOffReturn(
+      UUID returnLineId, UUID skuId, UUID warehouseId, int qty, String key, String hash) {
+    UUID tenantId = TenantContext.requireTenantId();
+    Stored stored = idempotency.claim(tenantId, SCOPE_RETURN_WRITE_OFF, key, hash);
+    if (stored != null) {
+      return idempotency.replay(stored, WriteOffResult.class).unwrap();
+    }
+    UUID warehouse = warehouseId == null ? repository.defaultWarehouse() : warehouseId;
+    if (warehouse == null) {
+      throw new StockOperationException(
+          StockError.NO_DEFAULT_WAREHOUSE, "tenant has no default warehouse");
+    }
+    SkuInfo sku = repository.skus(Set.of(skuId)).get(skuId);
+    if (sku == null) {
+      throw new StockOperationException(StockError.UNKNOWN_SKU, "unknown sku " + skuId, skuId);
+    }
+    if (sku.bundle()) {
+      throw new StockOperationException(
+          StockError.INVALID_LINE, "bundle " + skuId + " has no stock; write off its components");
+    }
+    SkuWarehouse row = new SkuWarehouse(skuId, warehouse);
+    repository.ensureInventory(tenantId, List.of(row));
+    hooks.beforeInventoryLock(SCOPE_RETURN_WRITE_OFF);
+    Map<SkuWarehouse, InventoryRow> inventory = repository.lockInventory(List.of(row));
+    hooks.afterInventoryLocked(SCOPE_RETURN_WRITE_OFF);
+    InventoryRow locked = inventory.get(row);
+    if (locked == null) {
+      throw new IllegalStateException("inventory row for write-off is not visible");
+    }
+    UUID ledgerId = UuidV7.generate();
+    repository.insertLedger(
+        tenantId,
+        "DAMAGE_WRITE_OFF",
+        StockRepository.REF_RETURN_LINE,
+        actor(),
+        List.of(new LedgerEntry(ledgerId, skuId, warehouse, 0, 0, returnLineId)));
+    events.publishEvent(
+        new StockChanged(tenantId, Set.of(skuId), repository.bundlesUsing(Set.of(skuId))));
+    WriteOffResult result = new WriteOffResult(returnLineId, ledgerId, skuId, warehouse, qty);
+    idempotency.complete(tenantId, SCOPE_RETURN_WRITE_OFF, key, 200, result);
+    return result;
+  }
 
   private RestockResult doRestock(
       UUID returnLineId, UUID skuId, UUID warehouseId, int qty, String key, String hash) {

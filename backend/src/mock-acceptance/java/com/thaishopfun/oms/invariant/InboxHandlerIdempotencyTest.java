@@ -44,6 +44,8 @@ class InboxHandlerIdempotencyTest {
           "order.updated", "order.updated.json",
           "order.paid", "order.paid.json",
           "order.cancelled", "order.cancelled.json",
+          "return.requested", "return.requested.json",
+          "return.decided", "return.decided.json",
           "membership.changed", "membership.changed.json",
           "listing.changed", "listing.changed.json");
 
@@ -91,6 +93,29 @@ class InboxHandlerIdempotencyTest {
               registry.find("order.created"),
               loadExample("order.created.json", tsfShopId),
               "seed-" + eventType);
+        }
+        if (eventType.startsWith("return.")) {
+          deliver(
+              registry.find("order.created"),
+              loadExample("order.created.json", tsfShopId),
+              "seed-order-for-return");
+          fixture.inTenant(
+              tenantId,
+              () -> {
+                jdbc.update(
+                    """
+                    UPDATE sales_order SET fulfillment_status = 'DELIVERED'
+                    WHERE tenant_id = ? AND external_order_id = 'TSF-240929-000123'
+                    """,
+                    tenantId);
+                return null;
+              });
+        }
+        if ("return.decided".equals(eventType)) {
+          deliver(
+              registry.find("return.requested"),
+              loadExample("return.requested.json", tsfShopId),
+              "seed-return-req-" + eventType);
         }
         JsonNode payload = loadExample(CONTRACTS.get(eventType), tsfShopId);
         deliver(handler, payload, "idem-1");
@@ -143,6 +168,11 @@ class InboxHandlerIdempotencyTest {
           counts.put(
               "order_status_history",
               jdbc.queryForObject("SELECT count(*) FROM order_status_history", Long.class));
+          counts.put(
+              "return_request",
+              jdbc.queryForObject("SELECT count(*) FROM return_request", Long.class));
+          counts.put(
+              "return_line", jdbc.queryForObject("SELECT count(*) FROM return_line", Long.class));
           return counts;
         });
   }

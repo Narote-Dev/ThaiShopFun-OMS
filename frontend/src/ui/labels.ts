@@ -219,6 +219,28 @@ const LABELS: Record<string, string> = {
   'COUNT_CORRECTION': 'ปรับยอดตรวจนับ',
   'DAMAGE_WRITE_OFF': 'ตัดสินค้าเสียหาย',
   'RETURN_RESTOCK': 'คืนเข้าสต็อก',
+  RESELLABLE: 'ขายต่อได้',
+  RETURN: 'คืนสินค้า',
+  RTS: 'ตีกลับ (RTS)',
+  RETURN_NOT_RECEIVABLE: 'ยังไม่พร้อมรับของคืน',
+  RETURN_QTY_EXCEEDED: 'จำนวนคืนเกินที่ส่งแล้ว',
+  RETURN_RECEIVE_QTY_EXCEEDED: 'จำนวนรับคืนเกินที่เหลือในบรรทัดนี้',
+  RETURN_RECEIVE_TITLE: 'รับของคืน',
+  RETURN_LOAD_ERROR: 'โหลดคำขอคืนไม่สำเร็จ',
+  RETURN_LOADING: 'กำลังโหลด…',
+  RETURN_LINES_TITLE: 'รายการคืน',
+  RETURN_CONDITION_COLUMN: 'สภาพเมื่อรับ (ต่อชิ้น)',
+  RETURN_CONDITION_PLACEHOLDER: 'เลือกสภาพ',
+  RETURN_RECEIVE_PICK_CONDITION: 'เลือกสภาพสินค้าทุกชิ้นก่อนยืนยัน',
+  RETURN_RECEIVE_ERROR: 'บันทึกรับของคืนไม่สำเร็จ',
+  RETURN_RECEIVE_CONFIRM: 'ยืนยันรับของคืน',
+  RETURN_RECEIVE_OWNER_ONLY: 'เฉพาะผู้ดูแลร้านจึงจะบันทึกรับของคืนได้',
+  RETURN_RESELLABLE_QTY: 'ขายต่อได้',
+  RETURN_DAMAGED_QTY: 'เสียหาย',
+  RETURN_PIECE: 'ชิ้นที่',
+  MIXED: 'คละสภาพ',
+  PRODUCT: 'สินค้า',
+  QTY: 'จำนวน',
   'SHIP': 'ตัดเพื่อจัดส่ง',
   'RESERVE': 'จองสต็อก',
   'RELEASE': 'ปล่อยสต็อก',
@@ -250,8 +272,22 @@ const LABELS: Record<string, string> = {
   'the file has no data rows': 'ไฟล์ไม่มีแถวข้อมูล'
 }
 
-export function labelTh(value: string | null | undefined, context?: 'mapping_source'): string {
+const RETURN_STATUS: Record<string, string> = {
+  REQUESTED: 'รอดำเนินการ',
+  APPROVED: 'อนุมัติแล้ว',
+  REJECTED: 'ไม่รับคืน',
+  RECEIVED: 'รับของแล้ว',
+  CLOSED: 'ปิดแล้ว',
+}
+
+export function labelTh(
+  value: string | null | undefined,
+  context?: 'mapping_source' | 'return_status' | 'return_type',
+): string {
   if (context === 'mapping_source' && value === 'MANUAL') return 'จับคู่ด้วยมือ'
+  if (context === 'return_status' && value && RETURN_STATUS[value]) return RETURN_STATUS[value]
+  if (context === 'return_type' && value === 'RETURN') return LABELS.RETURN
+  if (context === 'return_type' && value === 'RTS') return LABELS.RTS
   if (!value) return '—'
   return LABELS[value] ?? LABELS[value.toUpperCase()] ?? (/^[^a-zA-Z]*$/.test(value) ? value : 'ไม่ระบุ')
 }
