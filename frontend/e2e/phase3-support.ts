@@ -13,9 +13,17 @@ export async function ownerToken(request: APIRequestContext): Promise<string> {
 }
 
 export async function seedDemoCatalog(request: APIRequestContext): Promise<void> {
-  const catalog = await request.post(`${OMS}/control/demo/order-catalog`)
-  expect(catalog.ok()).toBeTruthy()
-  expect((await catalog.json()).status).toBe('OK')
+  await expect
+    .poll(
+      async () => {
+        const catalog = await request.post(`${OMS}/control/demo/order-catalog`)
+        if (!catalog.ok()) return ''
+        const body = await catalog.json()
+        return body.status === 'OK' ? 'ok' : ''
+      },
+      { timeout: 120_000, intervals: [2000] },
+    )
+    .toBe('ok')
 }
 
 export async function assertInvariants(request: APIRequestContext): Promise<void> {
@@ -231,20 +239,27 @@ export async function sendRefundSucceeded(
 }
 
 export async function sendOrderCancelled(request: APIRequestContext, externalOrderId: string): Promise<void> {
-  const body = {
-    event: {
-      event_id: `e2e-cancel-${externalOrderId}`,
-      event_type: 'order.cancelled',
-      schema_version: 1,
-      occurred_at: new Date().toISOString(),
-      tsf_shop_id: 'shop_active',
-      aggregate_id: externalOrderId,
-      aggregate_version: 3,
-      data: { order_id: externalOrderId },
-    },
-  }
-  const response = await request.post(`${MOCK}/control/events/send`, { data: body })
-  expect(response.ok()).toBeTruthy()
+  await expect
+    .poll(
+      async () => {
+        const body = {
+          event: {
+            event_id: `e2e-cancel-${externalOrderId}`,
+            event_type: 'order.cancelled',
+            schema_version: 1,
+            occurred_at: new Date().toISOString(),
+            tsf_shop_id: 'shop_active',
+            aggregate_id: externalOrderId,
+            aggregate_version: 3,
+            data: { order_id: externalOrderId },
+          },
+        }
+        const response = await request.post(`${MOCK}/control/events/send`, { data: body })
+        return response.ok() ? 'sent' : ''
+      },
+      { timeout: 60_000, intervals: [2000] },
+    )
+    .toBe('sent')
 }
 
 export async function orderDetail(

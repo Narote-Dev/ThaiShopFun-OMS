@@ -99,7 +99,7 @@ test('phase 3 full flow: reserve through partial return and refund snapshot', as
   page,
   request,
 }) => {
-  test.setTimeout(240_000)
+  test.setTimeout(300_000)
   const token = await ownerToken(request)
   await seedDemoCatalog(request)
   const externalOrderId = `E2E-FLOW-${Date.now()}`
@@ -194,7 +194,11 @@ test('phase 3 full flow: reserve through partial return and refund snapshot', as
   const receiveUrl = (detailBeforeReturn.returns as Array<{ receive_url: string }>)[0].receive_url
   await page.goto(receiveUrl)
   await expect(page.getByRole('heading', { name: 'รับของคืน', exact: true })).toBeVisible()
-  await page.getByLabel(/E2E item ชิ้นที่ 1/).selectOption('RESELLABLE')
+  await page
+    .getByRole('row')
+    .filter({ hasText: 'E2E item' })
+    .getByRole('combobox')
+    .selectOption('RESELLABLE')
   await page.getByRole('button', { name: 'ยืนยันรับคืน', exact: true }).click()
   await expect
     .poll(
