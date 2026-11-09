@@ -17,7 +17,7 @@ import org.springframework.web.filter.CorsFilter;
  */
 @Configuration
 @Profile("staging")
-class StagingBrowserCorsFilter {
+class StagingBrowserCorsConfiguration {
 
   @Bean
   FilterRegistrationBean<CorsFilter> stagingBrowserCorsFilter(
