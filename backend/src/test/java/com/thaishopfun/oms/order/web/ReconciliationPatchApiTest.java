@@ -1,4 +1,4 @@
-package com.thaishopfun.oms.reconciliation;
+package com.thaishopfun.oms.order.web;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -6,8 +6,6 @@ import com.thaishopfun.oms.auth.AuthTestSupport;
 import com.thaishopfun.oms.auth.UuidV7;
 import com.thaishopfun.oms.catalog.CatalogHttp;
 import com.thaishopfun.oms.invariant.SkipInvariantCheck;
-import com.thaishopfun.oms.order.web.OrderFixture;
-import com.thaishopfun.oms.order.web.OrderIntegrationTest;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
